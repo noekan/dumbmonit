@@ -1,0 +1,173 @@
+use std::sync::Arc;
+
+use anyhow::{Context, Result};
+use ezymonit_server::config::Config;
+use ezymonit_server::state::{AppState, Inner};
+use ezymonit_server::{alerting, api, auth, collectors, crypto, db, scheduler, tsdb};
+use tracing::{info, warn};
+use tracing_subscriber::EnvFilter;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    init_tracing();
+
+    let config = Config::from_env().context("invalid configuration")?;
+    info!(version = env!("CARGO_PKG_VERSION"), "starting DumbMonit");
+
+    tokio::fs::create_dir_all(&config.data_dir)
+        .await
+        .with_context(|| format!("creating directory {}", config.data_dir.display()))?;
+
+    let secret = resolve_secret(&config).await?;
+    let pool = db::open(&config.database_path()).await?;
+    let cipher = db::init_cipher(&pool, &secret).await?;
+    if config.reset_password {
+        auth::reset_password(&pool).await?;
+        warn!(
+            "EZYMONIT_RESET_PASSWORD is set: all accounts and sessions removed — \
+             remove the variable once the first admin has been created again"
+        );
+    }
+    info!(database = %config.database_path().display(), "database ready");
+
+    let victoria = tsdb::Victoria::new(&config.victoria_url)?;
+    match victoria.health().await {
+        Ok(()) => info!(url = %config.victoria_url, "VictoriaMetrics reachable"),
+        // On ne bloque pas le démarrage : l'ordre de lancement des conteneurs n'est
+        // pas garanti, et le tampon d'écriture retentera de lui-même.
+        Err(error) => {
+            warn!(url = %config.victoria_url, %error, "VictoriaMetrics unreachable at startup")
+        }
+    }
+
+    let sink = tsdb::spawn_writer(victoria.clone(), config.write_flush_interval);
+
+    let mut registry = collectors::Registry::new();
+
+    // Équipements interrogés à distance.
+    registry.register(Arc::new(
+        collectors::SnmpCollector::new().with_request_timeout(config.probe_timeout),
+    ));
+    registry.register(Arc::new(collectors::ProxmoxCollector::new()));
+    registry.register(Arc::new(collectors::PbsCollector::new()));
+    registry.register(Arc::new(collectors::SynologyCollector::new()));
+
+    // Machines équipées de l'agent : les mesures arrivent en push, ce collecteur ne
+    // fait que constater leur fraîcheur.
+    registry.register(Arc::new(collectors::AgentCollector::new(pool.clone())));
+
+    // Sondes de disponibilité, à la manière d'Uptime Kuma.
+    registry.register(Arc::new(collectors::HttpCollector::new()));
+    registry.register(Arc::new(collectors::TcpCollector::new()));
+    registry.register(Arc::new(collectors::DnsCollector::new()));
+    registry.register(Arc::new(collectors::PingCollector::new()));
+    registry.register(Arc::new(collectors::TlsCollector::new()));
+
+    // Collecteur de démonstration : il permet d'obtenir des graphes sans matériel,
+    // le temps de configurer un premier équipement réel.
+    registry.register(Arc::new(collectors::DummyCollector));
+    info!(collectors = ?registry.kinds(), "collectors registered");
+
+    let bind = config.bind;
+    let state = AppState::new(Inner { config, pool, cipher, victoria, sink, collectors: registry });
+
+    scheduler::spawn(state.clone());
+    alerting::spawn(state.clone());
+    collectors::agent::spawn_policy_scheduler(state.clone());
+
+    let listener = tokio::net::TcpListener::bind(bind)
+        .await
+        .with_context(|| format!("cannot listen on {bind}"))?;
+    info!(%bind, "interface available");
+
+    axum::serve(listener, api::router(state))
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .context("erreur du serveur HTTP")?;
+
+    info!("clean shutdown");
+    Ok(())
+}
+
+fn init_tracing() {
+    let filter = EnvFilter::try_from_env("EZYMONIT_LOG")
+        .unwrap_or_else(|_| EnvFilter::new("info,sqlx=warn,hyper=warn"));
+    tracing_subscriber::fmt().with_env_filter(filter).with_target(false).init();
+}
+
+/// Détermine le secret d'instance : variable d'environnement si fournie, sinon
+/// fichier persistant, sinon génération au premier démarrage.
+///
+/// Le fichier permet à `docker compose up` de fonctionner sans configuration, tout
+/// en gardant les identifiants déchiffrables après un redémarrage.
+async fn resolve_secret(config: &Config) -> Result<String> {
+    if let Some(secret) = &config.secret {
+        info!("instance secret provided by the environment");
+        return Ok(secret.clone());
+    }
+
+    let path = config.secret_path();
+    match tokio::fs::read_to_string(&path).await {
+        Ok(secret) => {
+            let secret = secret.trim().to_string();
+            if secret.is_empty() {
+                anyhow::bail!(
+                    "the file {} is empty: restore it, or delete it to generate a new one",
+                    path.display()
+                );
+            }
+            Ok(secret)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let secret = crypto::generate_secret();
+            write_secret_file(&path, &secret).await?;
+            warn!(
+                path = %path.display(),
+                "instance secret generated — back up this file with the database, \
+                 without it the device credentials cannot be recovered"
+            );
+            Ok(secret)
+        }
+        Err(error) => {
+            Err(anyhow::Error::from(error).context(format!("reading {}", path.display())))
+        }
+    }
+}
+
+async fn write_secret_file(path: &std::path::Path, secret: &str) -> Result<()> {
+    tokio::fs::write(path, secret).await.with_context(|| format!("writing {}", path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .await
+            .with_context(|| format!("restricting permissions on {}", path.display()))?;
+    }
+    Ok(())
+}
+
+/// Attend `SIGTERM` (arrêt de conteneur) ou `Ctrl+C`.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(error) => warn!(%error, "cannot listen for SIGTERM"),
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => info!("interrupt received"),
+        _ = terminate => info!("SIGTERM received"),
+    }
+}

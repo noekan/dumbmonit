@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://dumbmonit.readthedocs.io
+    about: Installation, every source and channel, alerting, the agent, the API.
+  - name: Questions and ideas
+    url: https://github.com/noekan/dumbmonit/discussions
+    about: Not sure it is a bug? Ask here first.
+  - name: Security issue
+    url: https://github.com/noekan/dumbmonit/security/advisories/new
+    about: Report privately; never in a public issue.

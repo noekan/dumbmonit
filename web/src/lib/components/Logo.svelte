@@ -1,0 +1,16 @@
+<script lang="ts">
+	/** The DumbMonit mark: the pigeon's face on a rounded tile. */
+	interface Props {
+		class?: string;
+	}
+	let { class: className = 'size-7' }: Props = $props();
+</script>
+
+<svg viewBox="0 0 64 64" class={className} aria-hidden="true">
+	<rect width="64" height="64" rx="16" fill="#6f83a3" />
+	<circle cx="24" cy="30" r="14" fill="#fff" stroke="#1e2640" stroke-width="4" />
+	<circle cx="45" cy="30" r="11" fill="#fff" stroke="#1e2640" stroke-width="4" />
+	<circle cx="20" cy="27" r="5" fill="#1e2640" />
+	<circle cx="48" cy="27" r="4" fill="#1e2640" />
+	<path d="M27 40c3-3 11-3 14 0l-7 12z" fill="#e97b3a" stroke="#1e2640" stroke-width="3" stroke-linejoin="round" />
+</svg>

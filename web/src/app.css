@@ -1,0 +1,366 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/bricolage-grotesque/opsz.css';
+@import 'uplot/dist/uPlot.min.css';
+
+/* The manual toggle puts the `dark` class on <html>; `prefers-color-scheme`
+   is the default, applied by the bootstrap script in app.html. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------
+   Two lights on one chart.
+   Day: chart paper — cream ground, navy ink, teal / amber / red as inked stamps.
+   Night: radar composite — deep navy ground, cyan-teal signal, amber advisory,
+   warm red warning. Same roles, same names, both first-class.
+   --------------------------------------------------------------------------- */
+:root {
+	color-scheme: light;
+
+	--c-canvas: #f3efe6;
+	--c-canvas-deep: #ebe6d9;
+	--c-surface: #fbf9f4;
+	--c-surface-2: #f0ebe0;
+	--c-line: rgb(22 33 58 / 0.14);
+	--c-line-strong: rgb(22 33 58 / 0.28);
+
+	--c-ink: #16213a;
+	--c-ink-2: #4a5a78;
+	--c-ink-3: #7c8aa5;
+	--c-ghost: rgb(22 33 58 / 0.1);
+
+	--c-signal: #0f8f86;
+	--c-signal-ink: #0b6d66;
+	--c-signal-soft: rgb(15 143 134 / 0.12);
+	--c-advisory: #b7791f;
+	--c-advisory-ink: #8f5d12;
+	--c-advisory-soft: rgb(183 121 31 / 0.14);
+	--c-warning: #c8402f;
+	--c-warning-ink: #a32f21;
+	--c-warning-soft: rgb(200 64 47 / 0.12);
+	--c-info: #2f6db5;
+	--c-info-ink: #24568f;
+	--c-info-soft: rgb(47 109 181 / 0.12);
+
+	--c-on-signal: #f3efe6;
+
+	--dot-from: rgb(22 33 58 / 0.42);
+	--dot-to: rgb(15 143 134 / 0.5);
+	--dot-glow: rgb(15 143 134 / 0.22);
+
+	--shadow-lift: 0 1px 2px rgb(22 33 58 / 0.06), 0 6px 18px -8px rgb(22 33 58 / 0.22);
+	--shadow-float: 0 2px 6px rgb(22 33 58 / 0.08), 0 18px 40px -16px rgb(22 33 58 / 0.32);
+}
+
+html.dark {
+	color-scheme: dark;
+
+	--c-canvas: #0a1020;
+	--c-canvas-deep: #060b17;
+	--c-surface: #111a2e;
+	--c-surface-2: #17223a;
+	--c-line: rgb(148 178 214 / 0.14);
+	--c-line-strong: rgb(148 178 214 / 0.28);
+
+	--c-ink: #e8eef8;
+	--c-ink-2: #9fb0c8;
+	--c-ink-3: #647a99;
+	--c-ghost: rgb(159 176 200 / 0.14);
+
+	--c-signal: #22d3c5;
+	--c-signal-ink: #7fe9df;
+	--c-signal-soft: rgb(34 211 197 / 0.12);
+	--c-advisory: #f5b542;
+	--c-advisory-ink: #ffd27a;
+	--c-advisory-soft: rgb(245 181 66 / 0.14);
+	--c-warning: #ff6b5a;
+	--c-warning-ink: #ffa094;
+	--c-warning-soft: rgb(255 107 90 / 0.14);
+	--c-info: #7fb2ff;
+	--c-info-ink: #b1cfff;
+	--c-info-soft: rgb(127 178 255 / 0.14);
+
+	--c-on-signal: #06201e;
+
+	--dot-from: rgb(159 176 200 / 0.22);
+	--dot-to: rgb(34 211 197 / 0.32);
+	--dot-glow: rgb(34 211 197 / 0.14);
+
+	--shadow-lift: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -10px rgb(0 0 0 / 0.6);
+	--shadow-float: 0 2px 8px rgb(0 0 0 / 0.35), 0 24px 48px -16px rgb(0 0 0 / 0.7);
+}
+
+/* Tailwind utilities read the live variables, so `bg-surface` follows the theme. */
+@theme inline {
+	--color-canvas: var(--c-canvas);
+	--color-canvas-deep: var(--c-canvas-deep);
+	--color-surface: var(--c-surface);
+	--color-surface-2: var(--c-surface-2);
+	--color-line: var(--c-line);
+	--color-line-strong: var(--c-line-strong);
+	--color-ink: var(--c-ink);
+	--color-ink-2: var(--c-ink-2);
+	--color-ink-3: var(--c-ink-3);
+	--color-ghost: var(--c-ghost);
+	--color-signal: var(--c-signal);
+	--color-signal-ink: var(--c-signal-ink);
+	--color-signal-soft: var(--c-signal-soft);
+	--color-advisory: var(--c-advisory);
+	--color-advisory-ink: var(--c-advisory-ink);
+	--color-advisory-soft: var(--c-advisory-soft);
+	--color-warning: var(--c-warning);
+	--color-warning-ink: var(--c-warning-ink);
+	--color-warning-soft: var(--c-warning-soft);
+	--color-info: var(--c-info);
+	--color-info-ink: var(--c-info-ink);
+	--color-info-soft: var(--c-info-soft);
+	--color-on-signal: var(--c-on-signal);
+
+	--shadow-lift: var(--shadow-lift);
+	--shadow-float: var(--shadow-float);
+
+	--font-sans:
+		'Bricolage Grotesque Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+		sans-serif;
+	--font-mono:
+		ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono',
+		monospace;
+
+	--radius-plate: 6px;
+	--radius-card: 14px;
+
+	--ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+	--ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html {
+	height: 100%;
+	scrollbar-color: var(--c-line-strong) transparent;
+	-webkit-text-size-adjust: 100%;
+}
+
+body {
+	min-height: 100%;
+	background-color: var(--c-canvas);
+	color: var(--c-ink);
+	font-family: var(--font-sans);
+	font-optical-sizing: auto;
+	font-variation-settings: 'wdth' 100;
+	font-feature-settings: 'ss01', 'cv11';
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+	caret-color: var(--c-signal);
+	accent-color: var(--c-signal);
+}
+
+/* The parts we did not draw still carry the chart: selection, caret, focus, scrollbar. */
+::selection {
+	background: var(--c-signal);
+	color: var(--c-on-signal);
+}
+
+:focus-visible {
+	outline: 2px solid var(--c-signal);
+	outline-offset: 2px;
+	border-radius: 4px;
+}
+
+::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+::-webkit-scrollbar-thumb {
+	background: var(--c-line-strong);
+	border: 3px solid transparent;
+	background-clip: padding-box;
+	border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+a {
+	text-underline-offset: 0.18em;
+	text-decoration-thickness: 1px;
+}
+
+/* Numbers line up wherever they live: readouts, tables, timestamps. */
+.tnum,
+table,
+time,
+[data-numeric] {
+	font-variant-numeric: tabular-nums;
+}
+
+/* Display type: the bulletin voice. Bricolage opens up at large optical sizes. */
+.display {
+	font-weight: 600;
+	letter-spacing: -0.025em;
+	line-height: 1.02;
+	text-wrap: balance;
+	font-variation-settings:
+		'wdth' 100,
+		'opsz' 96;
+}
+
+.label-tape {
+	font-size: 0.6875rem;
+	font-weight: 600;
+	letter-spacing: 0.09em;
+	text-transform: uppercase;
+	color: var(--c-ink-3);
+}
+
+/* Faceplate: the 1U front of a device. Brushed surface, one machined edge. */
+.faceplate {
+	position: relative;
+	background:
+		linear-gradient(180deg, rgb(255 255 255 / 0.04), rgb(0 0 0 / 0.02)),
+		repeating-linear-gradient(
+			180deg,
+			transparent 0 3px,
+			rgb(127 127 127 / 0.025) 3px 4px
+		),
+		var(--c-surface);
+	border: 1px solid var(--c-line);
+	border-radius: var(--radius-card);
+	box-shadow: var(--shadow-lift);
+	transition:
+		transform 260ms var(--ease-out-expo),
+		box-shadow 260ms var(--ease-out-expo),
+		border-color 260ms var(--ease-out-expo);
+}
+.faceplate:where(a, button, [data-interactive]):hover {
+	transform: translateY(-1px);
+	box-shadow: var(--shadow-float);
+	border-color: var(--c-line-strong);
+}
+
+/* Ghost cell: absence is designed too. Empty and disabled states use it. */
+.ghost-cell {
+	background-image: radial-gradient(var(--c-ghost) 1px, transparent 1.2px);
+	background-size: 10px 10px;
+}
+
+/* Hairline graticule rule under readouts. */
+.graticule {
+	background-image: linear-gradient(90deg, var(--c-line) 0 6px, transparent 6px 12px);
+	background-size: 12px 1px;
+	background-repeat: repeat-x;
+	background-position: bottom;
+}
+
+/* Form controls in the chart's language. */
+.input {
+	width: 100%;
+	min-height: 2.5rem;
+	padding: 0.5rem 0.75rem;
+	border: 1px solid var(--c-line-strong);
+	border-radius: 8px;
+	background: var(--c-surface);
+	color: var(--c-ink);
+	font: inherit;
+	line-height: 1.4;
+	box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.04);
+	transition:
+		border-color 160ms ease,
+		box-shadow 160ms ease;
+}
+.input::placeholder {
+	color: var(--c-ink-3);
+}
+.input:hover {
+	border-color: var(--c-ink-3);
+}
+.input:focus {
+	outline: none;
+	border-color: var(--c-signal);
+	box-shadow: 0 0 0 3px var(--c-signal-soft);
+}
+.input:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+.input[aria-invalid='true'] {
+	border-color: var(--c-warning);
+	box-shadow: 0 0 0 3px var(--c-warning-soft);
+}
+select.input {
+	appearance: none;
+	padding-right: 2.25rem;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237c8aa5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 0.75rem center;
+}
+textarea.input {
+	min-height: 6rem;
+	resize: vertical;
+}
+
+/* uPlot is styled for a light theme by default; take it over. */
+.u-legend {
+	font-size: 0.75rem;
+	color: var(--c-ink-2);
+}
+.u-legend .u-marker {
+	border-color: currentColor;
+}
+.u-legend .u-series > * {
+	padding-block: 0;
+}
+/* The first legend column is the x-axis, already readable on the axis. */
+.u-legend .u-series:first-child {
+	display: none;
+}
+
+/* Keyframes used by the shell and effect components. */
+@keyframes led-blink {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.25;
+	}
+}
+@keyframes led-breathe {
+	0%,
+	100% {
+		box-shadow: 0 0 0 0 var(--led-glow);
+	}
+	50% {
+		box-shadow: 0 0 10px 2px var(--led-glow);
+	}
+}
+@keyframes rise-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+@keyframes shimmer {
+	from {
+		background-position: 200% 0;
+	}
+	to {
+		background-position: -200% 0;
+	}
+}
+
+.rise-in {
+	animation: rise-in 520ms var(--ease-out-expo) both;
+	animation-delay: var(--rise-delay, 0ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}

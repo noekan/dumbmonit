@@ -1,0 +1,107 @@
+//! Jetons d'enregistrement des agents.
+//!
+//! Un jeton est un secret porteur : le présenter suffit à écrire des mesures.
+//! Il est donc traité comme un mot de passe — stocké haché, jamais réaffiché, et
+//! comparé par empreinte.
+//!
+//! SHA-256 et non Argon2, contrairement au secret d'instance : un jeton
+//! d'enregistrement est un aléa de 192 bits, pas un mot de passe choisi par un
+//! humain. Il n'y a rien à ralentir, aucune attaque par dictionnaire n'a de prise,
+//! et l'empreinte est calculée à chaque lot reçu — soit, pour un parc de cent
+//! machines, plusieurs fois par seconde.
+
+use ezymonit_proto::TOKEN_PREFIX;
+use sha2::{Digest, Sha256};
+
+/// Longueur de la partie aléatoire, en octets. 192 bits : hors de portée d'une
+/// recherche exhaustive, et le jeton tient encore sur une ligne de terminal.
+const TOKEN_BYTES: usize = 24;
+
+/// Nombre de caractères conservés pour l'affichage, préfixe compris.
+const DISPLAY_LEN: usize = TOKEN_PREFIX.len() + 8;
+
+/// Fabrique un jeton d'enregistrement.
+pub fn generate() -> String {
+    let bytes: [u8; TOKEN_BYTES] = rand::random();
+    format!("{TOKEN_PREFIX}{}", hex::encode(bytes))
+}
+
+/// Empreinte stockée en base.
+pub fn fingerprint(token: &str) -> String {
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
+/// Début du jeton, affichable dans l'interface pour le désigner sans le révéler.
+pub fn display_prefix(token: &str) -> String {
+    token.chars().take(DISPLAY_LEN).collect()
+}
+
+/// Extrait le jeton d'un en-tête `Authorization`.
+///
+/// Tolérant sur la casse du schéma et les espaces, parce que les clients HTTP le
+/// sont tous ; strict sur le schéma lui-même, parce qu'accepter un mot de passe
+/// « Basic » ici serait une porte dérobée involontaire.
+pub fn extract_bearer(header: Option<&str>) -> Option<&str> {
+    let header = header?.trim();
+    let (scheme, value) = header.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    let token = value.trim();
+    if token.is_empty() { None } else { Some(token) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_generated_token_is_recognisable_and_unique() {
+        let first = generate();
+        let second = generate();
+
+        assert!(first.starts_with(TOKEN_PREFIX));
+        assert_eq!(first.len(), TOKEN_PREFIX.len() + TOKEN_BYTES * 2);
+        assert_ne!(first, second, "deux jetons ne doivent jamais coïncider");
+    }
+
+    #[test]
+    fn the_fingerprint_is_stable_and_never_contains_the_token() {
+        let token = generate();
+        assert_eq!(fingerprint(&token), fingerprint(&token));
+        // C'est toute la raison d'être du hachage : la base ne doit rien contenir
+        // qui permette de rejouer un jeton.
+        assert!(!fingerprint(&token).contains(&token[TOKEN_PREFIX.len()..]));
+        assert_eq!(fingerprint(&token).len(), 64);
+    }
+
+    #[test]
+    fn two_different_tokens_have_two_different_fingerprints() {
+        assert_ne!(fingerprint("ezym_aaa"), fingerprint("ezym_aab"));
+    }
+
+    #[test]
+    fn the_display_prefix_reveals_only_a_handful_of_characters() {
+        let token = generate();
+        let prefix = display_prefix(&token);
+        assert_eq!(prefix.len(), DISPLAY_LEN);
+        assert!(token.starts_with(&prefix));
+        assert!(prefix.len() < token.len() / 2);
+    }
+
+    #[test]
+    fn a_bearer_header_yields_the_token() {
+        assert_eq!(extract_bearer(Some("Bearer ezym_abc")), Some("ezym_abc"));
+        assert_eq!(extract_bearer(Some("bearer   ezym_abc  ")), Some("ezym_abc"));
+        assert_eq!(extract_bearer(Some("  BEARER ezym_abc")), Some("ezym_abc"));
+    }
+
+    #[test]
+    fn anything_else_is_refused() {
+        assert_eq!(extract_bearer(None), None);
+        assert_eq!(extract_bearer(Some("")), None);
+        assert_eq!(extract_bearer(Some("ezym_abc")), None, "le schéma est obligatoire");
+        assert_eq!(extract_bearer(Some("Basic dXNlcjpwYXNz")), None);
+        assert_eq!(extract_bearer(Some("Bearer ")), None);
+    }
+}

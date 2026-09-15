@@ -1,0 +1,155 @@
+# Test lab overlay: every integration exercised locally, without hardware.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.lab.yml up -d
+#   docker/lab/seed.sh          # creates the lab devices and notification channels
+#
+# Everything joins the compose default network, so the server reaches each
+# service by name (snmp-ups, fake-pve, mailpit…). Host ports are published only
+# where a browser or a CLI on the host needs them. Details, credentials and the
+# failure scenarios: docker/lab/README.md and docs/development.md ("Test lab").
+
+services:
+  ezymonit:
+    environment:
+      # OpenID Connect against the lab Dex. Groups need the `groups` scope.
+      EZYMONIT_OIDC_ISSUER: ${LAB_DEX_ISSUER:-http://dex:5556/dex}
+      EZYMONIT_OIDC_CLIENT_ID: dumbmonit
+      EZYMONIT_OIDC_CLIENT_SECRET: dumbmonit-lab-secret
+      EZYMONIT_OIDC_PROVIDER_NAME: Lab Dex
+      EZYMONIT_OIDC_SCOPES: openid profile email groups
+      EZYMONIT_OIDC_ADMIN_GROUPS: dumbmonit-admins
+      EZYMONIT_OIDC_GROUPS_CLAIM: groups
+
+  # ── SNMP agents (snmpsim replays .snmprec files; community = file name) ──────
+  # tandrup/snmpsim is the last published image of snmpsim 0.4 (Python 3.4);
+  # pinned by digest. Each container serves one recording under its own name
+  # plus a `public` copy so the network discovery scan finds it too.
+  snmp-ups:
+    image: tandrup/snmpsim@sha256:5140279e9080b2053febf8676f6c338f3723b0d06be8b77cf7e4657876e5c17c
+    command: >
+      snmpsimd.py --agent-udpv4-endpoint=0.0.0.0:161 --process-user=snmpsim
+      --process-group=nogroup --data-dir=/data --v2c-arch --logging-method=stderr
+    volumes:
+      - ./docker/lab/snmpsim/data/ups.snmprec:/data/ups.snmprec:ro
+      - ./docker/lab/snmpsim/data/ups.snmprec:/data/public.snmprec:ro
+      - ./docker/lab/snmpsim/data/ups-onbattery.snmprec:/data/ups-onbattery.snmprec:ro
+    ports:
+      - "${LAB_SNMP_UPS_PORT:-1611}:161/udp"
+    restart: unless-stopped
+
+  snmp-printer:
+    image: tandrup/snmpsim@sha256:5140279e9080b2053febf8676f6c338f3723b0d06be8b77cf7e4657876e5c17c
+    command: >
+      snmpsimd.py --agent-udpv4-endpoint=0.0.0.0:161 --process-user=snmpsim
+      --process-group=nogroup --data-dir=/data --v2c-arch --logging-method=stderr
+    volumes:
+      - ./docker/lab/snmpsim/data/printer.snmprec:/data/printer.snmprec:ro
+      - ./docker/lab/snmpsim/data/printer.snmprec:/data/public.snmprec:ro
+    ports:
+      - "${LAB_SNMP_PRINTER_PORT:-1612}:161/udp"
+    restart: unless-stopped
+
+  snmp-switch:
+    image: tandrup/snmpsim@sha256:5140279e9080b2053febf8676f6c338f3723b0d06be8b77cf7e4657876e5c17c
+    command: >
+      snmpsimd.py --agent-udpv4-endpoint=0.0.0.0:161 --process-user=snmpsim
+      --process-group=nogroup --data-dir=/data --v2c-arch --logging-method=stderr
+    volumes:
+      - ./docker/lab/snmpsim/data/switch.snmprec:/data/switch.snmprec:ro
+      - ./docker/lab/snmpsim/data/switch.snmprec:/data/public.snmprec:ro
+    ports:
+      - "${LAB_SNMP_SWITCH_PORT:-1613}:161/udp"
+    restart: unless-stopped
+
+  # ── API fakes (Python stdlib, plain HTTP: the collectors accept http:// URLs) ─
+  # LAB_SCENARIO toggles one failure each, comma separated (see the script headers):
+  #   fake-pve      vm-stopped, backup-old
+  #   fake-pbs      verify-failed, backup-old
+  #   fake-synology disk-warning, backup-old
+  fake-pve:
+    image: python:3.12-alpine
+    command: ["python", "-u", "/fakes/pve.py"]
+    working_dir: /fakes
+    volumes:
+      - ./docker/lab/fakes:/fakes:ro
+    environment:
+      LAB_SCENARIO: ${LAB_PVE_SCENARIO:-}
+      PYTHONDONTWRITEBYTECODE: "1"
+    ports:
+      - "${LAB_PVE_PORT:-18006}:8006"
+    restart: unless-stopped
+
+  fake-pbs:
+    image: python:3.12-alpine
+    command: ["python", "-u", "/fakes/pbs.py"]
+    working_dir: /fakes
+    volumes:
+      - ./docker/lab/fakes:/fakes:ro
+    environment:
+      LAB_SCENARIO: ${LAB_PBS_SCENARIO:-}
+      PYTHONDONTWRITEBYTECODE: "1"
+    ports:
+      - "${LAB_PBS_PORT:-18007}:8007"
+    restart: unless-stopped
+
+  fake-synology:
+    image: python:3.12-alpine
+    command: ["python", "-u", "/fakes/synology.py"]
+    working_dir: /fakes
+    volumes:
+      - ./docker/lab/fakes:/fakes:ro
+    environment:
+      LAB_SCENARIO: ${LAB_SYNOLOGY_SCENARIO:-}
+      PYTHONDONTWRITEBYTECODE: "1"
+    ports:
+      - "${LAB_SYNOLOGY_PORT:-15000}:5000"
+    restart: unless-stopped
+
+  # ── OpenID Connect: Dex + a tiny LDAP directory for users and groups ─────────
+  dex:
+    image: ghcr.io/dexidp/dex:v2.41.1
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    environment:
+      LAB_DEX_ISSUER: ${LAB_DEX_ISSUER:-http://dex:5556/dex}
+    volumes:
+      - ./docker/lab/dex/config.yaml:/etc/dex/config.yaml:ro
+    ports:
+      - "5556:5556"
+    depends_on:
+      - glauth
+    restart: unless-stopped
+
+  glauth:
+    image: glauth/glauth:v2.3.2
+    volumes:
+      - ./docker/lab/glauth/glauth.cfg:/app/config/config.cfg:ro
+    restart: unless-stopped
+
+  # ── Notification sinks ───────────────────────────────────────────────────────
+  mailpit:
+    image: axllent/mailpit:v1.21.8
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    ports:
+      - "${LAB_MAILPIT_UI_PORT:-8025}:8025"
+      - "${LAB_MAILPIT_SMTP_PORT:-1025}:1025"
+    restart: unless-stopped
+
+  ntfy:
+    image: binwiederhier/ntfy:v2.11.0
+    command: ["serve", "--base-url", "http://localhost:${LAB_NTFY_PORT:-8090}", "--listen-http", ":80"]
+    ports:
+      - "${LAB_NTFY_PORT:-8090}:80"
+    restart: unless-stopped
+
+  # ── Docker restart / update tests ────────────────────────────────────────────
+  # A throwaway container the agent may restart or update; the update path
+  # pulls nginx:1.27-alpine over it.
+  lab-victim:
+    image: nginx:1.25-alpine
+    container_name: lab-victim
+    labels:
+      dumbmonit.autorestart: "true"
+      dumbmonit.lab: "victim"
+    restart: unless-stopped

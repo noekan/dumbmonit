@@ -1,0 +1,61 @@
+name: Device or integration support
+description: Ask for a new device, vendor profile or integration.
+title: "[device] "
+labels: ["device-support"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        SNMP devices are matched by `sysObjectID`; a sample walk lets us write a profile without owning the hardware.
+        Redact anything sensitive (communities, serial numbers, public addresses).
+  - type: input
+    id: vendor
+    attributes:
+      label: Vendor
+      placeholder: MikroTik
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model and firmware
+      placeholder: CRS326-24G-2S+, RouterOS 7.16
+    validations:
+      required: true
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: How can it be monitored
+      options:
+        - SNMP v1/v2c
+        - SNMP v3
+        - HTTP / REST API
+        - Agent (Linux / Windows)
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: sysobjectid
+    attributes:
+      label: sysObjectID
+      description: "`snmpget -v2c -c public <ip> 1.3.6.1.2.1.1.2.0`"
+      placeholder: .1.3.6.1.4.1.14988.1
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample output
+      description: |
+        For SNMP: `snmpwalk -v2c -c public <ip> 1.3.6.1.2.1.1` plus the vendor subtree (`snmpwalk … 1.3.6.1.4.1.<enterprise>`), trimmed to a few hundred lines.
+        For an API: an example response with secrets removed.
+      render: text
+  - type: textarea
+    id: metrics
+    attributes:
+      label: What matters on this device
+      description: The three to five things you would want an alert about (temperature, PoE budget, fan failure, …).
+  - type: checkboxes
+    id: access
+    attributes:
+      label: Access
+      options:
+        - label: I own this device and can test a profile.

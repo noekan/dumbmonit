@@ -1,0 +1,60 @@
+name: Bug report
+description: Something does not work as described.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Security problems go to
+        https://github.com/noekan/dumbmonit/security/advisories/new instead, not here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+      placeholder: |
+        1. Added an SNMP device with address …
+        2. Opened its page
+        3. Expected interface graphs; got "Profile not detected"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Image tag or commit (`docker compose images`, or `curl localhost:8080/api/health`).
+      placeholder: ghcr.io/noekan/dumbmonit:edge, commit abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - SNMP collection / profiles
+        - Proxmox VE / PBS
+        - Synology DSM
+        - Agent (Linux / Windows)
+        - Service monitors (HTTP, TCP, DNS, ping, TLS)
+        - Alerting / rules / baseline
+        - Notifications
+        - Web UI
+        - Docker / deployment
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        `docker compose logs --tail=200 ezymonit` (set `EZYMONIT_LOG=debug` for more).
+        Redact addresses, communities and tokens.
+      render: text
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Host OS and architecture, Docker version, browser if the UI is involved, the device model and firmware if a collector is involved.
+      placeholder: Debian 12 on amd64, Docker 27, Firefox 130; Netgear GS308T firmware 1.0.2

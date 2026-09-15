@@ -1,0 +1,20 @@
+# Development overlay: adds a lab SNMP agent and exposes VictoriaMetrics, so
+# collection can be tested without hardware.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# Then add a device of type SNMP with address `snmp-lab` and community `public`:
+# the profile is detected on its own and the graphs fill up.
+
+services:
+  snmp-lab:
+    image: polinux/snmpd
+    hostname: snmp-lab
+    volumes:
+      - ./docker/snmpd-lab.conf:/etc/snmp/snmpd.conf:ro
+    restart: unless-stopped
+
+  victoriametrics:
+    ports:
+      # Handy for querying MetricsQL directly while debugging.
+      - "${EZYMONIT_VM_PORT:-8428}:8428"

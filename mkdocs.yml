@@ -1,0 +1,96 @@
+site_name: DumbMonit
+site_description: Simple monitoring for homelabs and small teams. Two containers, one IP address, useful alerts in a minute.
+site_url: https://dumbmonit.readthedocs.io
+repo_url: https://github.com/noekan/dumbmonit
+repo_name: noekan/dumbmonit
+edit_uri: edit/main/docs/
+docs_dir: docs
+
+validation:
+  links:
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn
+copyright: Apache 2.0 — DumbMonit
+
+theme:
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - content.code.copy
+    - content.tabs.link
+
+extra_css:
+  - assets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      # Same slugs as the web app's renderer and GitHub, so the anchors the
+      # server catalogue points to (/docs/notifications#email-smtp, …) match.
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.details
+  - pymdownx.keys
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Install:
+      - Docker: install/docker.md
+      - Add your first device: install/first-device.md
+  - Devices:
+      - Overview: devices/index.md
+      - SNMP: devices/snmp.md
+      - Proxmox VE: devices/proxmox.md
+      - Proxmox Backup Server: devices/pbs.md
+      - Synology DSM: devices/synology.md
+      - Linux and Windows agent: devices/agent.md
+      - Services (HTTP, TCP, DNS, ping, TLS): devices/services.md
+      - Demo device: devices/demo.md
+  - Alerting:
+      - How alerting works: alerting/index.md
+      - Rules: alerting/rules.md
+      - Maintenance windows: alerting/maintenance.md
+      - Notification channels: notifications.md
+  - Using DumbMonit:
+      - Overview page: using/overview.md
+      - Devices page: using/devices.md
+      - Settings: using/settings.md
+      - Connect an assistant (MCP): using/assistant.md
+  - Reference:
+      - HTTP API: reference/api.md
+      - Configuration: reference/configuration.md
+      - Metrics: reference/metrics.md
+  - Development: development.md
+  - FAQ: faq.md

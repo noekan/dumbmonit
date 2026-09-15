@@ -1,0 +1,52 @@
+[package]
+name = "ezymonit-agent"
+description = "Agent système EzyMonit : collecte les métriques d'une machine et les pousse vers le serveur."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ezymonit-agent"
+path = "src/main.rs"
+
+[dependencies]
+ezymonit-proto = { path = "../proto" }
+
+anyhow.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+# Runtime volontairement mono-thread et réduit au strict nécessaire : l'agent
+# passe sa vie à dormir, un ordonnanceur multi-thread ne lui apporterait qu'un
+# surcoût mémoire sur des machines parfois très modestes.
+tokio = { version = "1", default-features = false, features = [
+    "rt", "macros", "time", "signal", "net", "process", "io-util", "fs", "sync",
+] }
+
+# Sans « env-filter » : la dépendance à un moteur d'expressions régulières
+# doublerait presque la taille du binaire pour un réglage que trois niveaux de
+# journalisation couvrent amplement.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
+
+# Mêmes réglages TLS que le serveur, pour ne pas entretenir deux configurations.
+reqwest = { version = "0.13", default-features = false, features = [
+    "json", "rustls", "rustls-native-certs", "gzip",
+] }
+
+# Couche multiplateforme d'accès aux compteurs système.
+sysinfo = { version = "0.39", default-features = false, features = [
+    "system", "disk", "network",
+] }
+
+# Même moteur YAML que les profils de collecte du serveur : un seul format de
+# configuration à connaître dans tout le produit.
+serde_yaml_ng = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+# Intégration au gestionnaire de services : point d'entrée du service, prise en
+# charge de l'ordre d'arrêt, et interrogation de l'état des services surveillés.
+windows-service = "0.8"

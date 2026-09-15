@@ -1,0 +1,19 @@
+/target
+/data
+node_modules
+web/build
+web/.svelte-kit
+*.db
+*.db-wal
+*.db-shm
+secret.key
+.env
+web/shots/
+web/tools/shots/
+web/tools/*.png
+
+# Design tooling scratch
+.impeccable/mocks/
+
+# AI tooling vendored by `npx skills` (reinstall from skills-lock.json)
+.agents/

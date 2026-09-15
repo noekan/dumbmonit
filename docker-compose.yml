@@ -1,0 +1,44 @@
+services:
+  ezymonit:
+    # `docker compose up -d` pulls the published image (latest release; use
+    # `:edge` for the last commit on main). To build from this checkout instead,
+    # run `docker compose up -d --build`: the result is tagged with the same name
+    # and used from then on.
+    image: ghcr.io/noekan/dumbmonit:latest
+    build: .
+    ports:
+      # The host port is configurable: 8080 is a crowded port on a homelab
+      # machine. `EZYMONIT_PORT=8099 docker compose up -d` moves it.
+      - "${EZYMONIT_PORT:-8080}:8080"
+    volumes:
+      - ezymonit-data:/data
+    environment:
+      EZYMONIT_VM_URL: http://victoriametrics:8428
+      # Uncomment to set the secret yourself instead of letting DumbMonit
+      # generate it in /data/secret.key. It encrypts device credentials: losing
+      # it means re-entering every one of them.
+      # EZYMONIT_SECRET: replace-me-with-32-random-characters
+      # Lost password: `EZYMONIT_RESET_PASSWORD=1 docker compose up -d` clears
+      # the password at startup and the UI asks for a new one; then start again
+      # without the variable.
+      EZYMONIT_RESET_PASSWORD: ${EZYMONIT_RESET_PASSWORD:-}
+    depends_on:
+      - victoriametrics
+    # Only needed for "ping" (ICMP) monitors:
+    # cap_add:
+    #   - NET_RAW
+    restart: unless-stopped
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:latest
+    command:
+      - "-retentionPeriod=12"        # 12 months
+      - "-storageDataPath=/vmdata"
+      - "-httpListenAddr=:8428"
+    volumes:
+      - vm-data:/vmdata
+    restart: unless-stopped
+
+volumes:
+  ezymonit-data:
+  vm-data:

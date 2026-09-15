@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest something DumbMonit should do.
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a new device kind or vendor integration, use "Device or integration support" instead.
+        Keep in mind the product principles: one-second answer, one way to add anything, quiet by default.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that is hard or impossible today? Describe the situation, not the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: How you imagine it working, if you have an idea. Sketches and screenshots of other tools welcome.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds you have tried
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to work on this with some guidance.

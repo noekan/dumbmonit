@@ -1,0 +1,97 @@
+# Imprimantes réseau, via PRINTER-MIB (RFC 3805) et la partie imprimante de
+# HOST-RESOURCES-MIB.
+#
+# L'intérêt principal est le niveau des consommables : savoir qu'un toner arrive en
+# fin de course avant que quelqu'un ne s'en aperçoive à l'impression.
+id: printer
+name: Printer (PRINTER-MIB)
+match:
+  sysobjectid:
+    - 1.3.6.1.4.1.11.2.3.9  # HP, branche des périphériques d'impression
+    - 1.3.6.1.4.1.1347      # Kyocera
+    - 1.3.6.1.4.1.1248      # Epson
+    - 1.3.6.1.4.1.1602      # Canon
+    - 1.3.6.1.4.1.2435      # Brother
+    - 1.3.6.1.4.1.641       # Lexmark
+    - 1.3.6.1.4.1.367       # Ricoh
+    - 1.3.6.1.4.1.253       # Xerox
+    - 1.3.6.1.4.1.236       # Samsung
+    - 1.3.6.1.4.1.2001      # OKI
+    - 1.3.6.1.4.1.18334     # Konica Minolta
+    - 1.3.6.1.4.1.2385      # Sharp
+  sysdescr:
+    - "[Pp]rinter"
+    - "LaserJet"
+    - "OfficeJet"
+    - "imageRUNNER"
+    - "[Ii]mprimante"
+  priority: 0
+
+include: [system]
+
+metrics:
+  # prtMarkerSuppliesLevel, indexé par (hrDeviceIndex, prtMarkerSuppliesIndex) : le
+  # suffixe d'index compte donc deux arcs, d'où l'importance d'une clé de jointure
+  # textuelle et non entière.
+  #
+  # Attention aux valeurs négatives, qui sont des sentinelles et non des mesures :
+  # -1 = niveau inconnu, -2 = capacité illimitée, -3 = « il en reste ».
+  # Colonnes de prtMarkerSuppliesTable (RFC 3805) : .6 description, .8 capacité
+  # maximale, .9 niveau courant.
+  - name: printer_supply_level
+    oid: 1.3.6.1.2.1.43.11.1.1.9
+    kind: gauge
+    walk: true
+    labels:
+      supply: 1.3.6.1.2.1.43.11.1.1.6
+    filters:
+      max_rows: 32
+
+  # Capacité maximale, dans la même unité que le niveau : le pourcentage restant est
+  # le rapport des deux, calculé à la lecture.
+  - name: printer_supply_max
+    oid: 1.3.6.1.2.1.43.11.1.1.8
+    kind: gauge
+    walk: true
+    labels:
+      supply: 1.3.6.1.2.1.43.11.1.1.6
+    filters:
+      max_rows: 32
+
+  # Bacs à papier : prtInputCurrentLevel et prtInputMaxCapacity, mêmes sentinelles
+  # négatives que pour les consommables.
+  - name: printer_input_level
+    oid: 1.3.6.1.2.1.43.8.2.1.10
+    kind: gauge
+    walk: true
+    labels:
+      tray: 1.3.6.1.2.1.43.8.2.1.13
+    filters:
+      max_rows: 16
+
+  - name: printer_input_max
+    oid: 1.3.6.1.2.1.43.8.2.1.9
+    kind: gauge
+    walk: true
+    labels:
+      tray: 1.3.6.1.2.1.43.8.2.1.13
+    filters:
+      max_rows: 16
+
+  # prtMarkerLifeCount : compteur de pages du moteur d'impression, jamais remis à
+  # zéro. C'est lui qui permet de suivre la consommation réelle.
+  - name: printer_pages_printed
+    oid: 1.3.6.1.2.1.43.10.2.1.4
+    kind: counter
+    walk: true
+    filters:
+      max_rows: 8
+
+  # hrPrinterStatus : 1 = autre, 2 = inconnu, 3 = repos, 4 = impression,
+  # 5 = préchauffage.
+  - name: printer_status
+    oid: 1.3.6.1.2.1.25.3.5.1.1
+    kind: gauge
+    walk: true
+    filters:
+      max_rows: 8

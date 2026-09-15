@@ -1,0 +1,126 @@
+# Onduleurs, via l'UPS-MIB standard (RFC 1628).
+#
+# La plupart des cartes réseau d'onduleur — APC, Eaton, CyberPower, Riello — la
+# publient en plus de leur MIB propriétaire ; c'est le seul dénominateur commun.
+# Les modèles qui n'exposent que leur MIB propriétaire ne remonteront rien ici.
+id: ups
+name: UPS (UPS-MIB)
+match:
+  sysobjectid:
+    - 1.3.6.1.2.1.33        # agents conformes annonçant directement l'UPS-MIB
+    - 1.3.6.1.4.1.318       # APC
+    - 1.3.6.1.4.1.534       # Eaton / Powerware
+    - 1.3.6.1.4.1.705       # MGE
+    - 1.3.6.1.4.1.3808      # CyberPower
+    - 1.3.6.1.4.1.5491      # Riello
+    - 1.3.6.1.4.1.4555      # Socomec
+    - 1.3.6.1.4.1.850       # Tripp Lite
+    - 1.3.6.1.4.1.476       # Vertiv / Liebert
+    - 1.3.6.1.4.1.2254      # Salicru
+  sysdescr:
+    - "[Uu][Pp][Ss]"
+    - "[Oo]nduleur"
+  priority: 0
+
+include: [system]
+
+metrics:
+  # upsBatteryStatus : 1 = inconnu, 2 = normal, 3 = batterie basse,
+  # 4 = batterie épuisée. C'est la métrique à surveiller en priorité.
+  - name: ups_battery_status
+    oid: 1.3.6.1.2.1.33.1.2.1.0
+    kind: gauge
+
+  # Non nul dès que l'onduleur est passé sur batterie : la coupure est en cours.
+  - name: ups_battery_seconds_on
+    oid: 1.3.6.1.2.1.33.1.2.2.0
+    kind: gauge
+
+  - name: ups_battery_minutes_remaining
+    oid: 1.3.6.1.2.1.33.1.2.3.0
+    kind: gauge
+
+  - name: ups_battery_charge_percent
+    oid: 1.3.6.1.2.1.33.1.2.4.0
+    kind: gauge
+
+  # upsBatteryVoltage est exprimée en dixièmes de volt continu.
+  - name: ups_battery_volts
+    oid: 1.3.6.1.2.1.33.1.2.5.0
+    kind: gauge
+    scale: 0.1
+
+  # upsBatteryCurrent est en dixièmes d'ampère continu, signée : négative en décharge.
+  - name: ups_battery_amperes
+    oid: 1.3.6.1.2.1.33.1.2.6.0
+    kind: gauge
+    scale: 0.1
+
+  # La température de batterie est en degrés Celsius entiers, sans facteur.
+  # Une dérive de quelques degrés annonce un jeu de batteries en fin de vie.
+  - name: ups_battery_temperature_celsius
+    oid: 1.3.6.1.2.1.33.1.2.7.0
+    kind: gauge
+
+  # Nombre de fois où l'alimentation d'entrée est sortie des tolérances : un
+  # compteur qui grimpe doucement révèle un secteur instable.
+  - name: ups_input_line_bads
+    oid: 1.3.6.1.2.1.33.1.3.1.0
+    kind: counter
+
+  # Tables d'entrée et de sortie : une ligne par phase. Un onduleur monophasé n'en
+  # a qu'une, un triphasé en a trois — d'où le parcours plutôt qu'une lecture simple.
+  - name: ups_input_volts
+    oid: 1.3.6.1.2.1.33.1.3.3.1.3
+    kind: gauge
+    walk: true
+    filters:
+      max_rows: 8
+
+  # upsInputFrequency est en dixièmes de hertz.
+  - name: ups_input_hertz
+    oid: 1.3.6.1.2.1.33.1.3.3.1.2
+    kind: gauge
+    walk: true
+    scale: 0.1
+    filters:
+      max_rows: 8
+
+  # upsOutputSource : 3 = secteur, 5 = batterie, 4 = dérivation. Cette valeur et
+  # upsBatteryStatus suffisent à écrire une alerte « sur batterie » fiable.
+  - name: ups_output_source
+    oid: 1.3.6.1.2.1.33.1.4.1.0
+    kind: gauge
+
+  - name: ups_output_hertz
+    oid: 1.3.6.1.2.1.33.1.4.2.0
+    kind: gauge
+    scale: 0.1
+
+  - name: ups_output_volts
+    oid: 1.3.6.1.2.1.33.1.4.4.1.2
+    kind: gauge
+    walk: true
+    filters:
+      max_rows: 8
+
+  # upsOutputPower est en watts ; la puissance apparente n'est pas normalisée.
+  - name: ups_output_watts
+    oid: 1.3.6.1.2.1.33.1.4.4.1.4
+    kind: gauge
+    walk: true
+    filters:
+      max_rows: 8
+
+  - name: ups_output_load_percent
+    oid: 1.3.6.1.2.1.33.1.4.4.1.5
+    kind: gauge
+    walk: true
+    filters:
+      max_rows: 8
+
+  # Nombre d'alarmes actives dans la upsAlarmTable. Non nul, il justifie d'aller
+  # regarder l'onduleur de plus près.
+  - name: ups_alarms_present
+    oid: 1.3.6.1.2.1.33.1.6.1.0
+    kind: gauge

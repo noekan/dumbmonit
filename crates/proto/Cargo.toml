@@ -1,0 +1,16 @@
+[package]
+name = "ezymonit-proto"
+description = "Types partagés entre le serveur EzyMonit, ses collecteurs et l'agent."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

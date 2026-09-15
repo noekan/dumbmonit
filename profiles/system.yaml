@@ -1,0 +1,30 @@
+# Profil universel : ce que tout agent SNMP sait répondre.
+#
+# Il sert de socle aux autres profils, qui l'incluent, et de dernier recours pour un
+# équipement que l'auto-détection ne reconnaît pas.
+id: system
+name: System (SNMPv2-MIB)
+match:
+  # Repli absolu. Les profils spécialisés lui passent devant grâce à leur préfixe
+  # de sysObjectID, ou à leur priorité pour ceux qui répondent aussi à « * ».
+  sysobjectid: ["*"]
+  priority: 0
+
+metrics:
+  # sysUpTime est en centièmes de seconde depuis le démarrage de l'agent SNMP —
+  # et non de la machine : sur Net-SNMP, redémarrer le démon le remet à zéro.
+  - name: system_uptime_seconds
+    oid: 1.3.6.1.2.1.1.3.0
+    kind: gauge
+    scale: 0.01
+
+  # sysServices est un champ de bits décrivant les couches OSI servies. Sa valeur
+  # importe peu ; la métrique existe surtout pour porter les étiquettes d'identité,
+  # qui sont peu nombreuses et stables dans le temps.
+  - name: system_info
+    oid: 1.3.6.1.2.1.1.7.0
+    kind: gauge
+    labels:
+      sysname: 1.3.6.1.2.1.1.5.0
+      syscontact: 1.3.6.1.2.1.1.4.0
+      syslocation: 1.3.6.1.2.1.1.6.0

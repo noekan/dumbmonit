@@ -1,0 +1,614 @@
+//! Configuration de l'agent : fichier YAML, surchargé par l'environnement.
+//!
+//! Les deux sources sont indispensables. Le fichier est ce que le script
+//! d'installation écrit une fois pour toutes ; l'environnement est ce qui permet
+//! de lancer l'agent dans un conteneur ou de tester une nouvelle URL sans toucher
+//! au disque.
+
+use std::collections::BTreeMap;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use anyhow::{Context, Result, bail};
+use serde::Deserialize;
+
+use crate::collect::plakar::{self, PlakarConfig};
+use crate::collect::system_health::SystemHealthConfig;
+
+/// Période d'échantillonnage par défaut. Trente secondes donnent des graphes
+/// lisibles sans peser sur une machine modeste.
+pub const DEFAULT_INTERVAL_SECS: u64 = 30;
+
+/// En dessous, l'agent coûterait plus cher que ce qu'il mesure.
+pub const MIN_INTERVAL_SECS: u64 = 5;
+
+/// Borne du tampon de reprise, en échantillons.
+///
+/// Environ une heure de rattrapage pour une machine ordinaire, pour quelques
+/// mégaoctets de mémoire : assez pour absorber le redémarrage d'un serveur sans
+/// jamais menacer la machine surveillée.
+pub const DEFAULT_MAX_BUFFERED_SAMPLES: usize = 20_000;
+
+/// Chemin du socket Docker sur les systèmes de type Unix.
+pub const DEFAULT_DOCKER_SOCKET: &str = "/var/run/docker.sock";
+
+/// Période de l'inventaire des mises à jour en attente. Une heure : les dépôts
+/// ne bougent pas plus vite, et chaque inventaire charge toutes leurs
+/// métadonnées.
+pub const DEFAULT_UPDATES_INTERVAL_SECS: u64 = 3600;
+
+/// En dessous, l'agent passerait son temps à relancer `dnf`.
+pub const MIN_UPDATES_INTERVAL_SECS: u64 = 300;
+
+/// Ce que le fichier YAML peut contenir.
+///
+/// Tous les champs sont optionnels : un fichier ne portant que l'URL et le jeton
+/// est parfaitement valide, et c'est exactement ce qu'écrit l'installateur.
+/// Les champs inconnus sont ignorés plutôt que refusés, pour qu'un fichier écrit
+/// par une version plus récente ne bloque pas le démarrage.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct FileConfig {
+    server_url: Option<String>,
+    token: Option<String>,
+    interval_secs: Option<u64>,
+    hostname: Option<String>,
+    services: Option<Vec<String>>,
+    tags: Option<BTreeMap<String, String>>,
+    docker: Option<bool>,
+    docker_socket: Option<String>,
+    docker_update_check: Option<bool>,
+    commands: Option<bool>,
+    plakar_bin: Option<String>,
+    plakar_klosets: Option<Vec<String>>,
+    plakar_home: Option<String>,
+    plakar_interval_secs: Option<u64>,
+    max_buffered_samples: Option<usize>,
+    log_level: Option<String>,
+    system_health: Option<SystemHealthFile>,
+}
+
+/// Section `system_health` du fichier : santé du système d'exploitation.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct SystemHealthFile {
+    enabled: Option<bool>,
+    check_updates: Option<bool>,
+    #[serde(alias = "updates_interval_seconds")]
+    updates_interval_secs: Option<u64>,
+    check_reboot: Option<bool>,
+    check_failed_units: Option<bool>,
+}
+
+/// Configuration effective, une fois le fichier et l'environnement fusionnés.
+#[derive(Clone)]
+pub struct Config {
+    /// Racine du serveur EzyMonit, sans le chemin de la route.
+    pub server_url: String,
+    /// Jeton d'enregistrement. Ne doit jamais apparaître dans les journaux.
+    pub token: String,
+    pub interval: Duration,
+    /// Nom d'hôte annoncé au serveur. `None` : celui que le système déclare.
+    pub hostname: Option<String>,
+    /// Unités systemd ou services Windows dont l'état est remonté.
+    pub services: Vec<String>,
+    pub tags: BTreeMap<String, String>,
+    pub docker: bool,
+    pub docker_socket: PathBuf,
+    /// Comparer les images des conteneurs à leur dépôt, une fois par heure.
+    pub docker_update_check: bool,
+    /// Accepter les actions envoyées par le serveur (redémarrage, mise à jour
+    /// de conteneur). Faux : l'agent ne fait que mesurer.
+    pub commands: bool,
+    /// Santé du système : mises à jour, redémarrage, unités en échec, SELinux.
+    pub system_health: SystemHealthConfig,
+    /// Sauvegardes Plakar.
+    pub plakar: PlakarConfig,
+    pub max_buffered_samples: usize,
+    pub log_level: tracing::Level,
+}
+
+/// Le jeton n'est jamais affiché, pas même tronqué.
+///
+/// C'est la seule protection qui tienne : un `Debug` dérivé finirait tôt ou tard
+/// dans une trace d'erreur, et un jeton d'enregistrement ouvre l'ingestion.
+impl fmt::Debug for Config {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Config")
+            .field("server_url", &self.server_url)
+            .field("token", &"<redacted>")
+            .field("interval", &self.interval)
+            .field("hostname", &self.hostname)
+            .field("services", &self.services)
+            .field("tags", &self.tags)
+            .field("docker", &self.docker)
+            .field("docker_socket", &self.docker_socket)
+            .field("docker_update_check", &self.docker_update_check)
+            .field("commands", &self.commands)
+            .field("max_buffered_samples", &self.max_buffered_samples)
+            .field("log_level", &self.log_level)
+            .field("system_health", &self.system_health)
+            .field("plakar", &self.plakar)
+            .finish()
+    }
+}
+
+impl Config {
+    /// Emplacement du fichier de configuration lorsque rien n'est précisé.
+    pub fn default_path() -> PathBuf {
+        #[cfg(windows)]
+        {
+            let root =
+                std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".to_string());
+            PathBuf::from(root).join("EzyMonit").join("agent.yaml")
+        }
+        #[cfg(not(windows))]
+        {
+            PathBuf::from("/etc/ezymonit/agent.yaml")
+        }
+    }
+
+    /// Charge la configuration : fichier s'il existe, puis surcharges d'environnement.
+    ///
+    /// L'absence de fichier n'est pas une erreur : elle correspond au cas
+    /// « tout est dans l'environnement », typique d'un déploiement en conteneur.
+    pub fn load(path: &Path) -> Result<Self> {
+        let file = match std::fs::read_to_string(path) {
+            Ok(text) => serde_yaml_ng::from_str::<FileConfig>(&text)
+                .with_context(|| format!("unreadable configuration file: {}", path.display()))?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => FileConfig::default(),
+            Err(error) => {
+                return Err(
+                    anyhow::Error::from(error).context(format!("reading {}", path.display()))
+                );
+            }
+        };
+        Self::merge(file, EnvSource::process())
+    }
+
+    fn merge(file: FileConfig, env: EnvSource) -> Result<Self> {
+        let server_url = env
+            .get("EZYMONIT_AGENT_URL")
+            .or(file.server_url)
+            .map(|url| url.trim().trim_end_matches('/').to_string())
+            .unwrap_or_default();
+        if server_url.is_empty() {
+            bail!("the server URL is required (key 'server_url' or variable EZYMONIT_AGENT_URL)");
+        }
+        if !server_url.starts_with("http://") && !server_url.starts_with("https://") {
+            bail!("the server URL must start with http:// or https:// (got '{server_url}')");
+        }
+
+        let token = env.get("EZYMONIT_AGENT_TOKEN").or(file.token).unwrap_or_default();
+        let token = token.trim().to_string();
+        if token.is_empty() {
+            bail!(
+                "the enrollment token is required (key 'token' or variable EZYMONIT_AGENT_TOKEN)"
+            );
+        }
+
+        let interval_secs = match env.get("EZYMONIT_AGENT_INTERVAL_SECS") {
+            Some(raw) => raw
+                .trim()
+                .parse::<u64>()
+                .with_context(|| format!("EZYMONIT_AGENT_INTERVAL_SECS: invalid value '{raw}'"))?,
+            None => file.interval_secs.unwrap_or(DEFAULT_INTERVAL_SECS),
+        };
+        if interval_secs < MIN_INTERVAL_SECS {
+            bail!("the sampling period must be at least {MIN_INTERVAL_SECS} seconds");
+        }
+
+        let services = match env.get("EZYMONIT_AGENT_SERVICES") {
+            Some(raw) => split_list(&raw),
+            None => file.services.unwrap_or_default(),
+        };
+
+        let tags = match env.get("EZYMONIT_AGENT_TAGS") {
+            Some(raw) => parse_tags(&raw)?,
+            None => file.tags.unwrap_or_default(),
+        };
+
+        let flag = |variable: &str, from_file: Option<bool>, default: bool| -> Result<bool> {
+            match env.get(variable) {
+                Some(raw) => parse_bool(&raw).with_context(|| format!("{variable}: {raw}")),
+                None => Ok(from_file.unwrap_or(default)),
+            }
+        };
+        let docker = flag("EZYMONIT_AGENT_DOCKER", file.docker, true)?;
+        let docker_update_check =
+            flag("EZYMONIT_AGENT_DOCKER_UPDATE_CHECK", file.docker_update_check, true)?;
+        let commands = flag("EZYMONIT_AGENT_COMMANDS", file.commands, true)?;
+
+        let plakar_interval_secs = match env.get("EZYMONIT_AGENT_PLAKAR_INTERVAL_SECS") {
+            Some(raw) => raw.trim().parse::<u64>().with_context(|| {
+                format!("EZYMONIT_AGENT_PLAKAR_INTERVAL_SECS: invalid value '{raw}'")
+            })?,
+            None => file.plakar_interval_secs.unwrap_or(plakar::DEFAULT_INTERVAL_SECS),
+        };
+        if plakar_interval_secs < plakar::MIN_INTERVAL_SECS {
+            bail!(
+                "the Plakar reading period must be at least {} seconds",
+                plakar::MIN_INTERVAL_SECS
+            );
+        }
+        let plakar = PlakarConfig {
+            bin: env
+                .get("EZYMONIT_AGENT_PLAKAR_BIN")
+                .or(file.plakar_bin)
+                .map(|bin| bin.trim().to_string())
+                .filter(|bin| !bin.is_empty())
+                .unwrap_or_else(|| "plakar".to_string()),
+            klosets: match env.get("EZYMONIT_AGENT_PLAKAR_KLOSETS") {
+                Some(raw) => split_list(&raw),
+                None => file
+                    .plakar_klosets
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|k| k.trim().to_string())
+                    .filter(|k| !k.is_empty())
+                    .collect(),
+            },
+            home: env
+                .get("EZYMONIT_AGENT_PLAKAR_HOME")
+                .or(file.plakar_home)
+                .map(|home| home.trim().to_string())
+                .filter(|home| !home.is_empty()),
+            interval: Duration::from_secs(plakar_interval_secs),
+        };
+
+        let max_buffered_samples = match env.get("EZYMONIT_AGENT_MAX_BUFFERED_SAMPLES") {
+            Some(raw) => raw.trim().parse::<usize>().with_context(|| {
+                format!("EZYMONIT_AGENT_MAX_BUFFERED_SAMPLES: invalid value '{raw}'")
+            })?,
+            None => file.max_buffered_samples.unwrap_or(DEFAULT_MAX_BUFFERED_SAMPLES),
+        };
+        if max_buffered_samples == 0 {
+            bail!("the catch-up buffer cannot be zero");
+        }
+
+        let log_level = match env.get("EZYMONIT_AGENT_LOG").or(file.log_level) {
+            Some(raw) => parse_level(&raw)?,
+            None => tracing::Level::INFO,
+        };
+
+        let system_health =
+            Self::merge_system_health(file.system_health.unwrap_or_default(), &env)?;
+
+        Ok(Self {
+            server_url,
+            token,
+            interval: Duration::from_secs(interval_secs),
+            hostname: env
+                .get("EZYMONIT_AGENT_HOSTNAME")
+                .or(file.hostname)
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty()),
+            services,
+            tags,
+            docker,
+            docker_socket: env
+                .get("EZYMONIT_AGENT_DOCKER_SOCKET")
+                .or(file.docker_socket)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(DEFAULT_DOCKER_SOCKET)),
+            docker_update_check,
+            commands,
+            system_health,
+            plakar,
+            max_buffered_samples,
+            log_level,
+        })
+    }
+
+    fn merge_system_health(file: SystemHealthFile, env: &EnvSource) -> Result<SystemHealthConfig> {
+        let flag = |variable: &str, from_file: Option<bool>, default: bool| -> Result<bool> {
+            match env.get(variable) {
+                Some(raw) => parse_bool(&raw).with_context(|| format!("{variable}: {raw}")),
+                None => Ok(from_file.unwrap_or(default)),
+            }
+        };
+        let updates_interval_secs = match env.get("EZYMONIT_AGENT_UPDATES_INTERVAL_SECS") {
+            Some(raw) => raw.trim().parse::<u64>().with_context(|| {
+                format!("EZYMONIT_AGENT_UPDATES_INTERVAL_SECS: invalid value '{raw}'")
+            })?,
+            None => file.updates_interval_secs.unwrap_or(DEFAULT_UPDATES_INTERVAL_SECS),
+        };
+        if updates_interval_secs < MIN_UPDATES_INTERVAL_SECS {
+            bail!(
+                "the pending-updates check period must be at least {MIN_UPDATES_INTERVAL_SECS} seconds"
+            );
+        }
+        Ok(SystemHealthConfig {
+            enabled: flag("EZYMONIT_AGENT_SYSTEM_HEALTH", file.enabled, true)?,
+            check_updates: flag("EZYMONIT_AGENT_CHECK_UPDATES", file.check_updates, true)?,
+            updates_interval: Duration::from_secs(updates_interval_secs),
+            check_reboot: flag("EZYMONIT_AGENT_CHECK_REBOOT", file.check_reboot, true)?,
+            check_failed_units: flag(
+                "EZYMONIT_AGENT_CHECK_FAILED_UNITS",
+                file.check_failed_units,
+                true,
+            )?,
+        })
+    }
+}
+
+/// Source des surcharges. Indirection volontaire : elle rend la fusion testable
+/// sans toucher aux variables d'environnement du processus de test, qui sont
+/// globales et donc hostiles à l'exécution parallèle des tests.
+struct EnvSource(BTreeMap<String, String>);
+
+impl EnvSource {
+    fn process() -> Self {
+        Self(std::env::vars().collect())
+    }
+
+    fn get(&self, key: &str) -> Option<String> {
+        self.0.get(key).map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
+    }
+}
+
+fn split_list(raw: &str) -> Vec<String> {
+    raw.split(',').map(str::trim).filter(|item| !item.is_empty()).map(str::to_string).collect()
+}
+
+fn parse_tags(raw: &str) -> Result<BTreeMap<String, String>> {
+    let mut tags = BTreeMap::new();
+    for pair in raw.split(',').map(str::trim).filter(|pair| !pair.is_empty()) {
+        let (key, value) = pair
+            .split_once('=')
+            .with_context(|| format!("invalid tag '{pair}', expected 'key=value'"))?;
+        let key = key.trim();
+        if key.is_empty() {
+            bail!("tag without a name in '{raw}'");
+        }
+        tags.insert(key.to_string(), value.trim().to_string());
+    }
+    Ok(tags)
+}
+
+fn parse_bool(raw: &str) -> Result<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "oui" | "yes" | "on" => Ok(true),
+        "0" | "false" | "non" | "no" | "off" => Ok(false),
+        other => bail!("invalid boolean value '{other}'"),
+    }
+}
+
+fn parse_level(raw: &str) -> Result<tracing::Level> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "trace" => Ok(tracing::Level::TRACE),
+        "debug" => Ok(tracing::Level::DEBUG),
+        "info" => Ok(tracing::Level::INFO),
+        "warn" | "warning" => Ok(tracing::Level::WARN),
+        "error" => Ok(tracing::Level::ERROR),
+        other => bail!("unknown log level '{other}'"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env(pairs: &[(&str, &str)]) -> EnvSource {
+        EnvSource(pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect())
+    }
+
+    fn file_with_url_and_token() -> FileConfig {
+        FileConfig {
+            server_url: Some("http://serveur:8080/".into()),
+            token: Some("ezym_abc".into()),
+            ..FileConfig::default()
+        }
+    }
+
+    #[test]
+    fn a_minimal_file_is_enough() {
+        let config = Config::merge(file_with_url_and_token(), env(&[])).expect("configuration");
+        // La barre oblique finale est retirée : sans cela l'URL construite
+        // contiendrait un double séparateur et le serveur répondrait 404.
+        assert_eq!(config.server_url, "http://serveur:8080");
+        assert_eq!(config.interval, Duration::from_secs(DEFAULT_INTERVAL_SECS));
+        assert!(config.docker, "la découverte Docker est active par défaut");
+        assert!(config.docker_update_check);
+        assert!(config.commands, "les actions du serveur sont acceptées par défaut");
+        assert_eq!(config.plakar, PlakarConfig::default());
+    }
+
+    #[test]
+    fn docker_and_command_flags_follow_the_environment() {
+        let config = Config::merge(
+            file_with_url_and_token(),
+            env(&[
+                ("EZYMONIT_AGENT_DOCKER_UPDATE_CHECK", "false"),
+                ("EZYMONIT_AGENT_COMMANDS", "no"),
+            ]),
+        )
+        .expect("configuration");
+        assert!(!config.docker_update_check);
+        assert!(!config.commands);
+        assert!(
+            Config::merge(
+                file_with_url_and_token(),
+                env(&[("EZYMONIT_AGENT_COMMANDS", "peut-être")])
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn plakar_klosets_are_read_from_the_file_or_the_environment() {
+        let yaml = "plakar_klosets:\n  - /srv/backups/main\n  - ' '\nplakar_bin: /opt/plakar\nplakar_home: /root\nplakar_interval_secs: 120\n";
+        let file = FileConfig {
+            server_url: Some("http://s:8080".into()),
+            token: Some("ezym_abc".into()),
+            ..serde_yaml_ng::from_str(yaml).expect("YAML valide")
+        };
+        let config = Config::merge(file, env(&[])).expect("configuration");
+        assert_eq!(config.plakar.klosets, vec!["/srv/backups/main"]);
+        assert_eq!(config.plakar.bin, "/opt/plakar");
+        assert_eq!(config.plakar.home.as_deref(), Some("/root"));
+        assert_eq!(config.plakar.interval, Duration::from_secs(120));
+
+        let config = Config::merge(
+            file_with_url_and_token(),
+            env(&[("EZYMONIT_AGENT_PLAKAR_KLOSETS", "/a, ptar:/b ,")]),
+        )
+        .expect("configuration");
+        assert_eq!(config.plakar.klosets, vec!["/a", "ptar:/b"]);
+    }
+
+    #[test]
+    fn too_frequent_a_plakar_reading_is_refused() {
+        let config = Config::merge(
+            file_with_url_and_token(),
+            env(&[("EZYMONIT_AGENT_PLAKAR_INTERVAL_SECS", "5")]),
+        );
+        assert!(config.is_err());
+    }
+
+    #[test]
+    fn the_environment_wins_over_the_file() {
+        let config = Config::merge(
+            file_with_url_and_token(),
+            env(&[
+                ("EZYMONIT_AGENT_URL", "https://autre:9000"),
+                ("EZYMONIT_AGENT_INTERVAL_SECS", "60"),
+            ]),
+        )
+        .expect("configuration");
+        assert_eq!(config.server_url, "https://autre:9000");
+        assert_eq!(config.interval, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn a_missing_url_or_token_is_refused() {
+        let no_url = FileConfig { token: Some("ezym_abc".into()), ..FileConfig::default() };
+        assert!(Config::merge(no_url, env(&[])).is_err());
+
+        let no_token =
+            FileConfig { server_url: Some("http://s:8080".into()), ..FileConfig::default() };
+        assert!(Config::merge(no_token, env(&[])).is_err());
+    }
+
+    #[test]
+    fn an_url_without_a_scheme_is_refused() {
+        let file = FileConfig {
+            server_url: Some("serveur:8080".into()),
+            token: Some("ezym_abc".into()),
+            ..FileConfig::default()
+        };
+        // Sans schéma, reqwest échouerait à chaque envoi : autant le dire au
+        // démarrage plutôt qu'à la première tentative.
+        assert!(Config::merge(file, env(&[])).is_err());
+    }
+
+    #[test]
+    fn too_short_an_interval_is_refused() {
+        let config =
+            Config::merge(file_with_url_and_token(), env(&[("EZYMONIT_AGENT_INTERVAL_SECS", "1")]));
+        assert!(config.is_err());
+    }
+
+    #[test]
+    fn services_and_tags_are_read_from_the_environment() {
+        let config = Config::merge(
+            file_with_url_and_token(),
+            env(&[
+                ("EZYMONIT_AGENT_SERVICES", "sshd, docker ,"),
+                ("EZYMONIT_AGENT_TAGS", "role=nas, salle = cave"),
+            ]),
+        )
+        .expect("configuration");
+        assert_eq!(config.services, vec!["sshd", "docker"]);
+        assert_eq!(config.tags.get("role").map(String::as_str), Some("nas"));
+        assert_eq!(config.tags.get("salle").map(String::as_str), Some("cave"));
+    }
+
+    #[test]
+    fn a_malformed_tag_is_refused() {
+        assert!(parse_tags("role").is_err());
+        assert!(parse_tags("=cave").is_err());
+    }
+
+    #[test]
+    fn the_yaml_file_is_parsed_as_expected() {
+        let yaml = r#"
+server_url: http://serveur:8080
+token: ezym_secret
+interval_secs: 15
+services:
+  - sshd
+  - nginx
+tags:
+  role: nas
+docker: false
+inconnu: 42
+system_health:
+  check_updates: false
+  updates_interval_secs: 900
+"#;
+        let file: FileConfig = serde_yaml_ng::from_str(yaml).expect("YAML valide");
+        let config = Config::merge(file, env(&[])).expect("configuration");
+        assert_eq!(config.interval, Duration::from_secs(15));
+        assert_eq!(config.services, vec!["sshd", "nginx"]);
+        assert!(!config.docker);
+        assert!(config.system_health.enabled, "la santé du système reste active par défaut");
+        assert!(!config.system_health.check_updates);
+        assert!(config.system_health.check_reboot);
+        assert_eq!(config.system_health.updates_interval, Duration::from_secs(900));
+    }
+
+    #[test]
+    fn system_health_defaults_and_environment_overrides() {
+        let config = Config::merge(file_with_url_and_token(), env(&[])).expect("configuration");
+        assert_eq!(config.system_health, SystemHealthConfig::default());
+        assert_eq!(
+            config.system_health.updates_interval,
+            Duration::from_secs(DEFAULT_UPDATES_INTERVAL_SECS)
+        );
+
+        let config = Config::merge(
+            file_with_url_and_token(),
+            env(&[
+                ("EZYMONIT_AGENT_SYSTEM_HEALTH", "false"),
+                ("EZYMONIT_AGENT_CHECK_FAILED_UNITS", "non"),
+                ("EZYMONIT_AGENT_UPDATES_INTERVAL_SECS", "7200"),
+            ]),
+        )
+        .expect("configuration");
+        assert!(!config.system_health.enabled);
+        assert!(!config.system_health.check_failed_units);
+        assert_eq!(config.system_health.updates_interval, Duration::from_secs(7200));
+    }
+
+    #[test]
+    fn too_frequent_an_updates_inventory_is_refused() {
+        // Relancer `dnf` toutes les dix secondes coûterait plus que tout le reste.
+        let config = Config::merge(
+            file_with_url_and_token(),
+            env(&[("EZYMONIT_AGENT_UPDATES_INTERVAL_SECS", "10")]),
+        );
+        assert!(config.is_err());
+    }
+
+    #[test]
+    fn the_long_spelling_of_the_updates_interval_is_accepted() {
+        let yaml = "system_health:\n  updates_interval_seconds: 1800\n";
+        let file = FileConfig {
+            server_url: Some("http://s:8080".into()),
+            token: Some("ezym_abc".into()),
+            ..serde_yaml_ng::from_str(yaml).expect("YAML valide")
+        };
+        let config = Config::merge(file, env(&[])).expect("configuration");
+        assert_eq!(config.system_health.updates_interval, Duration::from_secs(1800));
+    }
+
+    #[test]
+    fn the_token_never_appears_in_the_debug_output() {
+        let config = Config::merge(file_with_url_and_token(), env(&[])).expect("configuration");
+        let rendered = format!("{config:?}");
+        assert!(!rendered.contains("ezym_abc"), "le jeton a fuité : {rendered}");
+        assert!(rendered.contains("redacted"));
+    }
+}
