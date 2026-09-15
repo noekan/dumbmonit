@@ -410,6 +410,55 @@ const PROXMOX_OPTIONS: &[OptionView] = &[
         "pve1, pve2",
         "",
     ),
+    boolean(
+        "ha",
+        "Watch high availability",
+        "Reads the HA manager state: quorum, master, LRMs and the state of each HA resource.",
+        true,
+    ),
+    boolean(
+        "backup_jobs",
+        "Watch backup jobs",
+        "Reads the scheduled backup jobs (next run, last result) and lists the guests no job covers.",
+        true,
+    ),
+    boolean(
+        "scan_snapshots",
+        "Inventory snapshots",
+        "Lists the snapshots of every VM and container to report their number and age. One API call per guest.",
+        true,
+    ),
+    number(
+        "max_snapshot_guests",
+        "Snapshot inventory limit",
+        "Maximum number of guests whose snapshots are listed per probe, from 1 to 10000. Beyond it, the remaining guests are counted as skipped.",
+        "200",
+        "200",
+    ),
+    boolean(
+        "replication",
+        "Watch replication jobs",
+        "Reads the state of ZFS replication jobs on every node.",
+        true,
+    ),
+    boolean(
+        "ceph",
+        "Watch Ceph",
+        "Reads the Ceph cluster health, OSDs and usage. Silently skipped when Ceph is not set up.",
+        true,
+    ),
+    boolean(
+        "updates",
+        "Count pending updates",
+        "Lists the packages waiting for an update on each node. Needs Sys.Modify on \"/nodes\" (see the docs); silently skipped otherwise.",
+        true,
+    ),
+    boolean(
+        "certificates",
+        "Watch node certificates",
+        "Reports the days left before each node certificate expires.",
+        true,
+    ),
 ];
 
 /// Options lues par `collectors/pbs/options.rs`.
@@ -446,6 +495,18 @@ const PBS_OPTIONS: &[OptionView] = &[
         "500",
         "500",
     ),
+    boolean(
+        "jobs",
+        "Watch sync, verify and prune jobs",
+        "Reads the job lists to report each job's last result and next run. Needs Datastore.Audit on the datastores, plus Remote.Audit for sync jobs.",
+        true,
+    ),
+    boolean(
+        "updates",
+        "Count pending updates",
+        "Lists the packages waiting for an update on the backup server. Needs Sys.Audit on \"/\"; silently skipped otherwise.",
+        true,
+    ),
 ];
 
 /// Options lues par `collectors/synology/options.rs`.
@@ -473,6 +534,12 @@ const SYNOLOGY_OPTIONS: &[OptionView] = &[
         "Time allowed for each API call, from 1 to 120. The storage inventory can wake up sleeping disks.",
         "15",
         "15",
+    ),
+    boolean(
+        "abb",
+        "Watch Active Backup for Business",
+        "Reads the Active Backup for Business tasks (PCs, servers, virtual machines, file servers): last result, age of the last successful backup, schedule. Needs the package installed and an account allowed to use it; a NAS without the package is simply skipped.",
+        true,
     ),
 ];
 
@@ -552,7 +619,7 @@ fn describe(kind: &'static str) -> CollectorView {
         "synology" => CollectorView {
             kind,
             label: "Synology DSM",
-            summary: "Synology NAS: volumes, disk health, temperature and backups.",
+            summary: "Synology NAS: volumes, disk health, temperature, Hyper Backup and Active Backup for Business.",
             examples: &["DiskStation", "RackStation"],
             credential_types: &["username_password"],
             address_hint: "192.168.1.30",
@@ -564,6 +631,7 @@ fn describe(kind: &'static str) -> CollectorView {
                     "Create a user dedicated to monitoring, without administration rights.",
                     "Give it read-only access; it needs no shared folder.",
                     "If two-step verification is enforced for everyone, exempt this account, otherwise the login will fail.",
+                    "Active Backup for Business only answers an administrator, or an account the package was delegated to (Active Backup for Business → Settings → Privileges). Without that, its tasks are not read and the error is counted in \"scrape_errors\"; untick the option below to skip it.",
                     "Enter the NAS address and this account's credentials here.",
                 ],
                 warning: "An administrator account would work, but would give DumbMonit far more rights than needed.",
@@ -586,6 +654,8 @@ fn describe(kind: &'static str) -> CollectorView {
                     "Copy the install command shown and run it on the machine to monitor.",
                     "The agent installs itself as a service and pushes its measurements to this server.",
                     "The machine shows up on its own within a few seconds.",
+                    "Docker: to see the containers and let DumbMonit restart or update them, the agent must reach the Docker socket — add its user to the \"docker\" group or run it as root. Restart and auto-update policies are then set per container on the device page.",
+                    "Plakar backups: klosets are discovered automatically from ~/.config/plakar/stores.yml of every user and from ~/.plakar. To watch a specific list instead, set \"plakar_klosets\" in agent.yaml.",
                 ],
                 warning: "The agent contacts the server, never the other way round: no port needs to be opened on the monitored machine.",
                 doc_url: "",
@@ -845,6 +915,14 @@ mod tests {
                     "backup_lookback_days",
                     "scan_backup_storage",
                     "nodes",
+                    "ha",
+                    "backup_jobs",
+                    "scan_snapshots",
+                    "max_snapshot_guests",
+                    "replication",
+                    "ceph",
+                    "updates",
+                    "certificates",
                 ],
             ),
             (
@@ -856,9 +934,11 @@ mod tests {
                     "task_lookback_hours",
                     "datastores",
                     "max_groups",
+                    "jobs",
+                    "updates",
                 ],
             ),
-            ("synology", &["scheme", "port", "insecure_tls", "request_timeout_seconds"]),
+            ("synology", &["scheme", "port", "insecure_tls", "request_timeout_seconds", "abb"]),
         ];
         for (kind, cles) in attendues {
             let obtenues: Vec<&str> = describe(kind).options.iter().map(|o| o.key).collect();
@@ -925,6 +1005,7 @@ mod tests {
         assert_eq!(defaut("pbs", "task_lookback_hours"), "24");
         assert_eq!(defaut("pbs", "max_groups"), "500");
         assert_eq!(defaut("synology", "request_timeout_seconds"), "15");
+        assert_eq!(defaut("synology", "abb"), "true");
     }
 
     #[test]

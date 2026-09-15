@@ -47,6 +47,11 @@ pub struct Options {
     pub datastores: Vec<String>,
     /// Plafond de groupes de sauvegarde produisant des séries.
     pub max_groups: usize,
+    /// Interroge les listes de travaux planifiés (synchronisation, vérification,
+    /// purge). Trois appels de plus par interrogation, légers.
+    pub jobs: bool,
+    /// Interroge les mises à jour de paquets en attente.
+    pub updates: bool,
 }
 
 impl Options {
@@ -71,6 +76,8 @@ impl Options {
                 })
                 .unwrap_or_default(),
             max_groups: parse_max_groups(tag(target, "max_groups"))?,
+            jobs: parse_bool_or(tag(target, "jobs"), true)?,
+            updates: parse_bool_or(tag(target, "updates"), true)?,
         })
     }
 
@@ -85,8 +92,12 @@ fn tag<'a>(target: &'a Target, key: &str) -> Option<&'a str> {
 }
 
 fn parse_bool(value: Option<&str>) -> Result<bool, ProbeError> {
+    parse_bool_or(value, false)
+}
+
+fn parse_bool_or(value: Option<&str>, default: bool) -> Result<bool, ProbeError> {
     match value {
-        None => Ok(false),
+        None => Ok(default),
         Some(raw) => match raw.to_ascii_lowercase().as_str() {
             "true" | "1" | "yes" | "oui" | "on" => Ok(true),
             "false" | "0" | "no" | "non" | "off" => Ok(false),
@@ -219,6 +230,18 @@ mod tests {
         assert_eq!(options.task_lookback_seconds, 24 * 3_600);
         assert_eq!(options.max_groups, 500);
         assert!(options.datastores.is_empty());
+        assert!(options.jobs, "les travaux planifiés sont suivis par défaut");
+        assert!(options.updates, "les mises à jour en attente sont suivies par défaut");
+    }
+
+    #[test]
+    fn les_listes_facultatives_se_desactivent_par_etiquette() {
+        let options = Options::from_target(&cible(&[("jobs", "false"), ("updates", "0")])).unwrap();
+        assert!(!options.jobs);
+        assert!(!options.updates);
+        let options = Options::from_target(&cible(&[("jobs", "yes")])).unwrap();
+        assert!(options.jobs && options.updates);
+        assert!(Options::from_target(&cible(&[("updates", "parfois")])).is_err());
     }
 
     #[test]

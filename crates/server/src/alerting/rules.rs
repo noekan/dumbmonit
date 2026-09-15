@@ -47,6 +47,8 @@ fn base(uid: &str, name: &str, kind: RuleKind, query: &str) -> Rule {
         query: query.to_string(),
         operator: Operator::Gt,
         threshold: 0.0,
+        // Pas d'hystérésis par défaut : chaque règle choisit son seuil de retour.
+        clear_threshold: None,
         for_duration: Duration::ZERO,
         severity: Severity::Warning,
         selector: TargetSelector::All,
@@ -93,6 +95,9 @@ pub fn builtin_rules() -> Vec<Rule> {
             description: "CPU load sustained above 90%.".to_string(),
             operator: Operator::Gt,
             threshold: 90.0,
+            // Hystérésis : une charge qui oscille entre 88 et 92 % ne doit pas
+            // déclencher et résoudre à chaque cycle.
+            clear_threshold: Some(85.0),
             for_duration: Duration::from_secs(10 * 60),
             severity: Severity::Warning,
             unit: "%".to_string(),
@@ -105,6 +110,7 @@ pub fn builtin_rules() -> Vec<Rule> {
             description: "Filesystem 90% full or more.".to_string(),
             operator: Operator::Ge,
             threshold: 90.0,
+            clear_threshold: Some(88.0),
             for_duration: Duration::from_secs(15 * 60),
             severity: Severity::Warning,
             unit: "%".to_string(),
@@ -299,7 +305,9 @@ pub fn builtin_rules() -> Vec<Rule> {
         },
         // Moniteurs de disponibilité. Contrairement au matériel, un service en
         // panne écrit bien un point (`probe_success = 0`) : la règle est un simple
-        // seuil, et le `for` absorbe un raté isolé.
+        // seuil, et le `for` absorbe un raté isolé. `== bool 0` rend 1 pour un
+        // service en panne ; sans `bool`, la comparaison renverrait 0 (la valeur
+        // de gauche) et le seuil « > 0 » ne se déclencherait jamais.
         Rule {
             description: "The service has not responded correctly for three minutes.".to_string(),
             operator: Operator::Gt,
@@ -311,7 +319,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "service_down",
                 "Service down",
                 RuleKind::Threshold,
-                "ezymonit_probe_success == 0",
+                "ezymonit_probe_success == bool 0",
             )
         },
         // Instabilité : un service qui alterne sans cesse n'est jamais « en panne »
@@ -392,9 +400,10 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "container_stopped",
                 "Container stopped",
                 RuleKind::Threshold,
-                // La comparaison rend une série valant 1 quand le conteneur est
-                // arrêté ; un seuil « > 0 » la voit. Voir `service_down`.
-                "ezymonit_container_up == 0",
+                // `== bool` rend 1 quand le conteneur est arrêté, 0 sinon ; sans
+                // `bool`, MetricsQL renverrait la valeur de gauche — 0 — qu'un
+                // seuil « > 0 » ne verrait jamais. Voir `service_down`.
+                "ezymonit_container_up == bool 0",
             )
         },
         Rule {
@@ -482,6 +491,299 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "ezymonit_backup_last_status",
             )
         },
+        // Active Backup for Business (`collectors/synology/abb.rs`). `last_status`
+        // vaut 1 réussite, 0 échec, 2 en cours, -1 inconnu : « == bool 0 » rend une
+        // série valant 1 pour chaque tâche en échec et 0 pour les autres, ce qu'un
+        // seuil « > 0 » lit sans ambiguïté — un « < 1 » attraperait aussi l'inconnu.
+        Rule {
+            description: "The last run of this Active Backup for Business task failed, \
+                          or backed up only part of its devices."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "synology_abb_task_failed",
+                "Active Backup task failed",
+                RuleKind::Threshold,
+                "ezymonit_abb_task_last_status == bool 0",
+            )
+        },
+        // Mêmes seuils que les autres sauvegardes : deux jours, c'est une nuit ratée
+        // plus la marge d'une nuit. La série n'existe pas pour une tâche qui n'a
+        // jamais réussi ; c'est alors `synology_abb_task_failed` qui parle.
+        Rule {
+            description: "No successful Active Backup for Business run for this task for more \
+                          than two days."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 2.0 * 24.0 * 3600.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Warning,
+            unit: "s".to_string(),
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "synology_abb_backup_too_old",
+                "Active Backup too old",
+                RuleKind::Threshold,
+                "ezymonit_abb_task_last_success_seconds",
+            )
+        },
+        // Information : une tâche sans planning ne sauvegardera plus rien tant que
+        // personne ne la lance à la main. Une heure de `for` absorbe une
+        // reprogrammation en cours.
+        Rule {
+            description: "This Active Backup for Business task has no schedule, or its \
+                          continuous backup is paused."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Info,
+            repeat_interval: Some(Duration::from_secs(7 * 24 * 3600)),
+            ..base(
+                "synology_abb_task_disabled",
+                "Active Backup task disabled",
+                RuleKind::Threshold,
+                "ezymonit_abb_task_enabled == bool 0",
+            )
+        },
+        // Proxmox VE, au-delà des sauvegardes. Sévérités : « warning » de la
+        // ligne de produit = `Critical` ici, « advisory » = `Warning`.
+        //
+        // Machine arrêtée alors qu'elle tournait. `1 - running` vaut 1 pour une
+        // machine arrêtée ; le `and` ne retient que celles vues en marche dans les
+        // deux dernières heures, pour ne pas alerter sur une machine arrêtée de
+        // longue date. Une comparaison MetricsQL renvoie la valeur de gauche, pas
+        // un booléen : `running == 0` donnerait 0, invisible d'un seuil « > 0 ».
+        Rule {
+            description: "The VM or container was running and has been stopped for five minutes."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "pve_guest_stopped",
+                "VM or container stopped",
+                RuleKind::Threshold,
+                "(1 - ezymonit_proxmox_guest_running) \
+                 and (max_over_time(ezymonit_proxmox_guest_running[2h]) == 1)",
+            )
+        },
+        // Haute disponibilité : une ressource en `error` ou `fence` ne redémarrera
+        // pas toute seule, c'est une intervention.
+        Rule {
+            description: "A high-availability resource is in error or fenced.".to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(2 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(3600)),
+            ..base(
+                "pve_ha_resource_error",
+                "HA resource in error",
+                RuleKind::Threshold,
+                "ezymonit_proxmox_ha_resource_error",
+            )
+        },
+        // Quorum perdu : plus aucune machine ne peut démarrer sur le cluster, et la
+        // HA arrête celles qui tournent.
+        Rule {
+            description: "The cluster has lost quorum: guests can no longer be started."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(1800)),
+            ..base(
+                "pve_cluster_no_quorum",
+                "Cluster lost quorum",
+                RuleKind::Threshold,
+                "1 - ezymonit_proxmox_cluster_quorate",
+            )
+        },
+        // Nœud hors ligne vu du cluster. Distinct de « équipement injoignable » :
+        // l'API répond, c'est un membre qui manque.
+        Rule {
+            description: "A cluster node has been offline for two minutes.".to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(2 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(1800)),
+            ..base(
+                "pve_node_offline",
+                "Proxmox node offline",
+                RuleKind::Threshold,
+                "1 - ezymonit_proxmox_node_up",
+            )
+        },
+        // Stockage à 85 % : un cran avant « Disk almost full » (90 %), qui reste
+        // l'alerte sérieuse. Un LVM-thin plein bloque toutes les machines qu'il
+        // héberge, il vaut mieux prévenir tôt.
+        Rule {
+            description: "A Proxmox storage is more than 85% full.".to_string(),
+            operator: Operator::Gt,
+            threshold: 85.0,
+            for_duration: Duration::from_secs(15 * 60),
+            severity: Severity::Warning,
+            unit: "%".to_string(),
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "pve_storage_almost_full",
+                "Proxmox storage almost full",
+                RuleKind::Threshold,
+                "ezymonit_proxmox_storage_used_percent",
+            )
+        },
+        // Dernier travail de sauvegarde du nœud en échec (tâches `vzdump`).
+        Rule {
+            description: "The last backup job on this node failed.".to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "pve_backup_job_failed",
+                "Backup job failed",
+                RuleKind::Threshold,
+                "1 - ezymonit_proxmox_backup_job_last_ok",
+            )
+        },
+        // Instantané oublié : il grossit avec le temps et ralentit la machine, et
+        // personne ne s'en souvient. Information, pas panne.
+        Rule {
+            description: "The oldest snapshot of this machine is more than thirty days old."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 30.0 * 24.0 * 3600.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Info,
+            unit: "s".to_string(),
+            repeat_interval: Some(Duration::from_secs(7 * 24 * 3600)),
+            ..base(
+                "pve_snapshot_old",
+                "Old snapshot",
+                RuleKind::Threshold,
+                "ezymonit_proxmox_guest_snapshot_oldest_age_seconds",
+            )
+        },
+        // Réplication en échec : la copie de secours de la machine n'est plus à
+        // jour, la bascule restaurerait un état ancien.
+        Rule {
+            description: "A replication job is failing: the standby copy is stale.".to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "pve_replication_failed",
+                "Replication failed",
+                RuleKind::Threshold,
+                "ezymonit_proxmox_replication_job_error",
+            )
+        },
+        // Ceph : 0 OK, 1 WARN, 2 ERR. Les deux règles sont disjointes (`>= 2` et
+        // `== 1`) pour qu'un HEALTH_ERR ne déclenche pas aussi l'avertissement.
+        Rule {
+            description: "Ceph reports HEALTH_ERR: data may be unavailable.".to_string(),
+            operator: Operator::Ge,
+            threshold: 2.0,
+            for_duration: Duration::from_secs(2 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(1800)),
+            ..base(
+                "pve_ceph_health_error",
+                "Ceph health error",
+                RuleKind::Threshold,
+                "ezymonit_proxmox_ceph_health",
+            )
+        },
+        Rule {
+            description: "Ceph reports HEALTH_WARN for more than fifteen minutes.".to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(15 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "pve_ceph_health_warning",
+                "Ceph health warning",
+                RuleKind::Threshold,
+                "ezymonit_proxmox_ceph_health == 1",
+            )
+        },
+        // Mises à jour en attente : information, une fois par semaine suffit.
+        Rule {
+            description: "More than twenty package updates are pending on this node.".to_string(),
+            operator: Operator::Gt,
+            threshold: 20.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Info,
+            repeat_interval: Some(Duration::from_secs(7 * 24 * 3600)),
+            ..base(
+                "pve_updates_pending",
+                "Proxmox updates pending",
+                RuleKind::Threshold,
+                "ezymonit_proxmox_node_updates_pending",
+            )
+        },
+        // Certificat de l'interface d'un nœud : PVE renouvelle les siens lui-même,
+        // pas ceux importés à la main.
+        Rule {
+            description: "A node certificate expires in less than fourteen days.".to_string(),
+            operator: Operator::Lt,
+            threshold: 14.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Warning,
+            unit: "d".to_string(),
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "pve_certificate_expiring",
+                "Node certificate expiring",
+                RuleKind::Threshold,
+                "ezymonit_proxmox_node_certificate_expiry_days",
+            )
+        },
+        // Proxmox Backup Server : synchronisation vers un site distant en échec.
+        // La série vaut 1 (dernier passage réussi) ou 0 ; « < 1 » ne vise que les
+        // échecs, comme pour la vérification.
+        Rule {
+            description: "The last run of this PBS sync job failed.".to_string(),
+            operator: Operator::Lt,
+            threshold: 1.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "pbs_sync_failed",
+                "PBS sync job failed",
+                RuleKind::Threshold,
+                "ezymonit_pbs_sync_job_last_ok",
+            )
+        },
+        Rule {
+            description: "More than twenty package updates are pending on the backup server."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 20.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Info,
+            repeat_interval: Some(Duration::from_secs(7 * 24 * 3600)),
+            ..base(
+                "pbs_updates_pending",
+                "PBS updates pending",
+                RuleKind::Threshold,
+                "ezymonit_pbs_node_updates_pending",
+            )
+        },
     ]
 }
 
@@ -530,6 +832,23 @@ mod tests {
             "container_update_available",
             "plakar_backup_too_old",
             "plakar_backup_failed",
+            "synology_abb_task_failed",
+            "synology_abb_backup_too_old",
+            "synology_abb_task_disabled",
+            "pve_guest_stopped",
+            "pve_ha_resource_error",
+            "pve_cluster_no_quorum",
+            "pve_node_offline",
+            "pve_storage_almost_full",
+            "pve_backup_job_failed",
+            "pve_snapshot_old",
+            "pve_replication_failed",
+            "pve_ceph_health_error",
+            "pve_ceph_health_warning",
+            "pve_updates_pending",
+            "pve_certificate_expiring",
+            "pbs_sync_failed",
+            "pbs_updates_pending",
         ] {
             assert!(uids.contains(&attendu), "missing built-in rule: {attendu}");
         }
@@ -572,6 +891,25 @@ mod tests {
             "ezymonit_container_update_available",
             "ezymonit_backup_last_success_seconds",
             "ezymonit_backup_last_status",
+            // Synology Active Backup for Business (`collectors/synology/abb.rs`).
+            "ezymonit_abb_task_last_status",
+            "ezymonit_abb_task_last_success_seconds",
+            "ezymonit_abb_task_enabled",
+            // Proxmox VE, parité avec Pulse (`collectors/proxmox/{metrics,ha,
+            // snapshots,replication,ceph}.rs`).
+            "ezymonit_proxmox_guest_running",
+            "ezymonit_proxmox_ha_resource_error",
+            "ezymonit_proxmox_cluster_quorate",
+            "ezymonit_proxmox_node_up",
+            "ezymonit_proxmox_backup_job_last_ok",
+            "ezymonit_proxmox_guest_snapshot_oldest_age_seconds",
+            "ezymonit_proxmox_replication_job_error",
+            "ezymonit_proxmox_ceph_health",
+            "ezymonit_proxmox_node_updates_pending",
+            "ezymonit_proxmox_node_certificate_expiry_days",
+            // PBS, travaux de synchronisation et mises à jour (`collectors/pbs/jobs.rs`).
+            "ezymonit_pbs_sync_job_last_ok",
+            "ezymonit_pbs_node_updates_pending",
         ];
 
         for rule in builtin_rules() {

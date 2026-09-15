@@ -16,14 +16,14 @@ cannot write into another machine's series, even by forging its labels.
 
 | Family | Metrics | Labels |
 |---|---|---|
-| CPU | `cpu_usage_percent`, `cpu_core_usage_percent`, `cpu_count`, `load_average_1/5/15` | `core` |
+| CPU | `cpu_usage_percent`, `cpu_count`, `load_average_1/5/15`; `cpu_core_usage_percent` only with `cpu_per_core: true` | `core` |
 | Memory | `memory_total/used/available_bytes`, `memory_used_percent`, `swap_total/used_bytes`, `swap_used_percent` | |
 | Filesystems | `filesystem_total/used/free_bytes`, `filesystem_used_percent` | `mountpoint`, `device`, `fstype` |
 | Network (counters) | `if_octets_in/out`, `if_packets_in/out`, `if_errors_in/out` | `ifname` |
-| Disks (counters) | `disk_read_bytes`, `disk_written_bytes` | `device`, `mountpoint` |
+| Disks (counters) | `disk_read_bytes`, `disk_written_bytes`, one series per block device | `device` |
 | Host | `uptime_seconds`, `process_count` | |
 | Services | `service_up` (1 = running) | `service` |
-| Containers | `container_up`, `container_count`, `container_running_count` | `container`, `image` |
+| Containers | `container_up`, `container_count`, `container_running_count`, `container_series_skipped` (containers beyond `docker_max_containers`) | `container`, `image` |
 | Agent | `agent_collect_seconds`, `agent_buffered_samples`, `agent_dropped_samples` | |
 
 Counters are sent raw, so that a restart of the agent never produces a fake
@@ -123,6 +123,11 @@ a container without mounting a file:
 | `EZYMONIT_AGENT_TAGS` | `key=value`, comma-separated |
 | `EZYMONIT_AGENT_DOCKER` | `true` / `false` |
 | `EZYMONIT_AGENT_DOCKER_SOCKET` | Docker socket path |
+| `EZYMONIT_AGENT_DOCKER_MAX_CONTAINERS` | Containers detailed per host, default `200` (`0`: counts only) |
+| `EZYMONIT_AGENT_INTERFACES_IGNORE` | Interfaces left out, comma-separated names or regexes; default `^(veth|br-|docker|virbr|lo$|vEthernet)` |
+| `EZYMONIT_AGENT_INTERFACES_ONLY` | Interfaces to keep; when set, replaces the ignore list |
+| `EZYMONIT_AGENT_MOUNTS_IGNORE` | Mount points left out of filesystems and disk I/O; default skips `/var/lib/docker/`, `/run/…`, `/sys/`, `/proc/`, `/dev/`, `/snap/` |
+| `EZYMONIT_AGENT_CPU_PER_CORE` | `true` to also send one CPU series per core (default `false`) |
 | `EZYMONIT_AGENT_MAX_BUFFERED_SAMPLES` | Size of the catch-up buffer |
 | `EZYMONIT_AGENT_LOG` | `trace`, `debug`, `info`, `warn`, `error` |
 
@@ -164,11 +169,14 @@ tail -f /var/log/ezymonit-agent.log   # service log (OpenRC)
 | *Unreachable* although the agent runs | The token was revoked, or the pushes are rejected. Check `journalctl -u ezymonit-agent`: the error is logged there. |
 | Windows | The Windows service parts had not been exercised in the project's build image at the time of writing; report issues on GitHub. |
 
-## Docker
+## Docker containers
 
 When the agent can read the Docker socket (`docker: true`, the default, and a
-user in the `docker` group or root), every container becomes a handful of
-series, labelled `container` and `image` (the `name:tag` shown by `docker ps`):
+user in the `docker` group or root — `usermod -aG docker ezymonit`, then
+restart the agent), every container becomes a handful of series, labelled
+`container` and `image` (the `name:tag` shown by `docker ps`). If the device
+page says "No Docker on this machine" while Docker is installed, that is the
+first thing to check.
 
 | Metric | Meaning |
 |---|---|
@@ -217,50 +225,141 @@ same, but the result warns that the next `docker compose up` will recreate the
 container from the compose file. Containers whose name starts with `ezymonit`
 or `dumbmonit` are refused: the monitor never updates itself.
 
-The two switches set a per-container **policy**, evaluated by the server every
-minute:
+### Policies
+
+A per-container **policy** is evaluated by the server every minute:
 
 - **Restart if down** — a container reporting `container_up == 0` is restarted
   automatically, at most once every ten minutes.
 - **Auto-update in maintenance windows** — a container with an update available
   is updated automatically, but only while a maintenance window (silence)
-  covers the device, at most once every six hours. Policies default to pruning
-  the old image and to maintenance windows only.
+  covers the device, at most once every six hours. Schedule one on the Alerts
+  page, or silence the device from its page. Policies default to pruning the
+  old image and to maintenance windows only.
+
+Two places set them:
+
+- the **Docker strip** under the device header: "28 containers · 27 running ·
+  3 updates available · policies: 2 auto-restart, 0 auto-update", the last
+  action and its status, **Manage containers** (opens the list below) and
+  **Policies…**, a table of every container with the two switches and an
+  "Apply to all" row — the quickest way to turn auto-restart on for a whole
+  machine;
+- the switches inside each row of the **Containers** section, next to the
+  Restart and Update now buttons.
+
+Every switch saves on its own (`PUT /api/targets/<id>/containers/<name>/policy`);
+a failure only concerns that row and is shown next to it.
 
 Automatic actions show in "Recent actions" as requested by `policy`.
 
+### Safety rules
+
+- The agent only acts when `commands: true` (the default); set it to `false`
+  for a machine that must only be measured.
+- The agent fetches commands itself, with its enrollment token — nothing
+  connects to the machine. They expire after ten minutes and run one at a time;
+  the agent never pulls a different tag than the one the container already
+  uses.
+- An update that does not come back healthy is rolled back to the previous
+  container, and the old image is only removed once the new container runs.
+- Containers named `ezymonit*` or `dumbmonit*` are refused, by hand or by
+  policy: the monitor never acts on its own containers.
+- Compose-managed containers are updated, but the next `docker compose up`
+  recreates them from the compose file: bump the tag there too.
+
 ## Plakar backups
 
-The agent can watch [Plakar](https://plakar.io) klosets: list the repositories
-to read in the configuration and it runs `plakar at <kloset> ls` and `info`
-every ten minutes, in the background, and re-emits the last reading each cycle.
+The agent can watch [Plakar](https://plakar.io) klosets (repositories): every
+ten minutes, in the background, it runs `plakar at <kloset> ls` and `info` on
+each one and re-emits the last reading each cycle.
+
+### Discovery
+
+Nothing to configure: when `plakar_klosets` is empty, the agent finds the
+klosets itself, in this order, and reads each location only once:
+
+1. the agent's own configuration directory — `$XDG_CONFIG_HOME/plakar`, or
+   `~/.config/plakar` of the account it runs under (`plakar_home` when set);
+2. `/root/.config/plakar`;
+3. `/home/*/.config/plakar`, alphabetically.
+
+In each directory it reads `stores.yml` (or `stores.yaml`; the legacy
+`plakar.yml` is accepted too) and takes every entry of the `stores` map (also
+`repositories` and `klosets`) that has a `location`. Only the location is read:
+passphrases and rclone secrets that sit next to it are never kept nor logged.
+Each entry becomes the kloset `@<name>`, read with `plakar -configdir <dir> at
+@<name>`, so a kloset created by a user is read even when the agent runs as
+root. `~/.plakar` of every account is added when it exists (the default kloset
+of `plakar create`). Two accounts naming different klosets the same way are told
+apart as `@name` and `<user>:@name`.
+
+The result is logged once at `info` (and again only when it changes), and two
+gauges let the interface tell the cases apart: `backup_plakar_present` (0 when
+the binary is not on the machine) and `backup_klosets_found` (number of klosets
+read). The device page then says "Plakar is not installed on this machine",
+"Plakar is installed but no kloset was found", or lists the klosets.
+
+To watch a fixed list instead, name it — discovery is then skipped:
 
 ```yaml
 plakar_bin: /usr/bin/plakar          # default: "plakar" on PATH
-plakar_klosets:
+plakar_klosets:                      # explicit list: overrides discovery
   - /srv/backups/main
-  - /tmp/plakar-lab
-plakar_home: /root                   # optional, for a kloset at ~/.plakar
+  - "@diskext"                       # a named store of the agent's account
+plakar_home: /home/noe               # optional: HOME (and config dir) used when running plakar
 plakar_interval_secs: 600            # minimum 60
 ```
 
 | Variable | Effect |
 |---|---|
 | `EZYMONIT_AGENT_PLAKAR_BIN` | Path of the `plakar` binary |
-| `EZYMONIT_AGENT_PLAKAR_KLOSETS` | Klosets, comma-separated |
+| `EZYMONIT_AGENT_PLAKAR_KLOSETS` | Klosets, comma-separated (overrides discovery) |
 | `EZYMONIT_AGENT_PLAKAR_HOME` | Home directory used when running `plakar` |
+| `EZYMONIT_AGENT_PLAKAR_INTERVAL_SECS` | Seconds between two readings |
 | `EZYMONIT_AGENT_DOCKER_UPDATE_CHECK` | `true` / `false` — registry check for container updates |
 | `EZYMONIT_AGENT_COMMANDS` | `true` / `false` — accept actions from the server |
+
+An encrypted kloset needs its passphrase: put it in the store entry
+(`plakar store set <name> passphrase=…`, which is what `plakar store add` does)
+or export `PLAKAR_PASSPHRASE` in the agent's service environment. Without it
+the kloset reads as "Cannot be opened" (`backup_last_status = 0`).
+
+### Metrics and rules
 
 Metrics, labelled `kloset` and `source` (the directory that was backed up):
 `backup_last_success_seconds` (age of the newest snapshot),
 `backup_snapshot_count`, `backup_last_status` (1 when the newest snapshot has
-no error, 0 when it has errors or the kloset cannot be opened) and
-`backup_size_bytes{kloset}` (storage size of the repository).
+no error, 0 when it has errors or the kloset cannot be opened),
+`backup_size_bytes{kloset}` (storage size of the repository), plus
+`backup_plakar_present` and `backup_klosets_found` described above.
 
 Built-in rules: **Plakar backup too old** (advisory, no snapshot for more than
-two days) and **Plakar backup failed** (warning). The device page shows one line
-per source with the age of its last backup.
+two days) and **Plakar backup failed** (warning). The device page shows one
+block per kloset — age of the last backup, snapshot count, size, last status —
+and one line per source, with a "Backup too old" hint past two days.
+
+### Run a first backup
+
+With Plakar 1.1 installed on the machine (`plakar version`), as the user who
+will own the backups:
+
+```sh
+# 1. a kloset store, named so the agent finds it in ~/.config/plakar/stores.yml
+plakar store add diskext /mnt/diskext/plakar passphrase=…   # or any location Plakar accepts
+plakar at @diskext create                                   # add -plaintext to skip encryption
+
+# 2. a first backup, then check it
+plakar at @diskext backup /srv/photos
+plakar at @diskext ls
+```
+
+`plakar at <path> create` and `plakar at <path> backup <dir>` work the same with
+a plain directory instead of `@name`; `plakar create` without `at` uses
+`~/.plakar`, which the agent also finds. Schedule `plakar at @diskext backup
+/srv/photos` with cron or a systemd timer: the agent reports the age of the
+newest snapshot, and alerts when a day goes by without one — two days for the
+built-in rule.
 
 To try it locally with an unencrypted kloset:
 
@@ -271,5 +370,6 @@ plakar at /tmp/plakar-lab backup /tmp/plakar-lab-src
 plakar at /tmp/plakar-lab ls
 ```
 
-then add `plakar_klosets: ["/tmp/plakar-lab"]` to `agent.yaml` and check with
-`ezymonit-agent --dry-run` that `backup_*` samples appear.
+then add `plakar_klosets: ["/tmp/plakar-lab"]` to `agent.yaml` (a bare path
+outside a home is not discovered) and check with `ezymonit-agent --dry-run`
+that `backup_*` samples appear.

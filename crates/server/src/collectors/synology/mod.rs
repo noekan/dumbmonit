@@ -36,7 +36,10 @@
 //!   `administrators`. Sur DSM 7, la délégation « Surveillance du système »
 //!   (Panneau de configuration › Utilisateur et groupe › Délégation
 //!   d'administration) suffit pour l'utilisation, mais pas pour l'inventaire du
-//!   stockage.
+//!   stockage ;
+//! * `SYNO.ActiveBackup.*` — tâches Active Backup for Business — exige
+//!   `administrators` ou la délégation du paquet lui-même (Active Backup for
+//!   Business › Paramètres › Privilèges). Voir [`abb`].
 //!
 //! Autrement dit : un compte sans droits particuliers donne un NAS « vivant » mais
 //! aucune information sur ses disques, ce qui est justement l'essentiel.
@@ -49,7 +52,9 @@
 //! | `scheme` | `https` | `https` ou `http`. |
 //! | `port` | `5001` en HTTPS, `5000` en HTTP | Port de DSM, si l'adresse n'en précise pas. |
 //! | `request_timeout_seconds` | `15` | Délai par requête HTTP. |
+//! | `abb` | `true` | Interroge Active Backup for Business (voir [`abb`]). |
 
+mod abb;
 mod auth;
 mod backup;
 mod client;
@@ -106,8 +111,15 @@ const VERSION_BACKUP: u32 = 1;
 /// `SYNO.API.Auth` en fait partie : son chemin et sa version se découvrent comme
 /// les autres, ce qui évite de supposer `auth.cgi` ou `entry.cgi` selon la version
 /// de DSM.
-const WANTED_APIS: &[&str] =
-    &["SYNO.API.Auth", API_SYSTEM, API_UTILIZATION, API_STORAGE, API_BACKUP];
+const WANTED_APIS: &[&str] = &[
+    "SYNO.API.Auth",
+    API_SYSTEM,
+    API_UTILIZATION,
+    API_STORAGE,
+    API_BACKUP,
+    abb::API_TASK,
+    abb::API_LOG,
+];
 
 #[derive(Default)]
 pub struct SynologyCollector {
@@ -177,12 +189,11 @@ impl SynologyCollector {
         cache.entry(id).or_default().clone()
     }
 
-    async fn connect(&self, target: &Target) -> Result<DsmClient, ProbeError> {
-        let options = Options::from_target(target)?;
+    async fn connect(&self, target: &Target, options: &Options) -> Result<DsmClient, ProbeError> {
         let dsm = DsmClient::new(
             self.http(options.insecure_tls)?,
             options.base_url.clone(),
-            self.credentials(target, &options)?,
+            self.credentials(target, options)?,
             options.request_timeout,
         );
 
@@ -204,7 +215,8 @@ impl Collector for SynologyCollector {
 
     async fn probe(&self, target: &Target) -> Result<Vec<Sample>, ProbeError> {
         let started = std::time::Instant::now();
-        let dsm = self.connect(target).await?;
+        let options = Options::from_target(target)?;
+        let dsm = self.connect(target, &options).await?;
         let ts_ms = chrono::Utc::now().timestamp_millis();
 
         let mut outcome = Outcome::default();
@@ -263,6 +275,28 @@ impl Collector for SynologyCollector {
             );
         }
 
+        // Active Backup for Business, même logique : un paquet absent n'est pas une
+        // erreur. L'option `abb = false` permet de s'en passer même s'il est là.
+        if !options.abb {
+            debug!(
+                target_id = target.id,
+                "Active Backup for Business ignoré : option \"abb\" désactivée"
+            );
+        } else if !dsm.supports(abb::API_TASK) {
+            debug!(
+                target_id = target.id,
+                "Active Backup for Business absent du catalogue de ce NAS"
+            );
+        } else {
+            let now_s = chrono::Utc::now().timestamp();
+            let tasks = abb::collect(&dsm).await;
+            outcome.absorb(
+                target.id,
+                "tâches Active Backup for Business",
+                tasks.map(|tasks| abb::task_samples(&tasks, now_s, ts_ms)),
+            );
+        }
+
         let mut samples = outcome.samples;
         samples.push(Sample::new(
             "synology_scrape_errors",
@@ -280,7 +314,8 @@ impl Collector for SynologyCollector {
     }
 
     async fn discover(&self, target: &Target) -> Result<Option<String>, ProbeError> {
-        let dsm = self.connect(target).await?;
+        let options = Options::from_target(target)?;
+        let dsm = self.connect(target, &options).await?;
         let info: model::SystemInfo = dsm.call(API_SYSTEM, VERSION_SYSTEM, "info", &[]).await?;
 
         debug!(
@@ -497,7 +532,9 @@ mod tests {
     fn toutes_les_api_utilisees_sont_demandees_au_catalogue() {
         // Une API oubliée ici se traduirait par « API absente » à l'appel, alors
         // que le NAS la propose.
-        for api in [API_SYSTEM, API_UTILIZATION, API_STORAGE, API_BACKUP] {
+        for api in
+            [API_SYSTEM, API_UTILIZATION, API_STORAGE, API_BACKUP, abb::API_TASK, abb::API_LOG]
+        {
             assert!(WANTED_APIS.contains(&api), "{api} manque à la requête SYNO.API.Info");
         }
         assert!(WANTED_APIS.contains(&"SYNO.API.Auth"));

@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::alerting::notify_policy::ChannelPolicy;
 use crate::notify::error::NotifyError;
 use crate::notify::secret::SecretString;
 
@@ -167,6 +168,9 @@ pub struct ChannelSummary {
     pub has_secret: bool,
     pub last_error: Option<String>,
     pub last_sent_at: Option<String>,
+    /// Sévérité minimale, résolutions, délai minimal, heures calmes.
+    #[serde(default)]
+    pub policy: ChannelPolicy,
 }
 
 #[cfg(test)]

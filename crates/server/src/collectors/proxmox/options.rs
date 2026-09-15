@@ -26,6 +26,12 @@ const DEFAULT_BACKUP_LOOKBACK_DAYS: u32 = 31;
 /// Nombre maximal de tâches ramenées par nœud.
 const TASK_LIMIT: u32 = 500;
 
+/// Nombre d'invités dont les instantanés sont inventoriés à chaque collecte.
+///
+/// Un appel par invité : au-delà de deux cents machines, on préfère en sauter
+/// quelques-unes — et le dire — plutôt que d'allonger chaque collecte.
+const DEFAULT_MAX_SNAPSHOT_GUESTS: u32 = 200;
+
 #[derive(Debug, Clone)]
 pub struct Options {
     /// Racine de l'API, sans barre oblique finale : `https://pve.lan:8006`.
@@ -42,6 +48,22 @@ pub struct Options {
     pub scan_backup_storage: bool,
     /// Restriction à un sous-ensemble de nœuds. Vide signifie « tous ».
     pub nodes: Vec<String>,
+    /// État de la haute disponibilité (`/cluster/ha/status/current`).
+    pub ha: bool,
+    /// Travaux de sauvegarde planifiés et invités non couverts (`/cluster/backup`).
+    pub backup_jobs: bool,
+    /// Inventaire des instantanés, un appel par invité.
+    pub scan_snapshots: bool,
+    /// Plafond d'invités inventoriés pour les instantanés, par collecte.
+    pub max_snapshot_guests: u32,
+    /// État des travaux de réplication (`/nodes/{node}/replication`).
+    pub replication: bool,
+    /// Santé Ceph (`/cluster/ceph/status`), silencieux si Ceph n'est pas installé.
+    pub ceph: bool,
+    /// Mises à jour en attente (`/nodes/{node}/apt/update`), silencieux sans droit.
+    pub updates: bool,
+    /// Expiration des certificats des nœuds (`/nodes/{node}/certificates/info`).
+    pub certificates: bool,
 }
 
 impl Options {
@@ -68,6 +90,14 @@ impl Options {
                         .collect()
                 })
                 .unwrap_or_default(),
+            ha: parse_bool_or(tag(target, "ha"), true)?,
+            backup_jobs: parse_bool_or(tag(target, "backup_jobs"), true)?,
+            scan_snapshots: parse_bool_or(tag(target, "scan_snapshots"), true)?,
+            max_snapshot_guests: parse_max_snapshot_guests(tag(target, "max_snapshot_guests"))?,
+            replication: parse_bool_or(tag(target, "replication"), true)?,
+            ceph: parse_bool_or(tag(target, "ceph"), true)?,
+            updates: parse_bool_or(tag(target, "updates"), true)?,
+            certificates: parse_bool_or(tag(target, "certificates"), true)?,
         })
     }
 
@@ -139,6 +169,21 @@ fn parse_lookback(value: Option<&str>) -> Result<i64, ProbeError> {
     Ok(i64::from(days) * 86_400)
 }
 
+fn parse_max_snapshot_guests(value: Option<&str>) -> Result<u32, ProbeError> {
+    let count = match value {
+        None => DEFAULT_MAX_SNAPSHOT_GUESTS,
+        Some(raw) => raw
+            .parse()
+            .map_err(|_| ProbeError::Config(format!("Invalid number of guests: \"{raw}\"")))?,
+    };
+    if !(1..=10_000).contains(&count) {
+        return Err(ProbeError::Config(
+            "max_snapshot_guests must be between 1 and 10000".to_string(),
+        ));
+    }
+    Ok(count)
+}
+
 /// Compose la racine de l'API à partir de l'adresse saisie par l'utilisateur.
 ///
 /// L'adresse est un champ libre : on y trouve aussi bien `10.0.0.1` que
@@ -205,6 +250,46 @@ mod tests {
         assert!(options.scan_backup_storage);
         assert_eq!(options.backup_lookback_seconds, 31 * 86_400);
         assert!(options.nodes.is_empty());
+        // Les inventaires complémentaires sont tous actifs : chacun sait se taire
+        // quand la fonctionnalité ou le droit manque.
+        assert!(options.ha);
+        assert!(options.backup_jobs);
+        assert!(options.scan_snapshots);
+        assert_eq!(options.max_snapshot_guests, 200);
+        assert!(options.replication);
+        assert!(options.ceph);
+        assert!(options.updates);
+        assert!(options.certificates);
+    }
+
+    /// Lecture d'un drapeau d'inventaire, pour parcourir les sept en boucle.
+    type Lecture = fn(&Options) -> bool;
+
+    #[test]
+    fn chaque_inventaire_complementaire_se_coupe_par_etiquette() {
+        let cas: [(&str, Lecture); 7] = [
+            ("ha", |o| o.ha),
+            ("backup_jobs", |o| o.backup_jobs),
+            ("scan_snapshots", |o| o.scan_snapshots),
+            ("replication", |o| o.replication),
+            ("ceph", |o| o.ceph),
+            ("updates", |o| o.updates),
+            ("certificates", |o| o.certificates),
+        ];
+        for (etiquette, lire) in cas {
+            let options = Options::from_target(&cible(&[(etiquette, "false")])).unwrap();
+            assert!(!lire(&options), "« {etiquette} = false » aurait dû couper l'inventaire");
+            let error = Options::from_target(&cible(&[(etiquette, "jamais")])).unwrap_err();
+            assert!(matches!(error, ProbeError::Config(_)));
+        }
+    }
+
+    #[test]
+    fn le_plafond_dinstantanes_est_borne() {
+        let options = Options::from_target(&cible(&[("max_snapshot_guests", "50")])).unwrap();
+        assert_eq!(options.max_snapshot_guests, 50);
+        assert!(Options::from_target(&cible(&[("max_snapshot_guests", "0")])).is_err());
+        assert!(Options::from_target(&cible(&[("max_snapshot_guests", "abc")])).is_err());
     }
 
     #[test]

@@ -70,6 +70,11 @@ conteneur sans monter de fichier :
 | `EZYMONIT_AGENT_TAGS` | `cle=valeur`, séparés par des virgules |
 | `EZYMONIT_AGENT_DOCKER` | `true` / `false` |
 | `EZYMONIT_AGENT_DOCKER_SOCKET` | Chemin du socket Docker |
+| `EZYMONIT_AGENT_DOCKER_MAX_CONTAINERS` | Conteneurs détaillés par hôte, `200` par défaut (`0` : décomptes seuls) |
+| `EZYMONIT_AGENT_INTERFACES_IGNORE` | Interfaces ignorées (noms ou regex, séparés par des virgules) ; par défaut `^(veth|br-|docker|virbr|lo$|vEthernet)` |
+| `EZYMONIT_AGENT_INTERFACES_ONLY` | Interfaces à garder ; remplace la liste d'exclusion quand elle est définie |
+| `EZYMONIT_AGENT_MOUNTS_IGNORE` | Points de montage exclus des systèmes de fichiers et des E/S disque |
+| `EZYMONIT_AGENT_CPU_PER_CORE` | `true` pour envoyer aussi une série par cœur (`false` par défaut) |
 | `EZYMONIT_AGENT_MAX_BUFFERED_SAMPLES` | Taille du tampon de reprise |
 | `EZYMONIT_AGENT_LOG` | `trace`, `debug`, `info`, `warn`, `error` |
 
@@ -92,7 +97,7 @@ les messages d'erreur du client HTTP.
 | Mémoire | `memory_{total,used,available}_bytes`, `memory_used_percent`, `swap_{total,used}_bytes`, `swap_used_percent` | — |
 | Systèmes de fichiers | `filesystem_{total,used,free}_bytes`, `filesystem_used_percent` | `mountpoint`, `device`, `fstype` |
 | Réseau (compteurs) | `if_octets_{in,out}`, `if_packets_{in,out}`, `if_errors_{in,out}` | `ifname` |
-| Disques (compteurs) | `disk_read_bytes`, `disk_written_bytes` | `device`, `mountpoint` |
+| Disques (compteurs) | `disk_read_bytes`, `disk_written_bytes`, une série par périphérique | `device` |
 | Hôte | `uptime_seconds`, `process_count` | — |
 | Services | `service_up` (1 = en marche) | `service` |
 | Conteneurs | `container_up`, `container_count`, `container_running_count` | `container`, `image` |

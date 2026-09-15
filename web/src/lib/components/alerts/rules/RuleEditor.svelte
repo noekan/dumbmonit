@@ -18,12 +18,14 @@
 		REPEAT_OPTIONS,
 		SEVERITY_OPTIONS,
 		anomalySummary,
+		clearLabel,
 		fromSeverityWord,
 		payloadFrom,
 		toSeverityWord,
 		withCurrent,
 		type SeverityWord
 	} from './options';
+	import OverridesEditor from './OverridesEditor.svelte';
 
 	interface Props {
 		rule: AlertRule;
@@ -53,6 +55,8 @@
 	let description = $state(initial.description);
 	let query = $state(initial.query);
 	let threshold = $state(String(initial.threshold));
+	// Empty string: no hysteresis. The field is a text input so "no value" stays distinct from 0.
+	let clearThreshold = $state(initial.clear_threshold === null ? '' : String(initial.clear_threshold));
 	let operator = $state<RuleOperator>(initial.operator);
 	let forSecs = $state(initial.for_secs);
 	let severity = $state<SeverityWord>(toSeverityWord(initial.severity));
@@ -101,6 +105,21 @@
 			error = 'The threshold must be a number.';
 			return;
 		}
+		let clearValue: number | null = null;
+		if (!anomaly && clearThreshold.trim() !== '') {
+			clearValue = Number(clearThreshold);
+			if (!Number.isFinite(clearValue)) {
+				error = 'The clear threshold must be a number, or left empty.';
+				return;
+			}
+			const firesAbove = operator === '>' || operator === '>=';
+			if (firesAbove ? clearValue >= thresholdValue : clearValue <= thresholdValue) {
+				error = firesAbove
+					? 'The clear threshold must be below the threshold: fire above one, clear under the other.'
+					: 'The clear threshold must be above the threshold: fire below one, clear over the other.';
+				return;
+			}
+		}
 		saving = true;
 		try {
 			const saved = await updateAlertRule(rule.id, {
@@ -110,6 +129,7 @@
 				query: rule.builtin ? rule.query : trimmedQuery,
 				operator,
 				threshold: thresholdValue,
+				clear_threshold: clearValue,
 				for_secs: forSecs,
 				severity: fromSeverityWord(severity),
 				channels: selected,
@@ -192,6 +212,27 @@
 				</select>
 			</Field>
 		</div>
+		<div class="grid gap-4 sm:grid-cols-3">
+			<Field
+				label={clearLabel(operator)}
+				for={`${prefix}-clear`}
+				help="Optional. Once firing, the alert only clears past this value, so a reading hovering at the threshold does not flap."
+			>
+				<div class="relative">
+					<input
+						id={`${prefix}-clear`}
+						type="number"
+						step="any"
+						class={`input tnum ${rule.unit ? 'pr-12' : ''}`}
+						bind:value={clearThreshold}
+						placeholder="None"
+					/>
+					{#if rule.unit}
+						<span class="label-tape pointer-events-none absolute top-1/2 right-3 -translate-y-1/2" aria-hidden="true">{rule.unit}</span>
+					{/if}
+				</div>
+			</Field>
+		</div>
 	{/if}
 
 	<div class="grid gap-4 sm:grid-cols-3">
@@ -264,6 +305,10 @@
 			</p>
 		{/if}
 	</fieldset>
+
+	{#if !anomaly}
+		<OverridesEditor {rule} />
+	{/if}
 
 	{#if error}
 		<p class="text-[0.8125rem] font-medium text-warning-ink" role="alert">

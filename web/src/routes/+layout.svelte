@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { alertsStore } from '$lib/stores/alerts.svelte';
-	import { auth, safeDestination, isPublicRoute } from '$lib/stores/auth.svelte';
+	import { auth, safeDestination, isPublicRoute, isStandaloneRoute } from '$lib/stores/auth.svelte';
 	import NavBar from '$lib/components/NavBar.svelte';
 	import Logo from '$lib/components/Logo.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
@@ -29,6 +29,8 @@
 	$effect(() => {
 		if (!auth.checked) return;
 		const path = page.url.pathname;
+		// A public status page is the same for everyone: no redirect either way.
+		if (isStandaloneRoute(path)) return;
 
 		if (!auth.available) {
 			if (isPublicRoute(path)) void goto('/', { replaceState: true });

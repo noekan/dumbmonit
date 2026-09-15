@@ -11,6 +11,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use crate::alerting::group::{AlertGroup, GroupItem, NotifyReason};
 use crate::alerting::machine::EffectivePhase;
 use crate::alerting::model::Severity;
+use crate::alerting::notify_policy::{DIGEST_MAX_LINES, Digest, Hold};
 
 /// Message prêt à partir, indépendant du canal.
 #[derive(Debug, Clone, PartialEq)]
@@ -42,6 +43,9 @@ pub struct Message {
     pub operator: String,
     /// Nombre d'alertes réunies dans ce message.
     pub count: usize,
+    /// Lien vers l'équipement (ou l'instance) dans DumbMonit, quand une URL
+    /// publique est connue. Déjà inclus dans `text` et `markdown`.
+    pub link: Option<String>,
 }
 
 /// Variables utilisables dans un gabarit de canal personnalisé, avec leur
@@ -121,10 +125,29 @@ impl Message {
             ("color", format!("{:06X}", self.color())),
             ("color_hex", format!("#{:06X}", self.color())),
             ("emoji", self.emoji().to_string()),
-            ("link", String::new()),
+            ("link", self.link.clone().unwrap_or_default()),
             ("source", "ezymonit".to_string()),
             ("token", String::new()),
         ])
+    }
+
+    /// Ajoute le lien vers l'équipement, en fin de corps et dans `link`.
+    ///
+    /// Le lien est du texte comme le reste : les services qui n'affichent que le
+    /// corps brut (ntfy, courriel) le montrent aussi, et un lien cliquable dans
+    /// un message qui dit « le NAS va mal » est ce qu'on attend d'un téléphone.
+    pub fn attach_link(&mut self, base_url: &str) {
+        let base = base_url.trim_end_matches('/');
+        let link = match self.target_id {
+            Some(id) => format!("{base}/targets/{id}"),
+            None => base.to_string(),
+        };
+        if !self.text.is_empty() {
+            self.text.push('\n');
+        }
+        self.text.push_str(&link);
+        self.markdown.push_str(&format!("\n[Open in DumbMonit]({link})"));
+        self.link = Some(link);
     }
 
     /// Clé identifiant le fil de discussion d'un équipement.
@@ -205,6 +228,7 @@ impl Message {
 fn glyph(item: &GroupItem) -> &'static str {
     match item.reason {
         NotifyReason::Resolved => "✅",
+        NotifyReason::Flapping => "🔁",
         _ => match item.severity {
             Severity::Info => "ℹ️",
             Severity::Warning => "⚠️",
@@ -283,6 +307,9 @@ fn line(item: &GroupItem, now: DateTime<Utc>) -> String {
     if item.phase == EffectivePhase::Suppressed {
         line.push_str(" — suppressed");
     }
+    if let Some(note) = &item.note {
+        line.push_str(&format!(" — {note}"));
+    }
     line
 }
 
@@ -328,7 +355,157 @@ pub fn render(group: &AlertGroup) -> Message {
         unit: head.map(|item| item.unit.clone()).unwrap_or_default(),
         operator: head.map(|item| item.operator.clone()).unwrap_or_default(),
         count,
+        link: None,
     }
+}
+
+/// Rend un résumé : un message par canal, plusieurs équipements dedans.
+///
+/// Un résumé d'un seul équipement, sans mention ni clôture d'heures calmes,
+/// est rendu exactement comme un groupe simple : le format habituel reste la
+/// norme, le résumé n'apparaît que quand il y a réellement plusieurs choses à
+/// dire. `public_url` ajoute un lien par équipement.
+pub fn render_digest(digest: &Digest, public_url: Option<&str>) -> Message {
+    if digest.groups.len() == 1 && digest.resolved_meanwhile.is_empty() && digest.hold.is_none() {
+        let mut message = render(&digest.groups[0]);
+        if let Some(base) = public_url {
+            message.attach_link(base);
+        }
+        return message;
+    }
+
+    let firing: usize = digest
+        .groups
+        .iter()
+        .flat_map(|group| group.items.iter())
+        .filter(|item| item.reason != NotifyReason::Resolved)
+        .count();
+    let resolved: usize = digest.item_count() - firing + digest.resolved_meanwhile.len();
+    let devices = digest.groups.len();
+    let all_resolved = firing == 0;
+
+    let mut summary = Vec::new();
+    if firing > 0 {
+        summary.push(format!("{firing} alert{}", if firing > 1 { "s" } else { "" }));
+    }
+    if resolved > 0 {
+        summary.push(format!("{resolved} resolved"));
+    }
+    let scope = match devices {
+        0 => String::new(),
+        1 => format!(" on {}", digest.groups[0].target_name),
+        n => format!(" on {n} devices"),
+    };
+    let mut title = format!("{}{scope}", summary.join(", "));
+    if digest.hold == Some(Hold::Quiet) {
+        title = format!("Quiet hours over — {title}");
+    }
+
+    // Les lignes sont plafonnées par message, pas par équipement : un résumé de
+    // trente lignes après une nuit calme n'apprend rien de plus que douze.
+    let mut text_lines: Vec<String> = Vec::new();
+    let mut md_lines: Vec<String> = Vec::new();
+    let mut shown = 0usize;
+    let mut omitted = 0usize;
+    for group in &digest.groups {
+        let name = if devices > 1 || digest.hold.is_some() {
+            Some(group.target_name.clone())
+        } else {
+            None
+        };
+        let mut wrote_header = false;
+        for item in &group.items {
+            if shown >= DIGEST_MAX_LINES {
+                omitted += 1;
+                continue;
+            }
+            if !wrote_header && let Some(name) = &name {
+                text_lines.push(format!("{name}:"));
+                md_lines.push(format!("**{name}**"));
+                wrote_header = true;
+            }
+            let rendered = line(item, digest.at);
+            text_lines.push(if name.is_some() {
+                format!("  {rendered}")
+            } else {
+                rendered.clone()
+            });
+            md_lines.push(format!("• {rendered}"));
+            shown += 1;
+        }
+        if wrote_header
+            && let Some(base) = public_url
+            && let Some(id) = group.target_id
+        {
+            let link = format!("{}/targets/{id}", base.trim_end_matches('/'));
+            text_lines.push(format!("  {link}"));
+            md_lines.push(format!("  [Open {}]({link})", group.target_name));
+        }
+    }
+    if omitted > 0 {
+        let more = format!("…and {omitted} more alert{}", if omitted > 1 { "s" } else { "" });
+        text_lines.push(more.clone());
+        md_lines.push(more);
+    }
+    if !digest.resolved_meanwhile.is_empty() {
+        let names: Vec<String> = digest
+            .resolved_meanwhile
+            .iter()
+            .map(|(target, item)| format!("{} ({target})", item.rule_name))
+            .collect();
+        let label = match digest.hold {
+            Some(Hold::Quiet) => "Resolved during quiet hours",
+            _ => "Resolved before this was sent",
+        };
+        text_lines.push(format!("{label}: {}", names.join(", ")));
+        md_lines.push(format!("_{label}: {}_", names.join(", ")));
+    }
+
+    let text = text_lines.join("\n");
+    let markdown = format!("**{title}**\n{}", md_lines.join("\n"));
+    // La sévérité du message est celle de la ligne la plus grave, pas celle que
+    // porte l'en-tête du groupe : c'est ce que l'utilisateur lit.
+    let severity = digest
+        .groups
+        .iter()
+        .flat_map(|group| group.items.iter().map(|item| item.severity))
+        .max()
+        .unwrap_or(Severity::Info);
+    let head = digest.groups.first().and_then(|group| group.items.first());
+    let (target_name, target_id) = match devices {
+        1 => (digest.groups[0].target_name.clone(), digest.groups[0].target_id),
+        0 => ("DumbMonit".to_string(), None),
+        n => (format!("{n} devices"), None),
+    };
+
+    let mut message = Message {
+        title,
+        text,
+        markdown,
+        severity,
+        resolved: all_resolved,
+        target_name,
+        target_id,
+        at: digest.at,
+        rule_name: head.map(|item| item.rule_name.clone()).unwrap_or_default(),
+        fingerprint: head.map(|item| item.fingerprint.clone()).unwrap_or_default(),
+        value: head.and_then(|item| item.value),
+        threshold: head.map(|item| item.threshold),
+        unit: head.map(|item| item.unit.clone()).unwrap_or_default(),
+        operator: head.map(|item| item.operator.clone()).unwrap_or_default(),
+        count: digest.item_count() + digest.resolved_meanwhile.len(),
+        link: None,
+    };
+    // Le lien global n'est ajouté que si aucun lien par équipement ne l'a été.
+    if let Some(base) = public_url
+        && devices != 1
+    {
+        message.link = Some(base.trim_end_matches('/').to_string());
+    } else if let Some(base) = public_url {
+        message.link =
+            message.target_id.map(|id| format!("{}/targets/{id}", base.trim_end_matches('/')));
+    }
+    message
 }
 
 /// Message envoyé par le bouton « Envoyer un message de test ».
@@ -359,6 +536,7 @@ pub fn test_message(channel_name: &str) -> Message {
         unit: String::new(),
         operator: String::new(),
         count: 1,
+        link: None,
     }
 }
 
@@ -387,6 +565,7 @@ pub fn sample_message(resolved: bool) -> Message {
         unit: "%".to_string(),
         operator: ">".to_string(),
         count: 1,
+        link: None,
     }
 }
 
@@ -413,6 +592,7 @@ mod tests {
             series_key: "s".to_string(),
             since: Some(at(0)),
             phase: EffectivePhase::Firing,
+            note: None,
         }
     }
 
@@ -569,5 +749,95 @@ mod tests {
         assert!(message.title.contains("Home Discord"));
         assert!(message.text.contains("No alert"));
         assert_eq!(message.severity, Severity::Info);
+    }
+
+    fn digest(groups: Vec<AlertGroup>) -> Digest {
+        Digest { groups, resolved_meanwhile: Vec::new(), hold: None, at: at(300) }
+    }
+
+    fn named_group(target: i64, name: &str, items: Vec<GroupItem>) -> AlertGroup {
+        let mut group = group(items);
+        group.target_id = Some(target);
+        group.target_name = name.to_string();
+        group
+    }
+
+    #[test]
+    fn un_resume_d_un_seul_equipement_garde_le_format_habituel() {
+        let d = digest(vec![named_group(
+            1,
+            "nas",
+            vec![item("Disk full", NotifyReason::Firing, Severity::Warning)],
+        )]);
+        let message = render_digest(&d, Some("https://monit.lan/"));
+        assert_eq!(message.title, "nas — Disk full");
+        assert_eq!(message.link.as_deref(), Some("https://monit.lan/targets/1"));
+        assert!(message.text.ends_with("https://monit.lan/targets/1"), "{}", message.text);
+    }
+
+    #[test]
+    fn un_resume_multi_equipements_compte_et_sectionne() {
+        let d = digest(vec![
+            named_group(
+                1,
+                "nas",
+                vec![
+                    item("Disk full", NotifyReason::Firing, Severity::Warning),
+                    item("Backup old", NotifyReason::Resolved, Severity::Warning),
+                ],
+            ),
+            named_group(2, "router", vec![item("CPU", NotifyReason::Firing, Severity::Critical)]),
+        ]);
+        let message = render_digest(&d, Some("https://monit.lan"));
+        assert_eq!(message.title, "2 alerts, 1 resolved on 2 devices");
+        assert!(message.text.contains("nas:\n"), "{}", message.text);
+        assert!(message.text.contains("router:\n"), "{}", message.text);
+        assert!(message.text.contains("https://monit.lan/targets/2"));
+        assert_eq!(message.count, 3);
+        assert!(!message.resolved);
+        assert_eq!(message.severity, Severity::Critical);
+        assert_eq!(message.target_name, "2 devices");
+    }
+
+    #[test]
+    fn un_resume_trop_long_est_tronque_avec_un_compte() {
+        let items: Vec<GroupItem> = (0..DIGEST_MAX_LINES + 3)
+            .map(|i| item(&format!("rule {i:02}"), NotifyReason::Firing, Severity::Warning))
+            .collect();
+        let d = digest(vec![named_group(1, "nas", items), named_group(2, "b", vec![])]);
+        let message = render_digest(&d, None);
+        assert!(message.text.contains("…and 3 more alerts"), "{}", message.text);
+    }
+
+    #[test]
+    fn la_fin_des_heures_calmes_mentionne_ce_qui_s_est_resolu_entre_temps() {
+        let mut d = digest(vec![named_group(
+            1,
+            "nas",
+            vec![item("Disk full", NotifyReason::Firing, Severity::Warning)],
+        )]);
+        d.hold = Some(Hold::Quiet);
+        d.resolved_meanwhile =
+            vec![("router".to_string(), item("CPU", NotifyReason::Resolved, Severity::Warning))];
+        let message = render_digest(&d, None);
+        assert!(
+            message.title.starts_with("Quiet hours over — 1 alert, 1 resolved on nas"),
+            "{}",
+            message.title
+        );
+        assert!(
+            message.text.contains("Resolved during quiet hours: CPU (router)"),
+            "{}",
+            message.text
+        );
+    }
+
+    #[test]
+    fn une_ligne_de_battement_porte_sa_note() {
+        let mut flapping = item("Service", NotifyReason::Flapping, Severity::Warning);
+        flapping.note = Some("flapping: 4 changes in 30 min".to_string());
+        let message = render(&group(vec![flapping]));
+        assert!(message.text.starts_with("🔁 Service"), "{}", message.text);
+        assert!(message.text.contains("— flapping: 4 changes in 30 min"));
     }
 }

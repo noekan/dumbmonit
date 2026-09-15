@@ -7,7 +7,7 @@
 
 mod writer;
 
-pub use writer::{SampleSink, spawn_writer};
+pub use writer::{DEFAULT_FLUSH_SIZE, SampleSink, spawn_writer, spawn_writer_with};
 
 use anyhow::{Context, Result, bail};
 use ezymonit_proto::Sample;

@@ -2,7 +2,9 @@
 //!
 //! Interroge l'API REST d'un serveur de sauvegarde PBS et en tire l'état du
 //! nœud, le remplissage des datastores, l'ancienneté et l'état de vérification
-//! de la dernière sauvegarde de chaque machine, et les tâches en échec.
+//! de la dernière sauvegarde de chaque machine, les tâches en échec, l'état des
+//! travaux planifiés (synchronisation, vérification, purge) et les mises à jour
+//! en attente.
 //!
 //! # Principes
 //!
@@ -19,6 +21,9 @@
 //! * **La cardinalité est bornée.** Un PBS mutualisé héberge vite des milliers de
 //!   groupes de sauvegarde ; `max_groups` plafonne le nombre de séries, et les
 //!   appels par datastore sont limités à quelques-uns en parallèle.
+//! * **Un privilège facultatif ne manque pas bruyamment.** Les listes de travaux
+//!   et les mises à jour demandent des droits que le minimum documenté ne donne
+//!   pas ; un 403 sur ces appels ne produit ni série, ni erreur de collecte.
 //!
 //! # Réglages, portés par les étiquettes de la cible
 //!
@@ -30,34 +35,38 @@
 //! | `task_lookback_hours` | `24` | Fenêtre d'examen des tâches. |
 //! | `datastores` | tous | Restreint la collecte à une liste de datastores. |
 //! | `max_groups` | `500` | Plafond de groupes de sauvegarde produisant des séries. |
+//! | `jobs` | `true` | Interroge les travaux planifiés (`/admin/sync`, `/admin/verify`, `/admin/prune`). |
+//! | `updates` | `true` | Interroge les mises à jour de paquets en attente. |
 
 mod auth;
 mod backup;
 mod client;
+mod jobs;
 mod metrics;
 mod model;
 mod options;
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use ezymonit_proto::{Collector, Credential, MetricKind, ProbeError, Sample, Target, TargetId};
+use serde::de::DeserializeOwned;
 use tokio::sync::Semaphore;
 use tracing::{debug, warn};
 
 use auth::{AuthMode, Ticket};
 use backup::{GroupKey, GroupSummary};
 use client::PbsClient;
-use model::{DatastoreUsage, GcStatus, NamespaceEntry, NodeStatus, SnapshotEntry, TaskEntry};
+use jobs::JobKind;
+use model::{
+    AptUpdate, DatastoreUsage, GcStatus, JobEntry, NamespaceEntry, NodeStatus, SnapshotEntry,
+    TaskEntry,
+};
 use options::Options;
 
 /// Identifiant de profil renvoyé par la découverte.
 const PROFILE_ID: &str = "proxmox-backup-server";
-
-/// Délai d'établissement de la connexion TCP + TLS.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Nombre maximal d'appels simultanés vers les datastores.
 ///
@@ -68,10 +77,6 @@ const DATASTORE_CONCURRENCY: usize = 4;
 
 #[derive(Default)]
 pub struct PbsCollector {
-    /// Deux clients seulement, construits à la demande : `reqwest` mutualise le
-    /// pool de connexions, et la politique TLS ne peut pas être changée par requête.
-    http_verified: OnceLock<reqwest::Client>,
-    http_unverified: OnceLock<reqwest::Client>,
     /// Tickets en cache, un par cible, pour ne pas ouvrir une session — que PBS
     /// journalise — à chaque interrogation.
     tickets: Mutex<HashMap<TargetId, Arc<tokio::sync::Mutex<Option<Ticket>>>>>,
@@ -80,18 +85,6 @@ pub struct PbsCollector {
 impl PbsCollector {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    fn http(&self, insecure_tls: bool) -> Result<reqwest::Client, ProbeError> {
-        let cell = if insecure_tls { &self.http_unverified } else { &self.http_verified };
-        if let Some(existing) = cell.get() {
-            return Ok(existing.clone());
-        }
-        let built = client::build_http_client(insecure_tls, CONNECT_TIMEOUT)?;
-        // Une course entre deux cibles construirait deux clients ; le perdant est
-        // simplement jeté, ce qui est sans conséquence.
-        let _ = cell.set(built.clone());
-        Ok(built)
     }
 
     fn auth_mode(&self, target: &Target) -> Result<AuthMode, ProbeError> {
@@ -116,7 +109,7 @@ impl PbsCollector {
 
     fn client(&self, target: &Target, options: &Options) -> Result<PbsClient, ProbeError> {
         Ok(PbsClient::new(
-            self.http(options.insecure_tls)?,
+            crate::collectors::http::client(options.insecure_tls)?,
             options.base_url.clone(),
             self.auth_mode(target)?,
             options.request_timeout,
@@ -149,12 +142,16 @@ impl Collector for PbsCollector {
             ("limit", options.task_limit.to_string()),
             ("since", (now_s - options.task_lookback_seconds).to_string()),
         ];
-        // Les trois inventaires sont indépendants : les enchaîner tripleraient le
-        // temps passé sur un serveur lent.
-        let (node, usage, tasks) = futures::join!(
+        // Les inventaires sont indépendants : les enchaîner multiplierait
+        // d'autant le temps passé sur un serveur lent.
+        let (node, usage, tasks, sync_jobs, verify_jobs, prune_jobs, updates) = futures::join!(
             pbs.get::<NodeStatus>("/nodes/localhost/status", &[]),
             pbs.get::<Vec<DatastoreUsage>>("/status/datastore-usage", &[]),
             pbs.get::<Vec<TaskEntry>>("/nodes/localhost/tasks", &tasks_query),
+            optional_list::<JobEntry>(&pbs, options.jobs, JobKind::Sync.path()),
+            optional_list::<JobEntry>(&pbs, options.jobs, JobKind::Verify.path()),
+            optional_list::<JobEntry>(&pbs, options.jobs, JobKind::Prune.path()),
+            optional_list::<AptUpdate>(&pbs, options.updates, "/nodes/localhost/apt/update"),
         );
 
         match node {
@@ -175,11 +172,25 @@ impl Collector for PbsCollector {
         };
         samples.extend(backup::task_samples(&digest, ts_ms));
 
+        for (kind, outcome) in [
+            (JobKind::Sync, sync_jobs),
+            (JobKind::Verify, verify_jobs),
+            (JobKind::Prune, prune_jobs),
+        ] {
+            if let Some(list) = settle(outcome, &mut errors, target.id, kind.path()) {
+                samples.extend(jobs::job_samples(kind, &list, now_s, ts_ms));
+            }
+        }
+        if let Some(list) = settle(updates, &mut errors, target.id, "/nodes/localhost/apt/update") {
+            samples.extend(jobs::updates_samples(&list, ts_ms));
+        }
+
         let mut gc_from_status = BTreeMap::new();
         match usage {
             Ok(usages) => {
                 let permits = Semaphore::new(DATASTORE_CONCURRENCY);
                 let mut groups = BTreeMap::new();
+                let mut listed = Vec::new();
 
                 let selected: Vec<&DatastoreUsage> =
                     usages.iter().filter(|u| options.wants_datastore(&u.store)).collect();
@@ -201,12 +212,16 @@ impl Collector for PbsCollector {
                     errors += outcome.errors;
                     samples.extend(outcome.samples);
                     groups.extend(outcome.groups);
+                    listed.extend(
+                        outcome.namespaces.into_iter().map(|ns| (outcome.store.clone(), ns)),
+                    );
                     if let Some(date) = outcome.gc_last_success {
                         gc_from_status.insert(outcome.store, date);
                     }
                 }
 
                 samples.extend(backup::group_samples(&groups, options.max_groups, now_s, ts_ms));
+                samples.extend(backup::namespace_samples(&listed, &groups, ts_ms));
             }
             Err(error) => {
                 errors += 1;
@@ -240,12 +255,54 @@ impl Collector for PbsCollector {
     }
 }
 
+/// Une liste facultative : `None` si l'option est désactivée ou si le serveur
+/// refuse l'accès — privilège facultatif, absent du minimum documenté —, sinon
+/// le résultat de l'appel, erreurs comprises.
+async fn optional_list<T: DeserializeOwned>(
+    pbs: &PbsClient,
+    enabled: bool,
+    path: &'static str,
+) -> Option<Result<Vec<T>, ProbeError>> {
+    if !enabled {
+        return None;
+    }
+    match pbs.get_optional::<Vec<T>>(path, &[]).await {
+        Ok(Some(list)) => Some(Ok(list)),
+        Ok(None) => {
+            debug!(path, "accès refusé : privilège facultatif absent, aucune série");
+            None
+        }
+        Err(error) => Some(Err(error)),
+    }
+}
+
+/// Dépouille le résultat d'une liste facultative : une erreur — autre qu'un
+/// refus d'accès, déjà absorbé — compte dans `pbs_scrape_errors` comme pour
+/// n'importe quel inventaire.
+fn settle<T>(
+    outcome: Option<Result<Vec<T>, ProbeError>>,
+    errors: &mut u32,
+    target_id: TargetId,
+    path: &str,
+) -> Option<Vec<T>> {
+    match outcome? {
+        Ok(list) => Some(list),
+        Err(error) => {
+            *errors += 1;
+            warn!(target_id, path, %error, "liste PBS indisponible");
+            None
+        }
+    }
+}
+
 /// Ce qu'un datastore a livré.
 #[derive(Default)]
 struct DatastoreOutcome {
     store: String,
     samples: Vec<Sample>,
     groups: BTreeMap<GroupKey, GroupSummary>,
+    /// Espaces de noms dont le listing d'instantanés a abouti.
+    namespaces: Vec<String>,
     /// Date de la dernière GC réussie d'après `/gc`, en secondes Unix.
     gc_last_success: Option<i64>,
     errors: u32,
@@ -311,6 +368,7 @@ async fn collect_datastore(
         match pbs.get::<Vec<SnapshotEntry>>(&path, &query).await {
             Ok(snapshots) => {
                 outcome.groups.extend(backup::summarize_groups(store, &namespace, &snapshots));
+                outcome.namespaces.push(namespace);
             }
             Err(error) => {
                 outcome.errors += 1;
@@ -403,5 +461,26 @@ mod tests {
     fn le_port_par_defaut_est_celui_de_pbs() {
         let options = Options::from_target(&cible(Credential::None)).unwrap();
         assert_eq!(options.base_url, "https://10.0.0.20:8007");
+    }
+
+    #[test]
+    fn une_liste_facultative_en_erreur_compte_une_erreur_de_collecte() {
+        let mut errors = 0;
+        let absent: Option<Vec<u8>> = settle(None, &mut errors, 7, "/admin/sync");
+        assert!(absent.is_none());
+        assert_eq!(errors, 0, "option désactivée ou 403 : rien à compter");
+
+        let ok = settle(Some(Ok(vec![1u8, 2])), &mut errors, 7, "/admin/sync");
+        assert_eq!(ok, Some(vec![1, 2]));
+        assert_eq!(errors, 0);
+
+        let failed: Option<Vec<u8>> = settle(
+            Some(Err(ProbeError::Unreachable("/admin/prune: 502".into()))),
+            &mut errors,
+            7,
+            "/admin/prune",
+        );
+        assert!(failed.is_none());
+        assert_eq!(errors, 1);
     }
 }

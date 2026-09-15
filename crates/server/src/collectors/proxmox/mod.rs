@@ -2,7 +2,8 @@
 //!
 //! Interroge l'API REST d'un hyperviseur ou d'un cluster Proxmox VE et en tire
 //! l'état du quorum, des nœuds, des machines virtuelles, des conteneurs, des
-//! stockages et — surtout — des sauvegardes.
+//! stockages, de la haute disponibilité, de la réplication, de Ceph, des
+//! certificats, des mises à jour en attente et — surtout — des sauvegardes.
 //!
 //! # Principes
 //!
@@ -27,45 +28,61 @@
 //! | `backup_lookback_days` | `31` | Profondeur d'examen des tâches `vzdump`. |
 //! | `scan_backup_storage` | `true` | Inventorie les archives pour dater les sauvegardes par machine. |
 //! | `nodes` | tous | Restreint la collecte à une liste de nœuds. |
+//! | `ha` | `true` | État de la haute disponibilité (`/cluster/ha/status/current`). |
+//! | `backup_jobs` | `true` | Travaux de sauvegarde planifiés et invités non couverts. |
+//! | `scan_snapshots` | `true` | Inventorie les instantanés, un appel par invité. |
+//! | `max_snapshot_guests` | `200` | Plafond d'invités inventoriés par collecte ; au-delà, comptés dans `guest_snapshot_guests_skipped`. |
+//! | `replication` | `true` | État des travaux de réplication. |
+//! | `ceph` | `true` | Santé Ceph ; silencieux si Ceph n'est pas installé. |
+//! | `updates` | `true` | Mises à jour en attente ; demande `Sys.Modify` sur `/nodes`, silencieux sinon. |
+//! | `certificates` | `true` | Expiration des certificats de chaque nœud. |
 
 mod auth;
 mod backup;
+mod ceph;
 mod client;
+mod ha;
 mod metrics;
 mod model;
 mod options;
+mod replication;
+mod snapshots;
 
-use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::future::Future;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use ezymonit_proto::{Collector, Credential, MetricKind, ProbeError, Sample, Target, TargetId};
+use reqwest::StatusCode;
 use tracing::{debug, warn};
 
 use auth::{AuthMode, Ticket};
-use backup::{Archive, GuestIndex, GuestRef};
+use backup::{Archive, GuestIndex, GuestRef, JobRun};
 use client::PveClient;
 use metrics::GuestKind;
-use model::{ClusterStatusEntry, GuestEntry, NodeListEntry, NodeStatus, StorageEntry, TaskEntry};
+use model::{
+    AptPackage, BackupJob, CephStatus, CertificateInfo, ClusterStatusEntry, GuestEntry,
+    HaStatusEntry, NodeListEntry, NodeStatus, NotBackedUp, ReplicationJob, Snapshot, StorageEntry,
+    TaskEntry,
+};
 use options::Options;
+
+use crate::collectors::http;
 
 /// Identifiant de profil renvoyé par la découverte.
 const PROFILE_ID: &str = "proxmox-ve";
 
-/// Délai d'établissement de la connexion TCP + TLS.
+/// Listes d'instantanés demandées simultanément à un même nœud.
 ///
-/// Il est fixé une fois pour toutes au niveau du client mutualisé : un nœud éteint
-/// se manifeste par un `SYN` sans réponse, et cinq secondes suffisent à le
-/// constater sans faire attendre les autres nœuds du cluster.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Un appel par invité passe par le proxy du nœud, qui lit un fichier de
+/// configuration à chaque fois : quatre en vol suffisent à masquer la latence
+/// sans monopoliser `pveproxy`.
+const SNAPSHOT_PARALLELISM: usize = 4;
 
 #[derive(Default)]
 pub struct ProxmoxCollector {
-    /// Deux clients seulement, construits à la demande : `reqwest` mutualise le
-    /// pool de connexions, et la politique TLS ne peut pas être changée par requête.
-    http_verified: OnceLock<reqwest::Client>,
-    http_unverified: OnceLock<reqwest::Client>,
     /// Tickets en cache, un par cible. Sans ce cache, chaque interrogation ouvrirait
     /// une session sur l'hyperviseur, qui les journalise toutes.
     tickets: Mutex<HashMap<TargetId, Arc<tokio::sync::Mutex<Option<Ticket>>>>>,
@@ -74,18 +91,6 @@ pub struct ProxmoxCollector {
 impl ProxmoxCollector {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    fn http(&self, insecure_tls: bool) -> Result<reqwest::Client, ProbeError> {
-        let cell = if insecure_tls { &self.http_unverified } else { &self.http_verified };
-        if let Some(existing) = cell.get() {
-            return Ok(existing.clone());
-        }
-        let built = client::build_http_client(insecure_tls, CONNECT_TIMEOUT)?;
-        // Une course entre deux cibles construirait deux clients ; le perdant est
-        // simplement jeté, ce qui est sans conséquence.
-        let _ = cell.set(built.clone());
-        Ok(built)
     }
 
     fn auth_mode(&self, target: &Target) -> Result<AuthMode, ProbeError> {
@@ -118,7 +123,7 @@ impl Collector for ProxmoxCollector {
     async fn probe(&self, target: &Target) -> Result<Vec<Sample>, ProbeError> {
         let options = Options::from_target(target)?;
         let pve = PveClient::new(
-            self.http(options.insecure_tls)?,
+            http::client(options.insecure_tls)?,
             options.base_url.clone(),
             self.auth_mode(target)?,
             options.request_timeout,
@@ -135,7 +140,22 @@ impl Collector for ProxmoxCollector {
         samples.push(Sample::new("proxmox_up", 1.0, MetricKind::Gauge, ts_ms));
         let mut errors = 0u32;
 
-        match pve.get::<Vec<ClusterStatusEntry>>("/cluster/status", &[]).await {
+        // Les appels à l'échelle du cluster et la tournée des nœuds sont
+        // indépendants : tout part en même temps.
+        let budget = SnapshotBudget::new(options.max_snapshot_guests);
+        let (cluster, ha, jobs, not_backed_up, ceph_status, nodes) = futures::join!(
+            pve.get::<Vec<ClusterStatusEntry>>("/cluster/status", &[]),
+            when(options.ha, pve.get::<Vec<HaStatusEntry>>("/cluster/ha/status/current", &[])),
+            when(options.backup_jobs, pve.get::<Vec<BackupJob>>("/cluster/backup", &[])),
+            when(
+                options.backup_jobs,
+                pve.get::<Vec<NotBackedUp>>("/cluster/backup-info/not-backed-up", &[])
+            ),
+            when(options.ceph, pve.get::<CephStatus>("/cluster/ceph/status", &[])),
+            collect_nodes(&pve, &options, &budget, now_s, ts_ms),
+        );
+
+        match cluster {
             Ok(entries) => samples.extend(metrics::cluster_samples(&entries, ts_ms)),
             Err(error) => {
                 errors += 1;
@@ -143,31 +163,85 @@ impl Collector for ProxmoxCollector {
             }
         }
 
-        match pve.get::<Vec<NodeListEntry>>("/nodes", &[]).await {
-            Ok(nodes) => {
-                let outcomes = futures::future::join_all(
-                    nodes
-                        .iter()
-                        .filter(|node| options.wants_node(&node.node))
-                        .map(|node| collect_node(&pve, &options, node, now_s, ts_ms)),
-                )
-                .await;
+        match ha {
+            Some(Ok(entries)) => samples.extend(ha::ha_samples(&entries, ts_ms)),
+            Some(Err(error)) => {
+                errors += 1;
+                warn!(target_id = target.id, %error, "état de la haute disponibilité indisponible");
+            }
+            None => {}
+        }
 
-                let aggregate = merge(outcomes);
-                errors += aggregate.errors;
-                samples.extend(aggregate.samples);
-                samples.extend(backup::guest_backup_samples(
+        // Ceph absent se manifeste par une erreur (500 « not initialized », 404) :
+        // ce n'est ni une panne ni une faute, juste une fonctionnalité non installée.
+        match ceph_status {
+            Some(Ok(status)) => samples.extend(ceph::ceph_samples(&status, ts_ms)),
+            Some(Err(error)) => debug!(target_id = target.id, %error, "pas de Ceph sur ce cluster"),
+            None => {}
+        }
+
+        let aggregate = match nodes {
+            Ok(aggregate) => aggregate,
+            Err(error) => {
+                errors += 1;
+                warn!(target_id = target.id, %error, "liste des nœuds Proxmox indisponible");
+                Aggregate::default()
+            }
+        };
+        errors += aggregate.errors;
+        samples.extend(aggregate.samples);
+        samples.extend(backup::guest_backup_samples(
+            &aggregate.guests,
+            &aggregate.archives,
+            &aggregate.task_backups,
+            now_s,
+            ts_ms,
+        ));
+
+        // Les travaux planifiés ont besoin de l'inventaire des invités pour
+        // publier la couverture : ils passent donc après la tournée des nœuds.
+        match (jobs, not_backed_up) {
+            (Some(Ok(jobs)), not_backed_up) => {
+                let not_backed_up = match not_backed_up {
+                    Some(Ok(list)) => list,
+                    Some(Err(error)) => {
+                        errors += 1;
+                        warn!(target_id = target.id, %error, "liste des invités non sauvegardés indisponible");
+                        Vec::new()
+                    }
+                    None => Vec::new(),
+                };
+                samples.extend(backup::cluster_job_samples(
+                    &jobs,
+                    &not_backed_up,
                     &aggregate.guests,
-                    &aggregate.archives,
-                    &aggregate.task_backups,
+                    &aggregate.job_runs,
                     now_s,
                     ts_ms,
                 ));
             }
-            Err(error) => {
+            (Some(Err(error)), _) => {
                 errors += 1;
-                warn!(target_id = target.id, %error, "liste des nœuds Proxmox indisponible");
+                warn!(target_id = target.id, %error, "travaux de sauvegarde planifiés indisponibles");
             }
+            (None, _) => {}
+        }
+
+        if aggregate.replication_supported {
+            samples.push(Sample::new(
+                "proxmox_replication_jobs_total",
+                aggregate.replication_jobs.len() as f64,
+                MetricKind::Gauge,
+                ts_ms,
+            ));
+        }
+        if options.scan_snapshots {
+            samples.push(Sample::new(
+                "proxmox_guest_snapshot_guests_skipped",
+                f64::from(aggregate.snapshot_skipped),
+                MetricKind::Gauge,
+                ts_ms,
+            ));
         }
 
         samples.push(Sample::new(
@@ -188,7 +262,7 @@ impl Collector for ProxmoxCollector {
     async fn discover(&self, target: &Target) -> Result<Option<String>, ProbeError> {
         let options = Options::from_target(target)?;
         let pve = PveClient::new(
-            self.http(options.insecure_tls)?,
+            http::client(options.insecure_tls)?,
             options.base_url.clone(),
             self.auth_mode(target)?,
             options.request_timeout,
@@ -207,6 +281,53 @@ impl Collector for ProxmoxCollector {
     }
 }
 
+/// N'exécute l'appel que si l'option est active ; `None` sinon.
+///
+/// Permet de placer un appel facultatif dans un `join!` sans dupliquer la
+/// branche « option coupée » à chaque endroit.
+async fn when<T, F>(enabled: bool, call: F) -> Option<Result<T, ProbeError>>
+where
+    F: Future<Output = Result<T, ProbeError>>,
+{
+    if enabled { Some(call.await) } else { None }
+}
+
+/// Plafond d'invités dont on liste les instantanés, partagé entre les nœuds.
+///
+/// Les nœuds sont collectés en parallèle : un compteur atomique est la seule
+/// façon de tenir un plafond global sans sérialiser la tournée.
+struct SnapshotBudget(AtomicU32);
+
+impl SnapshotBudget {
+    fn new(max_guests: u32) -> Self {
+        Self(AtomicU32::new(max_guests))
+    }
+
+    /// Réserve une place ; `false` quand le plafond est atteint.
+    fn claim(&self) -> bool {
+        self.0.fetch_update(Ordering::AcqRel, Ordering::Acquire, |left| left.checked_sub(1)).is_ok()
+    }
+}
+
+/// Liste les nœuds puis les collecte en parallèle.
+async fn collect_nodes(
+    pve: &PveClient,
+    options: &Options,
+    budget: &SnapshotBudget,
+    now_s: i64,
+    ts_ms: i64,
+) -> Result<Aggregate, ProbeError> {
+    let nodes = pve.get::<Vec<NodeListEntry>>("/nodes", &[]).await?;
+    let outcomes = futures::future::join_all(
+        nodes
+            .iter()
+            .filter(|node| options.wants_node(&node.node))
+            .map(|node| collect_node(pve, options, node, budget, now_s, ts_ms)),
+    )
+    .await;
+    Ok(merge(outcomes))
+}
+
 /// Ce qu'un nœud a livré, avant fusion à l'échelle du cluster.
 #[derive(Default)]
 struct NodeOutcome {
@@ -214,6 +335,14 @@ struct NodeOutcome {
     guests: GuestIndex,
     archives: Vec<Archive>,
     task_backups: BTreeMap<i64, i64>,
+    /// Dernière exécution des travaux planifiés vue depuis ce nœud.
+    job_runs: BTreeMap<String, JobRun>,
+    /// Séries de réplication, fusionnées à part pour dédoublonner par travail.
+    replication: Vec<Sample>,
+    /// Vrai si le nœud a répondu à `/replication`, même par une liste vide.
+    replication_supported: bool,
+    /// Invités dont les instantanés n'ont pas été listés, plafond atteint.
+    snapshot_skipped: u32,
     errors: u32,
 }
 
@@ -223,6 +352,10 @@ struct Aggregate {
     guests: GuestIndex,
     archives: BTreeMap<i64, Vec<Archive>>,
     task_backups: BTreeMap<i64, i64>,
+    job_runs: BTreeMap<String, JobRun>,
+    replication_jobs: BTreeSet<String>,
+    replication_supported: bool,
+    snapshot_skipped: u32,
     errors: u32,
 }
 
@@ -253,6 +386,29 @@ fn merge(outcomes: Vec<NodeOutcome>) -> Aggregate {
                 .and_modify(|current| *current = (*current).max(date))
                 .or_insert(date);
         }
+
+        for (job, run) in outcome.job_runs {
+            aggregate
+                .job_runs
+                .entry(job)
+                .and_modify(|current| *current = current.latest(run))
+                .or_insert(run);
+        }
+
+        // Un travail de réplication peut être listé par sa source et par sa
+        // destination : la première occurrence l'emporte.
+        aggregate.replication_supported |= outcome.replication_supported;
+        let mut seen_here = BTreeSet::new();
+        for sample in outcome.replication {
+            let job = sample.labels.get("job").cloned().unwrap_or_default();
+            if aggregate.replication_jobs.contains(&job) && !seen_here.contains(&job) {
+                continue;
+            }
+            seen_here.insert(job);
+            aggregate.samples.push(sample);
+        }
+        aggregate.replication_jobs.extend(seen_here);
+        aggregate.snapshot_skipped += outcome.snapshot_skipped;
     }
 
     aggregate
@@ -264,6 +420,7 @@ async fn collect_node(
     pve: &PveClient,
     options: &Options,
     node: &NodeListEntry,
+    budget: &SnapshotBudget,
     now_s: i64,
     ts_ms: i64,
 ) -> NodeOutcome {
@@ -297,14 +454,40 @@ async fn collect_node(
         (format!("/nodes/{name}/storage"), format!("/nodes/{name}/tasks"));
     let tasks_query =
         [("typefilter", "vzdump".to_string()), ("limit", options.task_limit.to_string())];
+    let replication_path = format!("/nodes/{name}/replication");
+    let updates_path = format!("/nodes/{name}/apt/update");
+    let certificates_path = format!("/nodes/{name}/certificates/info");
 
-    // Les quatre inventaires d'un nœud sont indépendants : les enchaîner
-    // multiplierait par quatre le temps passé sur un nœud lent.
-    let (qemu, lxc, storages, tasks) = futures::join!(
+    // Les inventaires d'un nœud sont indépendants : les enchaîner multiplierait
+    // d'autant le temps passé sur un nœud lent.
+    let (qemu, lxc, storages, tasks, replication, updates, certificates) = futures::join!(
         pve.get::<Vec<GuestEntry>>(&qemu_path, &[]),
         pve.get::<Vec<GuestEntry>>(&lxc_path, &[]),
         pve.get::<Vec<StorageEntry>>(&storage_path, &[]),
         pve.get::<Vec<TaskEntry>>(&tasks_path, &tasks_query),
+        // Une machine isolée sans réplication configurée répond 404 ou 501.
+        when(
+            options.replication,
+            pve.get_unless::<Vec<ReplicationJob>>(
+                &replication_path,
+                &[],
+                &[StatusCode::NOT_FOUND, StatusCode::NOT_IMPLEMENTED],
+            )
+        ),
+        // `PVEAuditor` ne couvre pas `Sys.Modify`, exigé par `apt/update` : le 403
+        // est un droit facultatif non accordé, pas une erreur.
+        when(
+            options.updates,
+            pve.get_unless::<Vec<AptPackage>>(&updates_path, &[], &[StatusCode::FORBIDDEN])
+        ),
+        when(
+            options.certificates,
+            pve.get_unless::<Vec<CertificateInfo>>(
+                &certificates_path,
+                &[],
+                &[StatusCode::FORBIDDEN],
+            )
+        ),
     );
 
     for (kind, result) in [(GuestKind::Qemu, qemu), (GuestKind::Lxc, lxc)] {
@@ -352,11 +535,57 @@ async fn collect_node(
             ));
             outcome.task_backups =
                 backup::task_backups_by_vmid(&tasks, now_s, options.backup_lookback_seconds);
+            outcome.job_runs =
+                backup::task_runs_by_job(&tasks, now_s, options.backup_lookback_seconds);
         }
         Err(error) => {
             outcome.errors += 1;
             warn!(node = name, %error, "historique des tâches vzdump indisponible");
         }
+    }
+
+    match replication {
+        Some(Ok(Some(jobs))) => {
+            outcome.replication_supported = true;
+            outcome.replication = replication::replication_samples(name, &jobs, now_s, ts_ms);
+        }
+        Some(Ok(None)) => debug!(node = name, "pas de réplication sur ce nœud"),
+        Some(Err(error)) => {
+            outcome.errors += 1;
+            warn!(node = name, %error, "état de la réplication indisponible");
+        }
+        None => {}
+    }
+
+    match updates {
+        Some(Ok(Some(packages))) => {
+            outcome.samples.extend(metrics::updates_samples(name, &packages, ts_ms));
+        }
+        Some(Ok(None)) => debug!(
+            node = name,
+            "mises à jour non listées : Sys.Modify manquant sur /nodes (droit facultatif)"
+        ),
+        Some(Err(error)) => {
+            outcome.errors += 1;
+            warn!(node = name, %error, "liste des mises à jour indisponible");
+        }
+        None => {}
+    }
+
+    match certificates {
+        Some(Ok(Some(certs))) => {
+            outcome.samples.extend(metrics::certificate_samples(name, &certs, now_s, ts_ms));
+        }
+        Some(Ok(None)) => debug!(node = name, "certificats non listés : droit manquant"),
+        Some(Err(error)) => {
+            outcome.errors += 1;
+            warn!(node = name, %error, "informations de certificat indisponibles");
+        }
+        None => {}
+    }
+
+    if options.scan_snapshots {
+        collect_snapshots(pve, name, budget, &mut outcome, now_s, ts_ms).await;
     }
 
     if options.scan_backup_storage {
@@ -382,6 +611,51 @@ async fn collect_node(
     }
 
     outcome
+}
+
+/// Liste les instantanés des invités du nœud, dans la limite du plafond global
+/// et de `SNAPSHOT_PARALLELISM` appels en vol.
+async fn collect_snapshots(
+    pve: &PveClient,
+    node: &str,
+    budget: &SnapshotBudget,
+    outcome: &mut NodeOutcome,
+    now_s: i64,
+    ts_ms: i64,
+) {
+    let mut planned: Vec<(i64, GuestRef)> = Vec::new();
+    for (vmid, guest) in &outcome.guests {
+        if budget.claim() {
+            planned.push((*vmid, guest.clone()));
+        } else {
+            outcome.snapshot_skipped += 1;
+        }
+    }
+
+    let semaphore = tokio::sync::Semaphore::new(SNAPSHOT_PARALLELISM);
+    let listings = futures::future::join_all(planned.iter().map(|(vmid, guest)| {
+        let semaphore = &semaphore;
+        async move {
+            // Le sémaphore n'est jamais fermé : un refus de permis est théorique,
+            // et l'appel part alors sans attendre plutôt que d'être perdu.
+            let _permit = semaphore.acquire().await.ok();
+            let path = format!("/nodes/{node}/{}/{vmid}/snapshot", guest.kind.as_str());
+            (*vmid, guest, pve.get::<Vec<Snapshot>>(&path, &[]).await)
+        }
+    }))
+    .await;
+
+    for (vmid, guest, result) in listings {
+        match result {
+            Ok(list) => outcome
+                .samples
+                .extend(snapshots::snapshot_samples(vmid, guest, &list, now_s, ts_ms)),
+            Err(error) => {
+                outcome.errors += 1;
+                warn!(node, vmid, %error, "liste des instantanés indisponible");
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -475,7 +749,7 @@ mod tests {
             )]),
             archives: vec![archive(100, 1_724_000_000)],
             task_backups: BTreeMap::from([(100, 1_724_000_000)]),
-            errors: 0,
+            ..Default::default()
         };
         let injoignable = NodeOutcome {
             samples: vec![metrics::node_up_sample("pve3", false, 1000)],
@@ -520,5 +794,69 @@ mod tests {
         let a = NodeOutcome { task_backups: BTreeMap::from([(100, 1_000)]), ..Default::default() };
         let b = NodeOutcome { task_backups: BTreeMap::from([(100, 2_000)]), ..Default::default() };
         assert_eq!(merge(vec![a, b]).task_backups[&100], 2_000);
+    }
+
+    #[test]
+    fn le_plafond_dinstantanes_est_partage_et_ne_descend_pas_sous_zero() {
+        let budget = SnapshotBudget::new(2);
+        assert!(budget.claim());
+        assert!(budget.claim());
+        assert!(!budget.claim(), "le plafond est atteint");
+        assert!(!budget.claim(), "et le reste");
+        assert_eq!(budget.0.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn un_travail_de_replication_vu_par_deux_noeuds_nest_publie_quune_fois() {
+        let serie = |node: &str| {
+            Sample::new("proxmox_replication_job_error", 0.0, MetricKind::Gauge, 1000)
+                .with_label("job", "102-0")
+                .with_label("node", node)
+        };
+        let source = NodeOutcome {
+            replication: vec![serie("pve2")],
+            replication_supported: true,
+            ..Default::default()
+        };
+        let destination = NodeOutcome {
+            replication: vec![serie("pve2")],
+            replication_supported: true,
+            ..Default::default()
+        };
+        let sans = NodeOutcome::default();
+
+        let aggregate = merge(vec![source, destination, sans]);
+        assert_eq!(aggregate.samples.len(), 1);
+        assert_eq!(aggregate.replication_jobs.len(), 1);
+        assert!(aggregate.replication_supported);
+    }
+
+    #[test]
+    fn la_derniere_execution_dun_travail_planifie_est_fusionnee_entre_noeuds() {
+        let a = NodeOutcome {
+            job_runs: BTreeMap::from([("backup-1".to_string(), JobRun { start: 100, ok: true })]),
+            snapshot_skipped: 2,
+            ..Default::default()
+        };
+        let b = NodeOutcome {
+            job_runs: BTreeMap::from([("backup-1".to_string(), JobRun { start: 200, ok: false })]),
+            snapshot_skipped: 1,
+            ..Default::default()
+        };
+        let aggregate = merge(vec![a, b]);
+        assert_eq!(aggregate.job_runs["backup-1"], JobRun { start: 200, ok: false });
+        assert_eq!(aggregate.snapshot_skipped, 3);
+    }
+
+    #[tokio::test]
+    async fn un_appel_facultatif_coupe_ne_part_pas() {
+        let appele = std::cell::Cell::new(false);
+        let call = async {
+            appele.set(true);
+            Ok::<u8, ProbeError>(1)
+        };
+        assert!(when(false, call).await.is_none());
+        assert!(!appele.get(), "l'option coupée ne doit rien exécuter");
+        assert_eq!(when(true, async { Ok::<u8, ProbeError>(1) }).await.unwrap().unwrap(), 1);
     }
 }

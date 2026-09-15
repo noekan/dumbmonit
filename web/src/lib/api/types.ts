@@ -196,6 +196,8 @@ export interface AlertRule {
 	query: string;
 	operator: RuleOperator;
 	threshold: number;
+	/** Hysteresis: the alert clears only past this value. `null` = none. */
+	clear_threshold: number | null;
 	for_secs: number;
 	severity: AlertSeverity;
 	selector: TargetSelector;
@@ -207,6 +209,8 @@ export interface AlertRule {
 	enabled: boolean;
 	/** Shipped rule: it can be toggled but not deleted. */
 	builtin: boolean;
+	/** Per-device overrides of this rule. */
+	overrides: RuleOverride[];
 }
 
 /**
@@ -223,6 +227,7 @@ export interface AlertRulePayload {
 	query: string;
 	operator?: RuleOperator | string | null;
 	threshold?: number | null;
+	clear_threshold?: number | null;
 	for_secs?: number | null;
 	severity?: AlertSeverity | string | null;
 	selector?: TargetSelector | null;
@@ -582,6 +587,7 @@ export interface Channel {
 	has_secret: boolean;
 	last_error: string | null;
 	last_sent_at: string | null;
+	policy: ChannelPolicy;
 }
 
 /**
@@ -596,6 +602,8 @@ export interface ChannelPayload {
 	enabled?: boolean;
 	settings?: Record<string, unknown>;
 	secrets?: Record<string, unknown>;
+	/** Omitted on an update keeps the stored policy; fields absent keep their value. */
+	policy?: ChannelPolicyPayload;
 }
 
 export interface ChannelTestReport {
@@ -641,4 +649,220 @@ export interface ApiToken {
 /** Response of `POST /api/tokens`: the only chance to see the token in clear. */
 export interface CreatedApiToken extends ApiToken {
 	secret: string;
+}
+
+// --- Notification policy ----------------------------------------------------
+
+/** Weekly quiet-hours window, same shape as a weekly maintenance schedule. */
+export type QuietHours = Extract<SilenceSchedule, { kind: 'weekly' }>;
+
+/** Per-channel policy, mirroring the server's `ChannelPolicy`. */
+export interface ChannelPolicy {
+	/** Alerts below this severity never reach the channel. */
+	min_severity: AlertSeverity;
+	/** False: the channel only hears about problems, never about recoveries. */
+	notify_resolved: boolean;
+	/** Minimum seconds between two messages about the same alert; 0 = none. */
+	min_interval_secs: number;
+	/** During quiet hours only `critical` goes through; the rest waits for a digest. */
+	quiet_hours: QuietHours | null;
+}
+
+/** Body of the `policy` field on a channel: every field optional. */
+export interface ChannelPolicyPayload {
+	min_severity?: AlertSeverity | null;
+	notify_resolved?: boolean | null;
+	min_interval_secs?: number | null;
+	/** `null` clears the quiet hours; omitted keeps them. */
+	quiet_hours?: QuietHours | null;
+}
+
+/** Global policy, `GET/PUT /api/notify/policy`. */
+export interface NotificationPolicy {
+	/** Alerts firing within this window leave as one message per channel; 0 = immediately. */
+	batch_window_secs: number;
+	/** Messages per channel per hour; 0 = unlimited. */
+	max_per_hour: number;
+	/** State changes in `flap_window_secs` after which an alert is held; 0 = off. */
+	flap_events: number;
+	flap_window_secs: number;
+	flap_hold_secs: number;
+	/** Public URL used for device links in messages; empty falls back to EZYMONIT_PUBLIC_URL. */
+	public_url: string;
+}
+
+export type NotificationPolicyPayload = Partial<NotificationPolicy>;
+
+/** A rule's per-device override; a `null` field keeps the rule's value. */
+export interface RuleOverride {
+	rule_uid: string;
+	target_id: TargetId;
+	threshold: number | null;
+	clear_threshold: number | null;
+	enabled: boolean | null;
+}
+
+export interface RuleOverridePayload {
+	threshold?: number | null;
+	clear_threshold?: number | null;
+	enabled?: boolean | null;
+}
+
+// --- Status pages -----------------------------------------------------------
+
+export type StatusPageTheme = 'auto' | 'light' | 'dark';
+
+/** A service shown on a status page, as stored (admin view). */
+export interface StatusPageItem {
+	id: number;
+	page_id: number;
+	target_id: TargetId;
+	/** Public name of the service. */
+	label: string;
+	/** Empty string means "no group". */
+	group_name: string;
+	position: number;
+}
+
+export interface StatusPage {
+	id: number;
+	slug: string;
+	title: string;
+	description: string;
+	published: boolean;
+	theme: StatusPageTheme;
+	show_uptime_days: number;
+	created_at: string;
+	updated_at: string;
+	items: StatusPageItem[];
+}
+
+export interface StatusPagePayload {
+	title: string;
+	/** Omit to derive it from the title. */
+	slug?: string;
+	description?: string;
+	published?: boolean;
+	theme?: StatusPageTheme;
+	show_uptime_days?: number;
+}
+
+export interface StatusPageItemPayload {
+	target_id: TargetId;
+	/** Empty falls back to the device name. */
+	label?: string;
+	group_name?: string;
+}
+
+export type IncidentKind = 'incident' | 'maintenance';
+export type IncidentSeverity = 'minor' | 'major';
+export type IncidentStatus =
+	| 'investigating'
+	| 'identified'
+	| 'monitoring'
+	| 'resolved'
+	| 'scheduled'
+	| 'in_progress'
+	| 'completed';
+
+export interface IncidentUpdate {
+	id: number;
+	incident_id: number;
+	status: IncidentStatus;
+	body: string;
+	created_at: string;
+}
+
+export interface Incident {
+	id: number;
+	/** `null`: shown on every page. */
+	page_id: number | null;
+	title: string;
+	kind: IncidentKind;
+	status: IncidentStatus;
+	severity: IncidentSeverity;
+	starts_at: string;
+	ends_at: string | null;
+	created_at: string;
+	updated_at: string;
+	updates: IncidentUpdate[];
+}
+
+export interface IncidentPayload {
+	title: string;
+	kind?: IncidentKind;
+	status?: IncidentStatus;
+	severity?: IncidentSeverity;
+	page_id?: number | null;
+	starts_at?: string;
+	ends_at?: string;
+	/** First message of the timeline (creation only). */
+	body?: string;
+}
+
+export interface IncidentUpdatePayload {
+	status?: IncidentStatus;
+	body: string;
+}
+
+// Public document of `GET /api/public/status/{slug}`: no ids, no addresses.
+
+export type PublicOverall = 'operational' | 'degraded' | 'major' | 'maintenance';
+export type PublicItemState = 'up' | 'down' | 'degraded' | 'maintenance' | 'unknown';
+
+export interface PublicDayBucket {
+	/** `YYYY-MM-DD`, UTC. */
+	date: string;
+	/** `null` without any measurement that day. */
+	uptime_pct: number | null;
+	incidents: number;
+}
+
+export interface PublicStatusItem {
+	label: string;
+	state: PublicItemState;
+	uptime_24h: number | null;
+	uptime_7d: number | null;
+	uptime_90d: number | null;
+	latency_ms: number | null;
+	history: PublicDayBucket[];
+}
+
+export interface PublicStatusGroup {
+	name: string;
+	items: PublicStatusItem[];
+}
+
+export interface PublicIncidentUpdate {
+	status: IncidentStatus;
+	body: string;
+	created_at: string;
+}
+
+export interface PublicIncident {
+	title: string;
+	kind: IncidentKind;
+	status: IncidentStatus;
+	severity: IncidentSeverity;
+	starts_at: string;
+	ends_at: string | null;
+	updates: PublicIncidentUpdate[];
+}
+
+export interface PublicStatus {
+	page: {
+		slug: string;
+		title: string;
+		description: string;
+		theme: StatusPageTheme;
+		show_uptime_days: number;
+		updated_at: string;
+	};
+	overall: PublicOverall;
+	generated_at: string;
+	groups: PublicStatusGroup[];
+	/** Open incidents and those of the last 30 days. */
+	incidents: PublicIncident[];
+	/** Scheduled or in-progress maintenance windows. */
+	maintenance: PublicIncident[];
 }

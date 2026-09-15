@@ -10,7 +10,6 @@
 	 * row folds again: one status line, the switches, actions and the
 	 * container's own charts only once it is opened.
 	 */
-	import { untrack } from 'svelte';
 	import type { Target } from '$lib/api';
 	import { formatDuration, formatRelative } from '$lib/format';
 	import { Button, Confirm, ErrorNotice, Led, Plate, Skeleton, Toggle, type Tone } from '$lib/ui';
@@ -22,16 +21,13 @@
 		commandContainer,
 		commandLabel,
 		isPending,
-		listCommands,
-		listContainers,
 		restartContainer,
-		setContainerPolicy,
 		updateContainer,
 		type CommandStatus,
-		type CommandView,
 		type ContainerPolicy,
 		type ContainerView
 	} from './api';
+	import { fleetFor } from './fleet.svelte';
 
 	interface Props {
 		target: Target;
@@ -42,13 +38,11 @@
 
 	let { target, metrics = new Map(), loadingMetrics = false }: Props = $props();
 
-	let containers = $state<ContainerView[]>([]);
-	let commands = $state<CommandView[]>([]);
-	let loading = $state(true);
-	let error = $state<unknown>(null);
+	// The list itself lives in the shared fleet: the summary strip under the
+	// header reads the same one, so both stay in step with a single poll.
+	const fleet = $derived(fleetFor(target.id));
 
-	/** Per container: the policy being saved, an action in flight, an inline error, the result unfolded. */
-	let savingPolicy = $state<Record<string, boolean>>({});
+	/** Per container: an action in flight, an inline error, the result unfolded. */
 	let acting = $state<Record<string, boolean>>({});
 	let rowError = $state<Record<string, unknown>>({});
 	let showResult = $state<Record<string, boolean>>({});
@@ -56,17 +50,15 @@
 	/** Rows unfolded by the user; nothing is remembered across visits. */
 	let openRows = $state<Record<string, boolean>>({});
 
-	const busy = $derived(containers.some((c) => isPending(c.last_command)));
-	const recent = $derived(showAllCommands ? commands : commands.slice(0, 5));
+	const recent = $derived(showAllCommands ? fleet.commands : fleet.commands.slice(0, 5));
 
 	/** Header summary: "31 · 30 running · 2 updates available". */
 	const summary = $derived.by(() => {
-		if (loading || error || containers.length === 0) return undefined;
-		const running = containers.filter((c) => c.up).length;
-		const updates = containers.filter((c) => c.update_available === true).length;
-		const parts = [`${containers.length}`, `${running} running`];
-		if (running < containers.length) parts.push(`${containers.length - running} stopped`);
-		if (updates > 0) parts.push(`${updates} ${updates === 1 ? 'update' : 'updates'} available`);
+		if (fleet.loading || fleet.error || fleet.containers.length === 0) return undefined;
+		const total = fleet.containers.length;
+		const parts = [`${total}`, `${fleet.running} running`];
+		if (fleet.running < total) parts.push(`${total - fleet.running} stopped`);
+		if (fleet.updates > 0) parts.push(`${fleet.updates} ${fleet.updates === 1 ? 'update' : 'updates'} available`);
 		return parts.join(' · ');
 	});
 
@@ -105,57 +97,19 @@
 
 	// --- Loading ------------------------------------------------------------------
 
-	async function load(signal?: AbortSignal) {
-		error = null;
-		try {
-			const [list, history] = await Promise.all([listContainers(target.id, signal), listCommands(target.id, signal)]);
-			containers = list;
-			commands = history;
-		} catch (cause) {
-			if (cause instanceof DOMException && cause.name === 'AbortError') return;
-			error = cause;
-		} finally {
-			loading = false;
-		}
-	}
-
-	$effect(() => {
-		void target.id;
-		loading = true;
-		containers = [];
-		commands = [];
-		const controller = new AbortController();
-		void load(controller.signal);
-		return () => controller.abort();
-	});
+	$effect(() => fleet.retain());
 
 	// A pending command is worth a closer look: 5 s instead of the 30 s cadence.
 	$effect(() => {
-		const period = busy ? 5_000 : 30_000;
-		const controller = new AbortController();
-		const timer = setInterval(() => void untrack(() => load(controller.signal)), period);
-		return () => {
-			controller.abort();
-			clearInterval(timer);
-		};
+		fleet.poll(fleet.busy ? 5_000 : 30_000);
 	});
 
 	// --- Actions --------------------------------------------------------------------
 
 	async function savePolicy(c: ContainerView, patch: Partial<ContainerPolicy>) {
-		const previous = c.policy;
-		const next = { ...previous, ...patch };
-		savingPolicy = { ...savingPolicy, [c.name]: true };
 		rowError = { ...rowError, [c.name]: null };
-		c.policy = next;
-		try {
-			c.policy = await setContainerPolicy(target.id, c.name, next);
-		} catch (cause) {
-			c.policy = previous;
-			rowError = { ...rowError, [c.name]: cause };
-		} finally {
-			savingPolicy = { ...savingPolicy, [c.name]: false };
-		}
+		const failure = await fleet.setPolicy(c, patch);
+		if (failure) rowError = { ...rowError, [c.name]: failure };
 	}
 
 	async function act(c: ContainerView, kind: 'restart' | 'update') {
@@ -168,7 +122,7 @@
 					: await updateContainer(target.id, c.name, c.policy.prune_old_image);
 			c.last_command = command;
 			showResult = { ...showResult, [c.name]: false };
-			await load();
+			await fleet.load();
 		} catch (cause) {
 			rowError = { ...rowError, [c.name]: cause };
 		} finally {
@@ -178,21 +132,21 @@
 </script>
 
 <FoldSection kind="containers" title="Containers" {summary} class="rise-in">
-	{#if error}
+	{#if fleet.error}
 		<div class="px-5 py-4">
-			<ErrorNotice {error} title="Could not load the containers" onretry={() => void load()} />
+			<ErrorNotice error={fleet.error} title="Could not load the containers" onretry={() => void fleet.load()} />
 		</div>
-	{:else if loading}
+	{:else if fleet.loading}
 		<div class="flex flex-col gap-3 px-5 py-4" aria-busy="true" aria-label="Loading containers">
 			<Skeleton class="h-12 w-full" rows={3} />
 		</div>
-	{:else if containers.length === 0}
-		<p class="px-5 py-4 text-sm text-ink-2">No Docker on this machine.</p>
+	{:else if fleet.containers.length === 0}
+		<p class="px-5 py-4 text-sm text-ink-2">No Docker on this machine, or the agent cannot reach its socket (add the agent to the docker group or run it as root).</p>
 	{:else}
 		<ul class="divide-y divide-line">
-			{#each containers as c, i (c.name)}
+			{#each fleet.containers as c, i (c.name)}
 				{@const s = stateOf(c)}
-				{@const saving = savingPolicy[c.name] ?? false}
+				{@const saving = fleet.saving[c.name] ?? false}
 				{@const working = (acting[c.name] ?? false) || isPending(c.last_command)}
 				{@const charts = metrics.get(c.name) ?? []}
 				<FoldRow id={`container-${target.id}-${i}`} bind:open={openRows[c.name]} class="rise-in" style="--rise-delay: {Math.min(i, 8) * 40}ms">
@@ -273,7 +227,7 @@
 		<!-- History of what was asked of the agent -->
 		<div class="graticule border-t border-line px-5 py-4">
 			<h3 class="text-sm font-semibold text-ink">Recent actions</h3>
-			{#if commands.length === 0}
+			{#if fleet.commands.length === 0}
 				<p class="mt-1 text-sm text-ink-2">Nothing yet. Open a container and restart or update it.</p>
 			{:else}
 				<ul class="mt-2 flex flex-col gap-1.5" aria-live="polite">
@@ -290,9 +244,9 @@
 						</li>
 					{/each}
 				</ul>
-				{#if commands.length > 5}
+				{#if fleet.commands.length > 5}
 					<Button size="sm" variant="ghost" class="mt-2" onclick={() => (showAllCommands = !showAllCommands)}>
-						{showAllCommands ? 'Show fewer' : `Show all (${commands.length})`}
+						{showAllCommands ? 'Show fewer' : `Show all (${fleet.commands.length})`}
 					</Button>
 				{/if}
 			{/if}

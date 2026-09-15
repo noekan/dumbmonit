@@ -156,7 +156,7 @@ ENVIRONMENT VARIABLES (override the file):
     EZYMONIT_AGENT_DOCKER           Container inventory (true/false)
     EZYMONIT_AGENT_DOCKER_UPDATE_CHECK  Compare images with their registry (true/false)
     EZYMONIT_AGENT_COMMANDS         Accept container actions from the server (true/false)
-    EZYMONIT_AGENT_PLAKAR_KLOSETS   Plakar klosets to watch, comma-separated
+    EZYMONIT_AGENT_PLAKAR_KLOSETS   Plakar klosets to watch, comma-separated (default: discovered)
     EZYMONIT_AGENT_PLAKAR_BIN       Path to the plakar binary (default: plakar on PATH)
     EZYMONIT_AGENT_PLAKAR_HOME      HOME used when running plakar
     EZYMONIT_AGENT_PLAKAR_INTERVAL_SECS  Seconds between two kloset readings

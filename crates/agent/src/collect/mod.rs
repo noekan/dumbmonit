@@ -12,6 +12,7 @@
 //! ce serait ce même état qui mentirait au premier redémarrage.
 
 pub mod docker;
+pub mod filter;
 pub mod plakar;
 pub mod registry;
 pub mod services;
@@ -21,25 +22,141 @@ use std::collections::BTreeMap;
 
 use ezymonit_proto::{MetricKind, Sample};
 use sysinfo::{
-    CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessRefreshKind, ProcessesToUpdate,
-    RefreshKind, System,
+    CpuRefreshKind, DiskRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind, System,
 };
 
-use crate::collect::docker::ContainerStat;
-use crate::collect::plakar::KlosetStat;
+use crate::collect::docker::ContainerInventory;
+use crate::collect::filter::NameFilter;
+use crate::collect::plakar::PlakarReport;
 use crate::collect::services::ServiceState;
 use crate::collect::system_health::SystemHealthStat;
 
 /// Systèmes de fichiers virtuels : ils ne représentent aucun espace réel et
 /// n'apporteraient que du bruit — et, pour les surcouches de conteneurs, une
 /// explosion du nombre de séries.
-const PSEUDO_FILESYSTEMS: &[&str] =
-    &["overlay", "squashfs", "devtmpfs", "proc", "sysfs", "cgroup", "cgroup2", "devfs", "autofs"];
+const PSEUDO_FILESYSTEMS: &[&str] = &[
+    "overlay",
+    "squashfs",
+    "devtmpfs",
+    "devfs",
+    "devpts",
+    "proc",
+    "sysfs",
+    "cgroup",
+    "cgroup2",
+    "cgroupfs",
+    "autofs",
+    "tmpfs",
+    "ramfs",
+    "nsfs",
+    "binfmt_misc",
+    "efivarfs",
+    "bpf",
+    "tracefs",
+    "debugfs",
+    "configfs",
+    "securityfs",
+    "hugetlbfs",
+    "mqueue",
+    "pstore",
+    "rpc_pipefs",
+    "fusectl",
+];
+
+/// Les montages FUSE (`fuse.<programme>`) sont presque tous des vues
+/// applicatives — portail de documents, `gvfsd`, `lxcfs` — sans espace propre.
+/// Sauf ceux-ci, qui sont de vrais supports de stockage : un agrégat `mergerfs`
+/// ou un montage `rclone` est exactement ce qu'un homelab veut surveiller.
+const FUSE_STORAGE: &[&str] = &[
+    "fuse.mergerfs",
+    "fuse.sshfs",
+    "fuse.rclone",
+    "fuse.s3fs",
+    "fuse.glusterfs",
+    "fuse.ceph-fuse",
+    "fuse.juicefs",
+    "fuse.seaweedfs",
+    "fuse.encfs",
+    "fuse.gocryptfs",
+    "fuse.cryfs",
+    "fuse.bindfs",
+    "fuse.unionfs",
+    "fuse.unionfs-fuse",
+];
+
+/// Un système de fichiers sans espace réel derrière lui.
+pub fn is_pseudo_filesystem(fs_type: &str) -> bool {
+    PSEUDO_FILESYSTEMS.contains(&fs_type)
+        || (fs_type.starts_with("fuse.") && !FUSE_STORAGE.contains(&fs_type))
+}
+
+/// Motif par défaut des interfaces ignorées : les interfaces virtuelles des
+/// conteneurs et machines virtuelles, et la boucle locale.
+pub const DEFAULT_INTERFACES_IGNORE: &str = "^(veth|br-|docker|virbr|lo$|vEthernet)";
+
+/// Motif par défaut des points de montage ignorés : ce que le système ou un
+/// moteur de conteneurs monte pour lui-même. Sous `/run`, les sous-arbres sont
+/// énumérés plutôt que le répertoire entier : `/run/media/` est là où `udisks`
+/// monte les disques amovibles, et un disque USB de sauvegarde se surveille.
+pub const DEFAULT_MOUNTS_IGNORE: &str = "^/(var/lib/docker/|run/(user|docker|containerd|snapd|credentials|systemd|lock|udev|netns|lxc|lxd)/|sys/|proc/|dev/|snap/)";
+
+/// Un cycle sur dix, la liste des montages est relue et les processus
+/// recomptés là où il n'y a pas de raccourci. Cinq minutes à la période par
+/// défaut : un disque branché apparaît vite, sans que chaque cycle repasse sur
+/// des centaines de montages de conteneurs.
+pub const RELIST_EVERY: u64 = 10;
+
+/// Périmètre de la collecte système, fixé par la configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbeConfig {
+    /// Interfaces réseau ignorées, par leur nom.
+    pub interfaces_ignore: NameFilter,
+    /// Si non vide, seules ces interfaces sont remontées ; `interfaces_ignore`
+    /// n'est alors plus consulté.
+    pub interfaces_only: NameFilter,
+    /// Points de montage ignorés, pour l'espace disque comme pour les
+    /// entrées/sorties.
+    pub mounts_ignore: NameFilter,
+    /// Une série d'usage par cœur, en plus de l'usage global.
+    pub cpu_per_core: bool,
+}
+
+impl Default for ProbeConfig {
+    fn default() -> Self {
+        Self {
+            interfaces_ignore: NameFilter::parse("interfaces_ignore", &[DEFAULT_INTERFACES_IGNORE])
+                .expect("default interface pattern is valid"),
+            interfaces_only: NameFilter::none(),
+            mounts_ignore: NameFilter::parse("mounts_ignore", &[DEFAULT_MOUNTS_IGNORE])
+                .expect("default mount pattern is valid"),
+            cpu_per_core: false,
+        }
+    }
+}
+
+impl ProbeConfig {
+    /// Une interface mérite-t-elle des séries ?
+    pub fn keeps_interface(&self, name: &str) -> bool {
+        if !self.interfaces_only.is_empty() {
+            return self.interfaces_only.matches(name);
+        }
+        !self.interfaces_ignore.matches(name)
+    }
+
+    /// Un montage mérite-t-il des séries ? Le type est jugé avant le chemin :
+    /// c'est le test le moins cher, et il élimine l'essentiel.
+    pub fn keeps_mount(&self, mount_point: &str, fs_type: &str) -> bool {
+        !is_pseudo_filesystem(fs_type) && !self.mounts_ignore.matches(mount_point)
+    }
+}
 
 /// Usage processeur, global et détaillé.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CpuStat {
     pub global_percent: f64,
+    /// Nombre de cœurs logiques, indépendant du détail par cœur.
+    pub core_count: usize,
+    /// Usage par cœur ; vide quand le détail est désactivé.
     pub per_core_percent: Vec<f64>,
     /// Charge moyenne à 1, 5 et 15 minutes. Absente sur Windows, qui n'a pas cette
     /// notion — mieux vaut ne rien remonter qu'une série constamment à zéro.
@@ -75,10 +192,12 @@ pub struct InterfaceStat {
     pub tx_errors: u64,
 }
 
+/// Compteurs d'un périphérique bloc. Un seul jeu par périphérique, quel que
+/// soit le nombre de ses points de montage : les octets lus sur `/dev/sda1`
+/// sont les mêmes vus de `/` ou d'un montage lié.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiskIoStat {
     pub device: String,
-    pub mount_point: String,
     pub read_bytes: u64,
     pub written_bytes: u64,
 }
@@ -99,12 +218,13 @@ pub struct Snapshot {
     pub disk_io: Vec<DiskIoStat>,
     pub host: HostStat,
     pub services: Vec<(String, ServiceState)>,
-    pub containers: Option<Vec<ContainerStat>>,
+    /// Inventaire Docker. `None` : pas de démon, ou collecte désactivée.
+    pub containers: Option<ContainerInventory>,
     /// Santé du système d'exploitation (Linux seulement). `None` : collecteur
     /// désactivé, ou plateforme sans équivalent.
     pub system_health: Option<SystemHealthStat>,
-    /// Klosets Plakar. `None` : aucun kloset configuré.
-    pub backups: Option<Vec<KlosetStat>>,
+    /// Sauvegardes Plakar. `None` : première lecture pas encore aboutie.
+    pub backups: Option<PlakarReport>,
 }
 
 impl Snapshot {
@@ -154,7 +274,7 @@ fn percent(used: u64, total: u64) -> f64 {
 pub fn cpu_samples(cpu: &CpuStat, now_ms: i64) -> Vec<Sample> {
     let mut samples = vec![
         gauge("cpu_usage_percent", cpu.global_percent, now_ms),
-        gauge("cpu_count", cpu.per_core_percent.len() as f64, now_ms),
+        gauge("cpu_count", cpu.core_count as f64, now_ms),
     ];
     for (index, usage) in cpu.per_core_percent.iter().enumerate() {
         samples.push(
@@ -233,11 +353,7 @@ pub fn disk_io_samples(disks: &[DiskIoStat], now_ms: i64) -> Vec<Sample> {
         for (metric, value) in
             [("disk_read_bytes", disk.read_bytes), ("disk_written_bytes", disk.written_bytes)]
         {
-            samples.push(
-                counter(metric, value, now_ms)
-                    .with_label("device", &disk.device)
-                    .with_label("mountpoint", &disk.mount_point),
-            );
+            samples.push(counter(metric, value, now_ms).with_label("device", &disk.device));
         }
     }
     samples
@@ -261,13 +377,17 @@ pub fn service_samples(services: &[(String, ServiceState)], now_ms: i64) -> Vec<
         .collect()
 }
 
-pub fn container_samples(containers: &[ContainerStat], now_ms: i64) -> Vec<Sample> {
-    let running = containers.iter().filter(|container| container.running).count();
+/// Les compteurs portent sur l'inventaire entier ; le détail, sur les seuls
+/// conteneurs retenus par le plafond. `container_series_skipped` — toujours
+/// émis, à zéro le plus souvent — dit combien en sont exclus, pour qu'un
+/// plafond atteint se voie au lieu de passer pour des conteneurs disparus.
+pub fn container_samples(inventory: &ContainerInventory, now_ms: i64) -> Vec<Sample> {
     let mut samples = vec![
-        gauge("container_count", containers.len() as f64, now_ms),
-        gauge("container_running_count", running as f64, now_ms),
+        gauge("container_count", inventory.total as f64, now_ms),
+        gauge("container_running_count", inventory.running as f64, now_ms),
+        gauge("container_series_skipped", inventory.skipped() as f64, now_ms),
     ];
-    for container in containers {
+    for container in &inventory.detailed {
         let labelled = |sample: Sample| {
             sample.with_label("container", &container.name).with_label("image", &container.image)
         };
@@ -326,20 +446,34 @@ pub fn agent_samples(
 /// deux lectures, et repartir d'un `System` neuf à chaque cycle donnerait des
 /// valeurs fantaisistes.
 pub struct SystemProbe {
+    config: ProbeConfig,
     system: System,
     networks: Networks,
     disks: Disks,
+    /// Numéro du cycle, pour espacer les relectures coûteuses.
+    cycle: u64,
+    /// Dernier nombre de processus connu, là où le recompter coûte un parcours
+    /// complet de la table des processus.
+    #[cfg(not(target_os = "linux"))]
+    process_count: u64,
 }
 
 impl SystemProbe {
-    pub fn new() -> Self {
+    pub fn new(config: &ProbeConfig) -> Self {
         let refreshes = RefreshKind::nothing()
             .with_cpu(CpuRefreshKind::nothing().with_cpu_usage())
             .with_memory(MemoryRefreshKind::nothing().with_ram().with_swap());
+        // La liste des montages seulement, sans `statvfs` sur chacun : les
+        // montages retenus sont lus au premier cycle, les autres jamais.
+        let disks = Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing());
         Self {
+            config: config.clone(),
             system: System::new_with_specifics(refreshes),
             networks: Networks::new_with_refreshed_list(),
-            disks: Disks::new_with_refreshed_list(),
+            disks,
+            cycle: 0,
+            #[cfg(not(target_os = "linux"))]
+            process_count: 0,
         }
     }
 
@@ -354,18 +488,17 @@ impl SystemProbe {
     }
 
     pub fn read(&mut self) -> Snapshot {
+        let relist = self.cycle.is_multiple_of(RELIST_EVERY);
+        self.cycle = self.cycle.wrapping_add(1);
+
         self.system.refresh_cpu_usage();
         self.system.refresh_memory();
-        // `ProcessRefreshKind::nothing()` : seul le nombre de processus nous
-        // intéresse, il serait absurde de lire la ligne de commande et la mémoire
-        // de chacun d'eux à chaque cycle.
-        self.system.refresh_processes_specifics(
-            ProcessesToUpdate::All,
-            true,
-            ProcessRefreshKind::nothing(),
-        );
+        // `sysinfo` relit toujours `/sys/class/net` en entier : il n'existe pas
+        // de rafraîchissement partiel des interfaces. Le filtre s'applique donc à
+        // la mise en forme, pas à la lecture — ce sont les séries qui coûtent.
         self.networks.refresh(true);
-        self.disks.refresh(true);
+        self.refresh_disks(relist);
+        let process_count = self.process_count(relist);
 
         Snapshot {
             cpu: self.read_cpu(),
@@ -373,15 +506,60 @@ impl SystemProbe {
             filesystems: self.read_filesystems(),
             interfaces: self.read_interfaces(),
             disk_io: self.read_disk_io(),
-            host: HostStat {
-                uptime_secs: System::uptime(),
-                process_count: self.system.processes().len() as u64,
-            },
+            host: HostStat { uptime_secs: System::uptime(), process_count },
             services: Vec::new(),
             containers: None,
             system_health: None,
             backups: None,
         }
+    }
+
+    /// Rafraîchit les seuls montages retenus.
+    ///
+    /// Un rafraîchissement complet fait un `statvfs` par montage — sur une
+    /// machine à conteneurs, une centaine de surcouches `overlay` dont on ne
+    /// gardera rien. La liste n'est relue qu'un cycle sur [`RELIST_EVERY`], sans
+    /// lecture d'espace ; à chaque cycle, seuls les montages qui passent le
+    /// filtre sont réellement mesurés.
+    fn refresh_disks(&mut self, relist: bool) {
+        if relist {
+            self.disks.refresh_specifics(true, DiskRefreshKind::nothing());
+        }
+        let wanted = DiskRefreshKind::nothing().with_storage().with_io_usage();
+        for disk in self.disks.list_mut() {
+            let mount_point = disk.mount_point().to_string_lossy();
+            let fs_type = disk.file_system().to_string_lossy();
+            if self.config.keeps_mount(&mount_point, &fs_type) {
+                disk.refresh_specifics(wanted);
+            }
+        }
+    }
+
+    /// Nombre de processus. Sur Linux, le noyau le tient à jour dans
+    /// `/proc/loadavg` (quatrième champ, `en cours/total`) : une ligne à lire,
+    /// contre un parcours de `/proc` entier.
+    #[cfg(target_os = "linux")]
+    fn process_count(&mut self, _relist: bool) -> u64 {
+        std::fs::read_to_string("/proc/loadavg")
+            .ok()
+            .and_then(|text| parse_loadavg_process_count(&text))
+            .unwrap_or(0)
+    }
+
+    /// Ailleurs, seul `sysinfo` sait compter, et il lit chaque processus pour
+    /// cela : on ne le fait qu'un cycle sur [`RELIST_EVERY`].
+    #[cfg(not(target_os = "linux"))]
+    fn process_count(&mut self, relist: bool) -> u64 {
+        use sysinfo::{ProcessRefreshKind, ProcessesToUpdate};
+        if relist || self.process_count == 0 {
+            self.system.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                true,
+                ProcessRefreshKind::nothing(),
+            );
+            self.process_count = self.system.processes().len() as u64;
+        }
+        self.process_count
     }
 
     fn read_cpu(&self) -> CpuStat {
@@ -393,14 +571,15 @@ impl SystemProbe {
         #[cfg(not(unix))]
         let load_average = None;
 
+        let cpus = self.system.cpus();
         CpuStat {
             global_percent: f64::from(self.system.global_cpu_usage()),
-            per_core_percent: self
-                .system
-                .cpus()
-                .iter()
-                .map(|cpu| f64::from(cpu.cpu_usage()))
-                .collect(),
+            core_count: cpus.len(),
+            per_core_percent: if self.config.cpu_per_core {
+                cpus.iter().map(|cpu| f64::from(cpu.cpu_usage())).collect()
+            } else {
+                Vec::new()
+            },
             load_average,
         }
     }
@@ -419,10 +598,10 @@ impl SystemProbe {
         let mut seen = BTreeMap::new();
         for disk in self.disks.list() {
             let fs_type = disk.file_system().to_string_lossy().to_string();
-            if PSEUDO_FILESYSTEMS.contains(&fs_type.as_str()) || disk.total_space() == 0 {
+            let mount_point = disk.mount_point().to_string_lossy().to_string();
+            if !self.config.keeps_mount(&mount_point, &fs_type) || disk.total_space() == 0 {
                 continue;
             }
-            let mount_point = disk.mount_point().to_string_lossy().to_string();
             // Un même volume monté deux fois (montage lié, espace de noms de
             // conteneur) ne doit compter qu'une fois par point de montage.
             seen.entry(mount_point.clone()).or_insert_with(|| FilesystemStat {
@@ -437,8 +616,10 @@ impl SystemProbe {
     }
 
     fn read_interfaces(&self) -> Vec<InterfaceStat> {
-        self.networks
+        let mut interfaces: Vec<InterfaceStat> = self
+            .networks
             .iter()
+            .filter(|(name, _)| self.config.keeps_interface(name))
             .map(|(name, data)| InterfaceStat {
                 name: name.clone(),
                 rx_bytes: data.total_received(),
@@ -448,44 +629,71 @@ impl SystemProbe {
                 rx_errors: data.total_errors_on_received(),
                 tx_errors: data.total_errors_on_transmitted(),
             })
-            .collect()
+            .collect();
+        // `sysinfo` range les interfaces dans une table de hachage : l'ordre des
+        // échantillons changerait d'un cycle à l'autre sans raison.
+        interfaces.sort_by(|a, b| a.name.cmp(&b.name));
+        interfaces
     }
 
+    /// Une entrée par périphérique bloc : le premier montage retenu qui le
+    /// porte donne ses compteurs, les suivants sont le même disque vu d'ailleurs.
     fn read_disk_io(&self) -> Vec<DiskIoStat> {
-        self.disks
-            .list()
-            .iter()
-            .map(|disk| {
+        let mut seen = BTreeMap::new();
+        for disk in self.disks.list() {
+            let fs_type = disk.file_system().to_string_lossy();
+            let mount_point = disk.mount_point().to_string_lossy();
+            if !self.config.keeps_mount(&mount_point, &fs_type) || disk.total_space() == 0 {
+                continue;
+            }
+            // Sur Windows, un volume sans nom a un `name()` vide ; le serveur
+            // ignore une étiquette vide, et deux volumes anonymes fusionneraient
+            // en une seule série. Le point de montage (`C:\`) les distingue.
+            let device = match disk.name().to_string_lossy() {
+                name if name.is_empty() => mount_point.to_string(),
+                name => name.to_string(),
+            };
+            seen.entry(device.clone()).or_insert_with(|| {
                 let usage = disk.usage();
                 DiskIoStat {
-                    device: disk.name().to_string_lossy().to_string(),
-                    mount_point: disk.mount_point().to_string_lossy().to_string(),
+                    device,
                     read_bytes: usage.total_read_bytes,
                     written_bytes: usage.total_written_bytes,
                 }
-            })
-            .collect()
+            });
+        }
+        seen.into_values().collect()
     }
+}
+
+/// Quatrième champ de `/proc/loadavg` : `en cours/total`. On veut le total.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_loadavg_process_count(text: &str) -> Option<u64> {
+    let (_, total) = text.split_whitespace().nth(3)?.split_once('/')?;
+    total.parse().ok()
 }
 
 impl Default for SystemProbe {
     fn default() -> Self {
-        Self::new()
+        Self::new(&ProbeConfig::default())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::collect::docker::ContainerStat;
+    use crate::collect::plakar::KlosetStat;
 
     fn value_of(samples: &[Sample], series_key: &str) -> Option<f64> {
         samples.iter().find(|s| s.series_key() == series_key).map(|s| s.value)
     }
 
     #[test]
-    fn cpu_samples_carry_one_series_per_core() {
+    fn cpu_samples_carry_one_series_per_core_when_detailed() {
         let cpu = CpuStat {
             global_percent: 42.0,
+            core_count: 2,
             per_core_percent: vec![10.0, 74.0],
             load_average: Some([0.5, 0.4, 0.3]),
         };
@@ -500,13 +708,101 @@ mod tests {
     }
 
     #[test]
+    fn without_per_core_detail_the_core_count_is_still_reported() {
+        // Le détail par cœur est désactivé par défaut : autant de séries que de
+        // cœurs, pour des courbes que personne ne regarde. Le nombre de cœurs,
+        // lui, reste utile aux règles d'alerte sur la charge moyenne.
+        let cpu = CpuStat { global_percent: 42.0, core_count: 16, ..CpuStat::default() };
+        let samples = cpu_samples(&cpu, 0);
+        assert_eq!(value_of(&samples, "cpu_count"), Some(16.0));
+        assert!(samples.iter().all(|s| s.metric != "cpu_core_usage_percent"));
+    }
+
+    #[test]
     fn without_a_load_average_no_series_is_emitted() {
         // Sur Windows, publier trois séries constamment nulles ferait croire à une
         // machine au repos plutôt qu'à une mesure indisponible.
-        let cpu =
-            CpuStat { global_percent: 1.0, per_core_percent: vec![1.0], ..CpuStat::default() };
+        let cpu = CpuStat { global_percent: 1.0, core_count: 1, ..CpuStat::default() };
         let samples = cpu_samples(&cpu, 0);
         assert!(samples.iter().all(|s| !s.metric.starts_with("load_average")));
+    }
+
+    #[test]
+    fn the_default_interface_filter_drops_virtual_interfaces_only() {
+        let config = ProbeConfig::default();
+        for name in ["veth1a2b3c", "br-9f8e7d", "docker0", "virbr0", "lo", "vEthernet (WSL)"] {
+            assert!(!config.keeps_interface(name), "{name} should be dropped");
+        }
+        for name in ["eth0", "enp3s0", "wlp2s0", "bond0", "Ethernet", "Wi-Fi", "lo0"] {
+            assert!(config.keeps_interface(name), "{name} should be kept");
+        }
+    }
+
+    #[test]
+    fn an_allow_list_takes_precedence_over_the_ignore_list() {
+        let config = ProbeConfig {
+            interfaces_only: NameFilter::parse("interfaces_only", &["docker0", "^en"]).unwrap(),
+            ..ProbeConfig::default()
+        };
+        assert!(config.keeps_interface("docker0"), "explicitly allowed despite the default");
+        assert!(config.keeps_interface("enp3s0"));
+        assert!(!config.keeps_interface("eth0"), "not in the allow list");
+    }
+
+    #[test]
+    fn the_default_mount_filter_drops_runtime_and_pseudo_mounts() {
+        let config = ProbeConfig::default();
+        for (mount, fs) in [
+            ("/var/lib/docker/overlay2/abc/merged", "overlay"),
+            ("/var/lib/docker/volumes", "ext4"),
+            ("/run/user/1000", "tmpfs"),
+            ("/run/user/1000/doc", "fuse.portal"),
+            ("/run/user/1000/gvfs", "fuse.gvfsd-fuse"),
+            ("/run/docker/netns/abc", "nsfs"),
+            ("/run/credentials/systemd-resolved.service", "ramfs"),
+            ("/run/snapd/ns", "tmpfs"),
+            ("/run/user/1000/backup-bind", "ext4"),
+            ("/tmp", "tmpfs"),
+            ("/dev/shm", "tmpfs"),
+            ("/sys/fs/bpf", "bpf"),
+            ("/proc/sys/fs/binfmt_misc", "binfmt_misc"),
+            ("/snap/core/1234", "squashfs"),
+            ("/var/lib/lxcfs", "fuse.lxcfs"),
+        ] {
+            assert!(!config.keeps_mount(mount, fs), "{mount} ({fs}) should be dropped");
+        }
+        for (mount, fs) in [
+            ("/", "ext4"),
+            ("/boot", "ext4"),
+            ("/boot/efi", "vfat"),
+            ("/home", "btrfs"),
+            ("/mnt/pool", "fuse.mergerfs"),
+            ("/mnt/cloud", "fuse.rclone"),
+            ("/srv/nfs", "nfs4"),
+            ("/run/media/user/USB", "exfat"),
+            ("C:\\", "NTFS"),
+        ] {
+            assert!(config.keeps_mount(mount, fs), "{mount} ({fs}) should be kept");
+        }
+    }
+
+    #[test]
+    fn a_custom_mount_filter_replaces_the_default() {
+        let config = ProbeConfig {
+            mounts_ignore: NameFilter::parse("mounts_ignore", &["/boot/efi", "^/mnt/"]).unwrap(),
+            ..ProbeConfig::default()
+        };
+        assert!(!config.keeps_mount("/boot/efi", "vfat"));
+        assert!(!config.keeps_mount("/mnt/scratch", "ext4"));
+        assert!(config.keeps_mount("/var/lib/docker/volumes", "ext4"), "no longer ignored");
+        assert!(!config.keeps_mount("/var/lib/docker/overlay2/x/merged", "overlay"), "pseudo");
+    }
+
+    #[test]
+    fn the_process_count_is_read_from_loadavg() {
+        assert_eq!(parse_loadavg_process_count("0.52 0.58 0.59 2/1234 56789\n"), Some(1234));
+        assert_eq!(parse_loadavg_process_count("garbage"), None);
+        assert_eq!(parse_loadavg_process_count("0.1 0.2 0.3 x 1"), None);
     }
 
     #[test]
@@ -577,19 +873,15 @@ mod tests {
     }
 
     #[test]
-    fn disk_io_is_reported_as_counters() {
-        let disks = vec![DiskIoStat {
-            device: "/dev/sda".into(),
-            mount_point: "/".into(),
-            read_bytes: 4_096,
-            written_bytes: 8_192,
-        }];
+    fn disk_io_is_reported_as_counters_per_device() {
+        let disks =
+            vec![DiskIoStat { device: "/dev/sda".into(), read_bytes: 4_096, written_bytes: 8_192 }];
         let samples = disk_io_samples(&disks, 0);
         assert!(samples.iter().all(|s| s.kind == MetricKind::Counter));
-        assert_eq!(
-            value_of(&samples, r#"disk_written_bytes{device="/dev/sda",mountpoint="/"}"#),
-            Some(8_192.0)
-        );
+        // Plus d'étiquette `mountpoint` : un périphérique monté deux fois donnait
+        // deux fois la même courbe.
+        assert_eq!(value_of(&samples, r#"disk_written_bytes{device="/dev/sda"}"#), Some(8_192.0));
+        assert!(samples.iter().all(|s| !s.labels.contains_key("mountpoint")));
     }
 
     #[test]
@@ -627,9 +919,11 @@ mod tests {
                 ..ContainerStat::default()
             },
         ];
-        let samples = container_samples(&containers, 0);
+        let inventory = ContainerInventory::new(containers, 200);
+        let samples = container_samples(&inventory, 0);
         assert_eq!(value_of(&samples, "container_count"), Some(2.0));
         assert_eq!(value_of(&samples, "container_running_count"), Some(1.0));
+        assert_eq!(value_of(&samples, "container_series_skipped"), Some(0.0));
         let key = r#"{container="vaultwarden",image="vaultwarden:1"}"#;
         assert_eq!(value_of(&samples, &format!("container_up{key}")), Some(1.0));
         assert_eq!(value_of(&samples, &format!("container_health{key}")), Some(2.0));
@@ -648,12 +942,41 @@ mod tests {
         assert_eq!(value_of(&samples, &format!("container_started_seconds{key}")), Some(0.0));
         assert_eq!(value_of(&samples, &format!("container_update_available{key}")), Some(-1.0));
         assert_eq!(value_of(&samples, &format!("container_image_age_seconds{key}")), None);
+
+        // Seules deux étiquettes identifient un conteneur : en ajouter une
+        // (réseau, port, identifiant) multiplierait les séries d'autant.
+        for sample in
+            samples.iter().filter(|s| s.metric.starts_with("container_") && !s.labels.is_empty())
+        {
+            let keys: Vec<&str> = sample.labels.keys().map(String::as_str).collect();
+            assert_eq!(keys, ["container", "image"], "{}", sample.metric);
+        }
+    }
+
+    #[test]
+    fn beyond_the_cap_containers_are_counted_but_not_detailed() {
+        let containers: Vec<ContainerStat> = (0..5)
+            .map(|i| ContainerStat {
+                name: format!("c{i}"),
+                image: "app:1".into(),
+                running: i % 2 == 0,
+                ..ContainerStat::default()
+            })
+            .collect();
+        let inventory = ContainerInventory::new(containers, 2);
+        let samples = container_samples(&inventory, 0);
+        assert_eq!(value_of(&samples, "container_count"), Some(5.0));
+        assert_eq!(value_of(&samples, "container_running_count"), Some(3.0));
+        assert_eq!(value_of(&samples, "container_series_skipped"), Some(3.0));
+        assert_eq!(samples.iter().filter(|s| s.metric == "container_up").count(), 2);
+        // Les conteneurs en marche passent devant : ce sont eux qu'on surveille.
+        assert!(samples.iter().all(|s| { s.metric != "container_up" || s.value == 1.0 }));
     }
 
     #[test]
     fn a_full_snapshot_produces_every_family_at_the_same_instant() {
         let snapshot = Snapshot {
-            cpu: CpuStat { global_percent: 5.0, per_core_percent: vec![5.0], load_average: None },
+            cpu: CpuStat { global_percent: 5.0, core_count: 1, ..CpuStat::default() },
             memory: MemoryStat { total_bytes: 100, used_bytes: 40, ..MemoryStat::default() },
             filesystems: vec![FilesystemStat {
                 mount_point: "/".into(),
@@ -671,30 +994,31 @@ mod tests {
                 rx_errors: 0,
                 tx_errors: 0,
             }],
-            disk_io: vec![DiskIoStat {
-                device: "sda".into(),
-                mount_point: "/".into(),
-                read_bytes: 1,
-                written_bytes: 1,
-            }],
+            disk_io: vec![DiskIoStat { device: "sda".into(), read_bytes: 1, written_bytes: 1 }],
             host: HostStat { uptime_secs: 3_600, process_count: 120 },
             services: vec![("sshd".to_string(), ServiceState::Running)],
-            containers: Some(vec![ContainerStat {
-                name: "app".into(),
-                image: "app:1".into(),
-                running: true,
-                ..ContainerStat::default()
-            }]),
+            containers: Some(ContainerInventory::new(
+                vec![ContainerStat {
+                    name: "app".into(),
+                    image: "app:1".into(),
+                    running: true,
+                    ..ContainerStat::default()
+                }],
+                200,
+            )),
             system_health: Some(SystemHealthStat {
                 reboot_required: Some(false),
                 ..SystemHealthStat::default()
             }),
-            backups: Some(vec![KlosetStat {
-                kloset: "/srv/backups".into(),
-                storage_bytes: Some(10),
-                sources: Vec::new(),
-                readable: true,
-            }]),
+            backups: Some(PlakarReport {
+                installed: true,
+                klosets: vec![KlosetStat {
+                    kloset: "/srv/backups".into(),
+                    storage_bytes: Some(10),
+                    sources: Vec::new(),
+                    readable: true,
+                }],
+            }),
         };
 
         let samples = snapshot.to_samples(1_700_000_000_000);

@@ -46,6 +46,12 @@ sysinfo = { version = "0.39", default-features = false, features = [
 # configuration à connaître dans tout le produit.
 serde_yaml_ng = "0.10"
 
+# Filtres d'interfaces et de points de montage. Sans les fonctionnalités par
+# défaut (« perf », Unicode complet) : les noms filtrés font quelques
+# caractères, et le moteur complet pèserait lourd dans un binaire qui se veut
+# petit.
+regex = { version = "1", default-features = false, features = ["std", "unicode-perl"] }
+
 [target.'cfg(windows)'.dependencies]
 # Intégration au gestionnaire de services : point d'entrée du service, prise en
 # charge de l'ordre d'arrêt, et interrogation de l'état des services surveillés.

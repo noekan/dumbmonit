@@ -56,6 +56,11 @@ pub struct Options {
     /// Acceptation d'un certificat non vérifiable. Toujours un choix explicite.
     pub insecure_tls: bool,
     pub request_timeout: Duration,
+    /// Interrogation d'Active Backup for Business. Actif par défaut : un NAS sans le
+    /// paquet ne l'annonce pas au catalogue, et rien n'est alors demandé. L'option
+    /// sert à qui préfère ne pas voir ses sauvegardes de postes dans EzyMonit, ou
+    /// dont le compte de supervision n'a pas les droits sur le paquet.
+    pub abb: bool,
     /// Nom de session annoncé à DSM à la connexion. Un nom distinct de celui du
     /// navigateur évite que la connexion d'EzyMonit et celle de l'administrateur
     /// s'invalident mutuellement (code d'erreur 107).
@@ -71,6 +76,7 @@ impl Options {
             base_url: base_url(&target.address, scheme, port)?,
             insecure_tls: parse_bool(tag(target, "insecure_tls"))?,
             request_timeout: parse_timeout(tag(target, "request_timeout_seconds"))?,
+            abb: parse_bool_or(tag(target, "abb"), true)?,
             session_name: DEFAULT_SESSION_NAME.to_string(),
         })
     }
@@ -84,8 +90,12 @@ fn tag<'a>(target: &'a Target, key: &str) -> Option<&'a str> {
 }
 
 fn parse_bool(value: Option<&str>) -> Result<bool, ProbeError> {
+    parse_bool_or(value, false)
+}
+
+fn parse_bool_or(value: Option<&str>, default: bool) -> Result<bool, ProbeError> {
     match value {
-        None => Ok(false),
+        None => Ok(default),
         Some(raw) => match raw.to_ascii_lowercase().as_str() {
             "true" | "1" | "yes" | "oui" | "on" => Ok(true),
             "false" | "0" | "no" | "non" | "off" => Ok(false),
@@ -205,6 +215,17 @@ mod tests {
         assert!(!options.insecure_tls, "la vérification TLS reste active par défaut");
         assert_eq!(options.request_timeout, Duration::from_secs(15));
         assert_eq!(options.session_name, "DumbMonit");
+        assert!(options.abb, "Active Backup est interrogé sans rien configurer");
+    }
+
+    #[test]
+    fn active_backup_se_desactive_explicitement() {
+        assert!(!Options::from_target(&cible(&[("abb", "false")])).unwrap().abb);
+        assert!(!Options::from_target(&cible(&[("abb", "0")])).unwrap().abb);
+        assert!(Options::from_target(&cible(&[("abb", "true")])).unwrap().abb);
+        // Une étiquette vide vaut absence d'étiquette : le défaut reste actif.
+        assert!(Options::from_target(&cible(&[("abb", " ")])).unwrap().abb);
+        assert!(Options::from_target(&cible(&[("abb", "peut-être")])).is_err());
     }
 
     #[test]

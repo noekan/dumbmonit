@@ -82,12 +82,14 @@ nav:
       - How alerting works: alerting/index.md
       - Rules: alerting/rules.md
       - Maintenance windows: alerting/maintenance.md
+      - Notification policy: alerting/notifications.md
       - Notification channels: notifications.md
   - Using DumbMonit:
       - Overview page: using/overview.md
       - Devices page: using/devices.md
       - Settings: using/settings.md
       - Connect an assistant (MCP): using/assistant.md
+      - Status pages: using/status-pages.md
   - Reference:
       - HTTP API: reference/api.md
       - Configuration: reference/configuration.md

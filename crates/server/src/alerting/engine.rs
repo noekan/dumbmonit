@@ -5,7 +5,6 @@
 //! La règle qui gouverne le fichier : rien de ce qui échoue ici — VictoriaMetrics
 //! muet, canal en panne, base verrouillée — ne doit interrompre la boucle.
 
-use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -16,10 +15,12 @@ use tracing::{debug, info, warn};
 
 use crate::alerting::baseline;
 use crate::alerting::cycle::{self, CycleInput, RuleObservations};
+use crate::alerting::notify_policy::{self, Outgoing, Recipient};
 use crate::alerting::source::MetricSource;
 use crate::crypto::Cipher;
 use crate::db;
 use crate::notify;
+use crate::notify::policy_store;
 use crate::state::AppState;
 
 /// Réglages de la boucle, lus dans l'environnement.
@@ -166,7 +167,20 @@ async fn maintenance(pool: &SqlitePool, config: &AlertingConfig, now: DateTime<U
 
     let expired = db::alerts::purge_expired_silences(pool, now).await?;
 
-    debug!(historique = removed, baselines = forgotten, silences = expired, "maintenance done");
+    // Le registre des notifications ne sert qu'aux fenêtres glissantes du pipeline
+    // (plafond horaire, battement, délai minimal) : au-delà, il ne vaut rien.
+    let global = policy_store::load_global(pool).await?;
+    let channel_policies = policy_store::load_channel_policies(pool).await?;
+    let lookback = policy_store::lookback(&global, &channel_policies);
+    let ledger = policy_store::purge(pool, now, lookback).await?;
+
+    debug!(
+        historique = removed,
+        baselines = forgotten,
+        silences = expired,
+        registre = ledger,
+        "maintenance done"
+    );
     Ok(())
 }
 
@@ -190,6 +204,7 @@ pub async fn evaluate_once(
     let targets = db::alerts::list_target_nodes(pool).await?;
     let previous = db::alerts::load_states(pool).await?;
     let silences = db::alerts::list_silences(pool).await?;
+    let overrides = policy_store::list_overrides(pool, None, None).await?;
     let mut baselines = db::alerts::load_baselines(pool, baseline::bucket_of(now)).await?;
 
     let mut report = EvalReport::default();
@@ -215,7 +230,7 @@ pub async fn evaluate_once(
     }
 
     let outcome = cycle::plan_cycle(
-        CycleInput { now, observations, targets, previous, silences },
+        CycleInput { now, observations, targets, previous, silences, overrides },
         &mut baselines,
     );
 
@@ -240,11 +255,57 @@ pub async fn evaluate_once(
     db::alerts::touch_states(pool, &outcome.carried_over, now).await?;
     db::alerts::save_baselines(pool, &baselines, now).await?;
 
+    // Politique de notification : ce qui a le droit de parler passe encore par
+    // les filtres de canal, les heures calmes, la fenêtre de regroupement et le
+    // plafond horaire avant de partir (voir `notify_policy`).
     let channels = db::alerts::list_channels(pool, cipher).await?;
-    let notified = send_groups(pool, http, &channels, &outcome.groups, now, &mut report).await;
+    let global = policy_store::load_global(pool).await?;
+    let channel_policies = policy_store::load_channel_policies(pool).await?;
+    let lookback = policy_store::lookback(&global, &channel_policies);
+    let ledger = policy_store::load_ledger(pool, now, lookback).await?;
+    let recipients: Vec<Recipient> = channels
+        .iter()
+        .map(|channel| Recipient {
+            id: channel.id,
+            kind: channel.kind.clone(),
+            enabled: channel.enabled,
+            policy: channel_policies.get(&channel.id).cloned().unwrap_or_default(),
+        })
+        .collect();
+    let plan = notify_policy::plan(&outcome.groups, &recipients, &global, &ledger, now);
+    policy_store::apply_plan(pool, &plan).await?;
 
-    db::alerts::record_history(pool, &outcome.history, &notified).await?;
-    let fingerprints: Vec<String> = notified.into_iter().collect();
+    let env_url = std::env::var("EZYMONIT_PUBLIC_URL").ok();
+    let public_url = global.public_url(env_url.as_deref());
+    let window = TimeDelta::seconds(i64::from(global.batch_window_secs));
+    send_outgoing(
+        pool,
+        http,
+        &channels,
+        &plan.outgoing,
+        public_url.as_deref(),
+        window,
+        now,
+        &mut report,
+    )
+    .await;
+
+    // L'historique explique pourquoi une transition n'est pas partie : la raison
+    // du cycle (suppression, maintenance, apprentissage) prime, sinon celle de la
+    // politique (battement, filtre de canal, délai minimal).
+    let mut history = outcome.history;
+    for entry in &mut history {
+        if entry.reason.is_empty()
+            && !plan.announced.contains(&entry.fingerprint)
+            && let Some(verdict) = plan.verdicts.get(&entry.fingerprint)
+        {
+            entry.reason = verdict.clone();
+        }
+    }
+    db::alerts::record_history(pool, &history, &plan.announced).await?;
+    // Tout ce que la politique a pris en charge — parti, en attente ou écarté —
+    // est marqué : le cycle suivant ne doit pas le représenter.
+    let fingerprints: Vec<String> = plan.handled.into_iter().collect();
     db::alerts::mark_notified(pool, &fingerprints, now).await?;
 
     // La purge vient en dernier : elle s'appuie sur `last_eval_at`, que les écritures
@@ -257,54 +318,46 @@ pub async fn evaluate_once(
     Ok(report)
 }
 
-/// Envoie les messages du cycle et renvoie les empreintes effectivement notifiées.
-async fn send_groups(
+/// Envoie les messages décidés par la politique et consigne le résultat.
+///
+/// Un envoi raté remet ses lignes en file : le cycle suivant retente, exactement
+/// le comportement attendu d'une panne passagère du service de notification.
+#[allow(clippy::too_many_arguments)]
+async fn send_outgoing(
     pool: &SqlitePool,
     http: &reqwest::Client,
     channels: &[notify::ChannelConfig],
-    groups: &[crate::alerting::group::AlertGroup],
+    outgoing: &[Outgoing],
+    public_url: Option<&str>,
+    window: TimeDelta,
     now: DateTime<Utc>,
     report: &mut EvalReport,
-) -> HashSet<String> {
-    let mut notified = HashSet::new();
-
-    for group in groups {
-        let recipients = notify::select(channels, &group.channels);
-
-        if recipients.is_empty() {
-            // Aucun canal configuré : on considère l'alerte comme traitée. Sans cela,
-            // le jour où l'utilisateur branche enfin un canal, il recevrait d'un coup
-            // toutes les alertes accumulées depuis l'installation.
-            debug!(cible = %group.target_name, "no active channel, notification recorded without sending");
-            notified.extend(group.items.iter().map(|item| item.fingerprint.clone()));
+) {
+    for out in outgoing {
+        let Some(config) = channels.iter().find(|channel| channel.id == out.channel_id) else {
             continue;
-        }
+        };
+        let message = notify::render_digest(&out.digest, public_url);
+        let delivery = notify::deliver(http, config, &message).await;
 
-        let message = notify::render(group);
-        let reports = notify::dispatch(http, channels, &group.channels, &message).await;
-
-        let mut delivered = false;
-        for delivery in &reports {
-            if delivery.is_success() {
-                delivered = true;
-                report.notifications_sent += 1;
-            } else {
-                report.notifications_failed += 1;
+        if delivery.is_success() {
+            report.notifications_sent += 1;
+            if let Err(error) =
+                policy_store::record_sent(pool, out.channel_id, &out.queue_ids, &out.sent, now)
+                    .await
+            {
+                warn!(?error, "sent notification not recorded");
             }
-            if let Err(error) = db::alerts::record_delivery(pool, delivery, now).await {
-                warn!(?error, "delivery report not recorded");
+        } else {
+            report.notifications_failed += 1;
+            if let Err(error) = policy_store::requeue(pool, &out.retry, window).await {
+                warn!(?error, "failed notification not requeued");
             }
         }
-
-        // Un seul canal servi suffit : marquer l'alerte comme notifiée. Si tous ont
-        // échoué, on ne marque rien et le cycle suivant retentera — c'est
-        // exactement le comportement attendu d'une panne passagère.
-        if delivered {
-            notified.extend(group.items.iter().map(|item| item.fingerprint.clone()));
+        if let Err(error) = db::alerts::record_delivery(pool, &delivery, now).await {
+            warn!(?error, "delivery report not recorded");
         }
     }
-
-    notified
 }
 
 #[cfg(test)]

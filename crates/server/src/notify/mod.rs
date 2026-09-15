@@ -16,6 +16,7 @@ pub mod gateway;
 pub mod http;
 pub mod message;
 pub mod oncall;
+pub mod policy_store;
 pub mod push;
 pub mod secret;
 pub mod services;
@@ -31,7 +32,7 @@ pub mod catalog;
 pub use channel::{CHANNEL_KINDS, ChannelConfig, ChannelSummary};
 pub use error::NotifyError;
 pub use http::SEND_TIMEOUT;
-pub use message::{Message, TEMPLATE_VARIABLES, render, test_message};
+pub use message::{Message, TEMPLATE_VARIABLES, render, render_digest, test_message};
 
 #[async_trait]
 pub trait Notifier: Send + Sync {

@@ -205,9 +205,7 @@ impl TaskEntry {
     /// Une tâche terminée avec des avertissements a bien fait son travail : un
     /// `WARNINGS: 2` sur une sauvegarde de cent machines n'est pas un échec.
     pub fn succeeded(&self) -> bool {
-        self.status.as_deref().is_some_and(|s| {
-            s.eq_ignore_ascii_case("ok") || s.to_ascii_uppercase().starts_with("WARNINGS")
-        })
+        self.status.as_deref().is_some_and(state_is_success)
     }
 
     /// Datastore visé par la tâche, tiré de `worker_id`.
@@ -216,6 +214,79 @@ impl TaskEntry {
         let store = id.split(':').next().unwrap_or_default();
         (!store.is_empty()).then_some(store)
     }
+}
+
+/// Vrai si un état final de tâche ou de travail (`status`, `last-run-state`)
+/// est un succès : `OK`, ou `WARNINGS: n` — le travail a été fait, avec des
+/// réserves.
+pub fn state_is_success(state: &str) -> bool {
+    state.eq_ignore_ascii_case("ok") || state.to_ascii_uppercase().starts_with("WARNINGS")
+}
+
+/// Entrée de `GET /api2/json/admin/sync`, `/admin/verify` et `/admin/prune`.
+///
+/// PBS renvoie la configuration de chaque travail aplatie avec l'état de sa
+/// planification (`SyncJobStatus`, `VerificationJobStatus`, `PruneJobStatus`
+/// dans `pbs-api-types`). Les champs de configuration propres à chaque type
+/// (`keep-daily`, `outdated-after`…) sont ignorés : seuls comptent l'identité
+/// du travail et son dernier passage.
+#[derive(Debug, Default, Deserialize)]
+pub struct JobEntry {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub store: String,
+    /// Booléen chez PBS ; `Num` absorbe aussi un `0`/`1` ou une chaîne.
+    #[serde(default)]
+    pub disable: Option<Num>,
+    /// Synchronisation seulement : le dépôt distant et son datastore. Absents
+    /// pour une synchronisation locale, entre deux datastores du même serveur.
+    #[serde(default)]
+    pub remote: Option<String>,
+    #[serde(default, rename = "remote-store")]
+    pub remote_store: Option<String>,
+    /// Prochain passage planifié, en secondes Unix. Absent sans `schedule`.
+    #[serde(default, rename = "next-run")]
+    pub next_run: Option<Num>,
+    /// `OK`, `WARNINGS: n` ou le message d'erreur du dernier passage. Absent
+    /// tant que le travail n'a jamais tourné.
+    #[serde(default, rename = "last-run-state")]
+    pub last_run_state: Option<String>,
+    #[serde(default, rename = "last-run-endtime")]
+    pub last_run_endtime: Option<Num>,
+}
+
+impl JobEntry {
+    /// Un travail est actif sauf mention contraire : `disable` est absent tant
+    /// que l'administrateur n'a pas coché la case.
+    pub fn is_enabled(&self) -> bool {
+        self.disable.is_none_or(|flag| flag.0 == 0.0)
+    }
+
+    /// `Some(true)` si le dernier passage a réussi, `None` s'il n'y en a jamais eu.
+    pub fn last_run_ok(&self) -> Option<bool> {
+        self.last_run_state.as_deref().map(state_is_success)
+    }
+
+    /// Étiquette `remote` d'un travail de synchronisation : `remote:remote-store`,
+    /// ou `local` quand la source est un datastore du même serveur.
+    pub fn remote_label(&self) -> String {
+        match (self.remote.as_deref(), self.remote_store.as_deref()) {
+            (Some(remote), Some(store)) if !remote.is_empty() => format!("{remote}:{store}"),
+            (Some(remote), None) if !remote.is_empty() => remote.to_string(),
+            _ => "local".to_string(),
+        }
+    }
+}
+
+/// Entrée de `GET /api2/json/nodes/localhost/apt/update` : un paquet dont une
+/// mise à jour attend. Seul le décompte sert ; le nom n'est lu que pour ne
+/// compter que les entrées qui en portent un. PBS écrit `package`, PVE
+/// `Package` : l'alias couvre les deux.
+#[derive(Debug, Default, Deserialize)]
+pub struct AptUpdate {
+    #[serde(default, alias = "Package")]
+    pub package: Option<String>,
 }
 
 /// `GET /api2/json/admin/datastore/{store}/gc`
@@ -310,6 +381,43 @@ mod tests {
         assert!(ok("WARNINGS: 2").succeeded());
         assert!(!ok("unable to acquire lock").succeeded());
         assert!(!TaskEntry::default().is_finished());
+    }
+
+    #[test]
+    fn un_travail_expose_son_etat_et_sa_source() {
+        let sync: JobEntry = serde_json::from_str(
+            r#"{"id":"s-offsite","store":"archive","remote":"offsite","remote-store":"archive",
+                "schedule":"daily","next-run":1789538400,"last-run-state":"OK",
+                "last-run-upid":"UPID:x","last-run-endtime":1789455200}"#,
+        )
+        .unwrap();
+        assert!(sync.is_enabled());
+        assert_eq!(sync.last_run_ok(), Some(true));
+        assert_eq!(sync.remote_label(), "offsite:archive");
+
+        let local: JobEntry =
+            serde_json::from_str(r#"{"id":"s-local","store":"b","disable":true}"#).unwrap();
+        assert!(!local.is_enabled());
+        assert_eq!(local.last_run_ok(), None, "jamais exécuté");
+        assert_eq!(local.remote_label(), "local");
+
+        let echec = JobEntry {
+            last_run_state: Some("TASK ERROR: sync failed".into()),
+            ..Default::default()
+        };
+        assert_eq!(echec.last_run_ok(), Some(false));
+        let reserves =
+            JobEntry { last_run_state: Some("WARNINGS: 3".into()), ..Default::default() };
+        assert_eq!(reserves.last_run_ok(), Some(true));
+    }
+
+    #[test]
+    fn une_mise_a_jour_en_attente_est_lue_dans_les_deux_graphies() {
+        let pbs: AptUpdate =
+            serde_json::from_str(r#"{"package":"libc6","version":"2.36-9+deb12u8"}"#).unwrap();
+        assert_eq!(pbs.package.as_deref(), Some("libc6"));
+        let pve: AptUpdate = serde_json::from_str(r#"{"Package":"libc6"}"#).unwrap();
+        assert_eq!(pve.package.as_deref(), Some("libc6"));
     }
 
     #[test]

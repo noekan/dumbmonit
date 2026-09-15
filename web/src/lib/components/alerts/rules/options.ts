@@ -84,6 +84,7 @@ export function payloadFrom(rule: AlertRule): AlertRulePayload {
 		query: rule.query,
 		operator: rule.operator,
 		threshold: rule.threshold,
+		clear_threshold: rule.clear_threshold,
 		for_secs: rule.for_secs,
 		severity: rule.severity,
 		selector: rule.selector,
@@ -100,4 +101,9 @@ export function payloadFrom(rule: AlertRule): AlertRulePayload {
 export function anomalySummary(rule: AlertRule): string {
 	const p = rule.params;
 	return `sensitivity k = ${p.k} · smoothing α = ${p.alpha} · minimum ${p.min_samples} samples · floor ${p.mad_floor_abs} abs / ${p.mad_floor_rel} rel`;
+}
+
+/** "Clear below" for a rule that fires above, "Clear above" for one that fires below. */
+export function clearLabel(operator: AlertRule['operator']): string {
+	return operator === '<' || operator === '<=' ? 'Clear above' : 'Clear below';
 }

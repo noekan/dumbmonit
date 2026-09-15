@@ -4,7 +4,9 @@
 //! ne manipule que des structures déjà désérialisées, ce qui le rend testable
 //! sans serveur en face. L'API de PBS reprend les conventions de celle de PVE
 //! (enveloppe `{"data": …}`, ticket dans un cookie, jeton dans `Authorization`),
-//! seuls les noms changent : `PBSAuthCookie`, `PBSAPIToken`.
+//! seuls les noms changent : `PBSAuthCookie`, `PBSAPIToken`. Le client `reqwest`
+//! lui-même vient de `crate::collectors::http`, partagé avec les autres
+//! collecteurs REST.
 
 use std::time::Duration;
 
@@ -40,6 +42,31 @@ impl PbsClient {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<T, ProbeError> {
+        self.fetch(path, query, false)
+            .await?
+            .ok_or_else(|| ProbeError::Protocol(format!("Empty response from {path}")))
+    }
+
+    /// Comme [`Self::get`], mais un 403 donne `Ok(None)` au lieu d'une erreur.
+    ///
+    /// Pour les appels qui demandent un privilège que l'on ne veut pas exiger :
+    /// un jeton limité à `/datastore` et `/system` n'a pas à voir les mises à
+    /// jour de paquets, et cela ne doit compter ni comme erreur de collecte ni
+    /// comme erreur d'authentification.
+    pub async fn get_optional<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<Option<T>, ProbeError> {
+        self.fetch(path, query, true).await
+    }
+
+    async fn fetch<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+        forbidden_is_absent: bool,
+    ) -> Result<Option<T>, ProbeError> {
         let response = self.send(path, query, false).await?;
 
         let response = if response.status() == StatusCode::UNAUTHORIZED
@@ -51,6 +78,9 @@ impl PbsClient {
         };
 
         let status = response.status();
+        if status == StatusCode::FORBIDDEN && forbidden_is_absent {
+            return Ok(None);
+        }
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
             return Err(status_error(status, &body, path));
@@ -61,7 +91,7 @@ impl PbsClient {
         let envelope: Envelope<T> = serde_json::from_slice(&body).map_err(|error| {
             ProbeError::Protocol(format!("Unexpected response from {path}: {error}"))
         })?;
-        Ok(envelope.data)
+        Ok(Some(envelope.data))
     }
 
     async fn send(
@@ -156,25 +186,6 @@ impl PbsClient {
     }
 }
 
-/// Construit le client HTTP.
-///
-/// `accept_invalid_certs` désactive toute vérification du certificat présenté.
-/// C'est indispensable sur une installation PBS par défaut, qui s'annonce avec un
-/// certificat auto-signé, mais cela expose la connexion à une interception :
-/// l'option n'est donc jamais implicite, elle est portée par une étiquette de la
-/// cible.
-pub fn build_http_client(
-    accept_invalid_certs: bool,
-    connect_timeout: Duration,
-) -> Result<reqwest::Client, ProbeError> {
-    reqwest::Client::builder()
-        .danger_accept_invalid_certs(accept_invalid_certs)
-        .connect_timeout(connect_timeout)
-        .user_agent(concat!("DumbMonit/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|error| ProbeError::Config(format!("HTTP client unavailable: {error}")))
-}
-
 /// Traduit une erreur de transport en `ProbeError`.
 ///
 /// Seuls `Timeout` et `Unreachable` alimentent l'alerte « équipement hors
@@ -232,8 +243,8 @@ fn status_error(status: StatusCode, body: &str, path: &str) -> ProbeError {
                 .to_string(),
         ),
         StatusCode::FORBIDDEN => ProbeError::Auth(format!(
-            "Insufficient permissions on {path}: grant at least the DatastoreAudit role \
-             on \"/datastore\" and Audit on \"/system\" to the user or token"
+            "Insufficient permissions on {path}: grant the Audit role on \"/\" to the user \
+             or token, or at least DatastoreAudit on \"/datastore\" and Audit on \"/system\""
         )),
         // Une 5xx est bien une indisponibilité du service : PBS répond mais son
         // API ne fonctionne pas.

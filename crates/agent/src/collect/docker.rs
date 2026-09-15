@@ -82,9 +82,42 @@ const API_VERSION: &str = "/v1.41";
 /// collecte des conteneurs ne doit jamais retarder l'envoi des métriques système.
 const READ_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Plafond de conteneurs inspectés par cycle : au-delà, le coût des inspections
-/// dépasserait celui du reste de la collecte.
-pub const MAX_INSPECTED: usize = 100;
+/// Plafond par défaut de conteneurs détaillés par cycle. Chaque conteneur
+/// vaut six séries et une inspection : au-delà de deux cents, le coût des
+/// inspections dépasserait celui du reste de la collecte, et les séries
+/// noieraient la base.
+pub const DEFAULT_MAX_CONTAINERS: usize = 200;
+
+/// Inventaire d'un cycle : les compteurs portent sur tous les conteneurs, le
+/// détail sur les seuls premiers du plafond.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ContainerInventory {
+    /// Conteneurs présents, en marche ou non.
+    pub total: usize,
+    /// Conteneurs en marche, plafond compris.
+    pub running: usize,
+    /// Conteneurs détaillés — inspectés, et remontés avec leurs étiquettes.
+    pub detailed: Vec<ContainerStat>,
+}
+
+impl ContainerInventory {
+    /// Retient au plus `max_detailed` conteneurs, les conteneurs en marche
+    /// d'abord puis par nom : l'ordre doit être stable d'un cycle à l'autre, sans
+    /// quoi les séries de la frontière apparaîtraient et disparaîtraient au gré
+    /// de l'ordre du démon — la pire des cardinalités.
+    pub fn new(mut containers: Vec<ContainerStat>, max_detailed: usize) -> Self {
+        let total = containers.len();
+        let running = containers.iter().filter(|container| container.running).count();
+        containers.sort_by(|a, b| b.running.cmp(&a.running).then_with(|| a.name.cmp(&b.name)));
+        containers.truncate(max_detailed);
+        Self { total, running, detailed: containers }
+    }
+
+    /// Conteneurs présents mais non détaillés.
+    pub fn skipped(&self) -> usize {
+        self.total.saturating_sub(self.detailed.len())
+    }
+}
 
 /// Une image ne change pas d'âge ni d'empreintes : la réinspecter à chaque cycle
 /// serait du gaspillage. Dix minutes couvrent un `docker pull` manuel.
@@ -424,11 +457,13 @@ fn parse_rfc3339_secs(text: &str) -> Option<i64> {
 pub struct DockerProbe {
     client: DockerClient,
     images: HashMap<String, (Instant, ImageDetail)>,
+    /// Plafond de conteneurs détaillés par cycle.
+    max_containers: usize,
 }
 
 impl DockerProbe {
-    pub fn new(socket: &Path) -> Self {
-        Self { client: DockerClient::new(socket), images: HashMap::new() }
+    pub fn new(socket: &Path, max_containers: usize) -> Self {
+        Self { client: DockerClient::new(socket), images: HashMap::new(), max_containers }
     }
 
     /// Liste les conteneurs, en marche ou non, avec leur détail.
@@ -436,11 +471,11 @@ impl DockerProbe {
     /// Renvoie `None` — et non une erreur — quand le socket est absent : c'est le
     /// cas nominal sur une machine sans Docker, et il ne doit produire aucune
     /// trace inquiétante ni aucune série vide.
-    pub async fn read(&mut self) -> Option<Vec<ContainerStat>> {
+    pub async fn read(&mut self) -> Option<ContainerInventory> {
         if !self.client.exists() {
             return None;
         }
-        let mut containers = match self.client.get("/containers/json?all=1").await {
+        let containers = match self.client.get("/containers/json?all=1").await {
             Ok(response) if response.is_success() => match parse_containers(&response.body) {
                 Ok(list) => list,
                 Err(error) => {
@@ -465,8 +500,18 @@ impl DockerProbe {
             }
         };
 
+        let mut inventory = ContainerInventory::new(containers, self.max_containers);
+        if inventory.skipped() > 0 {
+            tracing::debug!(
+                total = inventory.total,
+                detailed = inventory.detailed.len(),
+                "container cap reached, the rest is only counted"
+            );
+        }
+        // Seuls les conteneurs retenus sont inspectés : c'est le plafond qui
+        // borne le nombre de requêtes au démon, pas l'inventaire.
         let now_secs = chrono::Utc::now().timestamp();
-        for container in containers.iter_mut().take(MAX_INSPECTED) {
+        for container in inventory.detailed.iter_mut() {
             let path = format!("/containers/{}/json", container.id);
             match self.client.get(&path).await {
                 Ok(response) if response.is_success() => {
@@ -496,7 +541,7 @@ impl DockerProbe {
                     .map(|created| now_secs.saturating_sub(created).max(0) as u64);
             }
         }
-        Some(containers)
+        Some(inventory)
     }
 
     /// Détail d'une image, depuis le cache ou le démon.
@@ -685,6 +730,39 @@ mod tests {
     async fn a_missing_socket_is_not_an_error() {
         let missing = Path::new("/tmp/ezymonit-socket-inexistant.sock");
         assert!(!DockerClient::new(missing).exists());
-        assert!(DockerProbe::new(missing).read().await.is_none());
+        assert!(DockerProbe::new(missing, DEFAULT_MAX_CONTAINERS).read().await.is_none());
+    }
+
+    #[test]
+    fn the_inventory_keeps_running_containers_first_within_the_cap() {
+        let stat = |name: &str, running: bool| ContainerStat {
+            name: name.into(),
+            running,
+            ..ContainerStat::default()
+        };
+        let inventory = ContainerInventory::new(
+            vec![
+                stat("zeta", false),
+                stat("beta", true),
+                stat("alpha", false),
+                stat("gamma", true),
+            ],
+            3,
+        );
+        assert_eq!(inventory.total, 4);
+        assert_eq!(inventory.running, 2);
+        assert_eq!(inventory.skipped(), 1);
+        let names: Vec<&str> = inventory.detailed.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["beta", "gamma", "alpha"]);
+    }
+
+    #[test]
+    fn a_zero_cap_only_counts() {
+        let inventory =
+            ContainerInventory::new(parse_containers(INVENTORY.as_bytes()).expect("inventaire"), 0);
+        assert_eq!(inventory.total, 2);
+        assert_eq!(inventory.running, 1);
+        assert!(inventory.detailed.is_empty());
+        assert_eq!(inventory.skipped(), 2);
     }
 }

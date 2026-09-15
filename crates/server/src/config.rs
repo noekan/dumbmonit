@@ -25,6 +25,23 @@ pub struct Config {
     pub probe_timeout: Duration,
     /// Période de vidage du tampon d'écriture vers VictoriaMetrics.
     pub write_flush_interval: Duration,
+    /// Taille de lot qui déclenche un envoi immédiat vers VictoriaMetrics, sans
+    /// attendre l'échéance.
+    pub write_flush_size: usize,
+    /// Threads de travail du runtime Tokio.
+    ///
+    /// Tokio en crée un par cœur par défaut : sur un NAS à seize cœurs, ce sont
+    /// seize piles et seize files locales pour un serveur qui passe l'essentiel de
+    /// son temps à attendre le réseau. Quatre suffisent largement à un homelab ;
+    /// la valeur reste réglable pour une instance qui interroge des centaines de
+    /// cibles.
+    pub workers: usize,
+    /// Nombre maximal de connexions SQLite ouvertes en parallèle.
+    ///
+    /// Chaque connexion coûte un thread `sqlx` et son cache de pages : quatre
+    /// suffisent à l'interface et au planificateur d'un homelab, la base ne
+    /// servant qu'à la configuration et aux états d'alerte.
+    pub db_pool_size: u32,
     /// Répertoire des binaires de l'agent servis sous `/download/`.
     ///
     /// Rempli à la construction de l'image ; s'il est vide ou absent, la commande
@@ -58,6 +75,10 @@ impl Config {
                 "EZYMONIT_FLUSH_INTERVAL_SECS",
                 "5",
             )?),
+            write_flush_size: env_parsed("EZYMONIT_FLUSH_BATCH", "5000")?,
+            workers: env_parsed::<usize>("EZYMONIT_WORKERS", &default_workers().to_string())?
+                .clamp(1, 256),
+            db_pool_size: env_parsed::<u32>("EZYMONIT_DB_POOL", "4")?.clamp(1, 64),
             agent_dir: PathBuf::from(env_or("EZYMONIT_AGENT_DIR", "/agents")),
             reset_password: env_flag("EZYMONIT_RESET_PASSWORD"),
             oidc: OidcEnv::from_env(),
@@ -71,6 +92,11 @@ impl Config {
     pub fn secret_path(&self) -> PathBuf {
         self.data_dir.join("secret.key")
     }
+}
+
+/// Threads de travail par défaut : au plus quatre, et jamais plus que de cœurs.
+fn default_workers() -> usize {
+    std::thread::available_parallelism().map_or(2, |n| n.get()).min(4)
 }
 
 fn env_or(key: &str, default: &str) -> String {

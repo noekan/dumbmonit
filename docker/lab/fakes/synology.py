@@ -2,7 +2,8 @@
 makes, with realistic JSON (`crates/server/src/collectors/synology/model.rs`).
 
 A DS920+ with two volumes (SHR btrfs + RAID1 ext4), four disks including an
-NVMe cache, and two Hyper Backup tasks.
+NVMe cache, two Hyper Backup tasks and three Active Backup for Business tasks
+(a PC task, a VM task and a file-server task).
 
 Everything goes through `/webapi/entry.cgi?api=…&version=…&method=…`, errors
 arrive as HTTP 200 with `{"success": false, "error": {"code": N}}`, exactly like
@@ -15,11 +16,15 @@ DSM refuses the storage inventory with code 105).
 Failure scenarios (`LAB_SCENARIO`, comma separated):
   disk-warning — Disk 2 reports a S.M.A.R.T. "warning" and bad-sector threshold exceeded
   backup-old   — the last successful Hyper Backup run is five days old
+  abb-fail     — the Active Backup VM task failed last night (last success three days ago);
+                 `LAB_ABB_FAIL=1` in the environment does the same
 """
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import secrets
 import time
 from http import HTTPStatus
@@ -33,6 +38,7 @@ PASSWORD = "lab-password"
 FLAGS = scenarios()
 DISK_WARNING = "disk-warning" in FLAGS
 BACKUP_OLD = "backup-old" in FLAGS
+ABB_FAIL = "abb-fail" in FLAGS or os.environ.get("LAB_ABB_FAIL", "").strip().lower() in {"1", "true", "yes", "on"}
 
 BOOT = now() - 75 * 3600 - 12 * 60 - 9  # "75:12:9", the real up_time format
 SESSIONS: set[str] = set()
@@ -44,6 +50,13 @@ CATALOG = {
     "SYNO.Core.System.Utilization": {"path": "entry.cgi", "minVersion": 1, "maxVersion": 1},
     "SYNO.Storage.CGI.Storage": {"path": "entry.cgi", "minVersion": 1, "maxVersion": 1},
     "SYNO.Backup.Task": {"path": "entry.cgi", "minVersion": 1, "maxVersion": 1},
+    # Active Backup for Business. Not documented by Synology; shapes follow the
+    # N4S4/synology-api project (core_active_backup.py). Every ABB API is version 1.
+    "SYNO.ActiveBackup.Task": {"path": "entry.cgi", "minVersion": 1, "maxVersion": 1},
+    "SYNO.ActiveBackup.Log": {"path": "entry.cgi", "minVersion": 1, "maxVersion": 1},
+    "SYNO.ActiveBackup.Overview": {"path": "entry.cgi", "minVersion": 1, "maxVersion": 1},
+    "SYNO.ActiveBackup.Setting": {"path": "entry.cgi", "minVersion": 1, "maxVersion": 1},
+    "SYNO.ActiveBackup.Version": {"path": "entry.cgi", "minVersion": 1, "maxVersion": 1},
 }
 
 
@@ -198,6 +211,133 @@ def backup_status(task_id: int):
     }
 
 
+# ── Active Backup for Business ────────────────────────────────────────────────
+# task_id -> (name, source_type, devices). source_type: 1 VM, 2 PC, 3 physical
+# server, 4 file server, 5 NAS. Every task runs nightly at 03:00.
+ABB_TASKS = {
+    5: ("Office laptops", 2, [(11, "laptop-anna", "Windows 11 Pro"), (12, "laptop-ben", "Windows 11 Pro")]),
+    6: ("Lab VMs", 1, [(21, "vm-web", "Debian 12"), (22, "vm-db", "Debian 12"), (23, "vm-ci", "Ubuntu 24.04")]),
+    7: ("File server share", 4, [(31, "fileserver-01", "")]),
+}
+ABB_FAILED_TASK = 6  # the VM task, under abb-fail
+
+
+def abb_last_run() -> int:
+    t = now()
+    run = t - (t % 86400) + 3 * 3600  # 03:00 each night
+    if run > t:
+        run -= 86400
+    return run
+
+
+def abb_result(task_id: int, start: int, status: int, result_id: int, error_count: int = 0):
+    """One execution, as in `last_result` and in `SYNO.ActiveBackup.Log list_result`.
+
+    status: 2 success, 3 partial success, 4 fail, 5 cancel, 6 no backup.
+    job_action 1 is a backup (128/1024/2048 restore, 131072 delete version…)."""
+    name, source_type, devices = ABB_TASKS[task_id]
+    return {
+        "backup_type": source_type, "detail_path": "", "error_count": error_count, "job_action": 1,
+        "none_count": 0, "result_id": result_id, "status": status,
+        "success_count": len(devices) - error_count,
+        "task_config": {"device_list": [{"device_id": d, "host_name": h} for d, h, _ in devices]},
+        "task_id": task_id, "task_name": name, "time_end": start + 9 * 60 + 17 * task_id,
+        "time_start": start, "transfered_bytes": 2_122_801_152 * task_id, "warning_count": 0,
+    }
+
+
+def abb_task_failed(task_id: int) -> bool:
+    return ABB_FAIL and task_id == ABB_FAILED_TASK
+
+
+def abb_results(task_id: int) -> list[dict]:
+    """Execution history, newest first: three nightly backups, the last one failed
+    under abb-fail (and the two before it as well, so the last success is old)."""
+    last_run = abb_last_run()
+    results = []
+    for nights_ago in range(0, 6):
+        start = last_run - nights_ago * 86400
+        failed = abb_task_failed(task_id) and nights_ago < 3
+        results.append(abb_result(task_id, start, 4 if failed else 2, 600 + task_id * 10 - nights_ago,
+                                  error_count=len(ABB_TASKS[task_id][2]) if failed else 0))
+    return results
+
+
+def abb_device(device_id: int, host: str, os_name: str, source_type: int, online: bool = True):
+    return {
+        "agent_can_backup": online, "agent_driver_status": "enable", "agent_status": "online" if online else "offline",
+        "agent_token": "xxxxxxxxxxxxxxx", "agentless_auth_policy": 0, "auto_discovery": False,
+        "backup_type": source_type, "create_time": 1709413000 + device_id, "device_id": device_id,
+        "device_uuid": f"00000000-0000-4000-8000-{device_id:012d}", "driver_status": None, "dsm_model": "",
+        "dsm_unique": "", "host_ip": f"192.168.10.{device_id}", "host_name": host, "host_port": 5510,
+        "hypervisor_id": 1 if source_type == 1 else 0, "inventory_id": 1 if source_type == 1 else 0,
+        "login_password": "", "login_time": 0, "login_user": "", "login_user_id": 0, "os_name": os_name,
+        "platform_type": 1, "vm_moid_path": "",
+    }
+
+
+def abb_task(task_id: int):
+    name, source_type, devices = ABB_TASKS[task_id]
+    last_run = abb_last_run()
+    last = abb_results(task_id)[0]
+    failed = abb_task_failed(task_id)
+    return {
+        "agentless_backup_path": "", "agentless_backup_policy": 0, "agentless_enable_block_transfer": False,
+        "agentless_enable_dedup": False, "agentless_enable_windows_vss": False, "allow_manual_backup": True,
+        "backup_cache_content": {"cached_enabled": False}, "backup_external": False, "backup_type": source_type,
+        "bandwidth": 0, "bandwidth_content": {"backup_bandwidth_base": 0, "backup_bandwidth_number": 0, "enable": False},
+        "cbt_enable_mode": 1, "connection_timeout": 0, "custom_volume": [], "datastore_reserved_percentage": 0,
+        "dedup_api_restore": True, "dedup_path": "", "device_count": len(devices),
+        "devices": [abb_device(d, h, o, source_type, online=not (failed and i == 0)) for i, (d, h, o) in enumerate(devices)],
+        "enable_app_aware_bkp": False, "enable_compress_transfer": True, "enable_datastore_aware": False,
+        "enable_dedup": True, "enable_encrypt_transfer": True, "enable_notify": True,
+        "enable_shutdown_after_complete": False, "enable_verification": False, "enable_wake_up": False,
+        "enable_windows_working_state": False, "last_result": last, "last_version_id": 160 + task_id,
+        "max_concurrent_devices": 0, "next_trigger_time": last_run + 86400,
+        "pre_post_script_setting": {"post_script_path": "", "pre_script_path": "", "script_exec_mode": 0},
+        "repo_dir": "@ActiveBackup",
+        "retention_policy": {"gfs_days": "7", "gfs_months": "12", "gfs_weeks": "4", "gfs_years": "3",
+                             "keep_all": False, "keep_versions": 10},
+        "sched_content": {"backup_window": "1" * 168, "enable_backup_window": False, "is_continuous_paused": False,
+                          "repeat_hour": 0, "repeat_type": "Daily", "run_hour": 3, "run_min": 0,
+                          "run_weekday": [0, 1, 2, 3, 4, 5, 6], "schedule_setting_type": 1,
+                          "start_day": 0, "start_month": 0, "start_year": 0},
+        "sched_id": task_id, "sched_modify_time": 1709413646, "share_compressed": False,
+        "share_name": "ActiveBackupforBusiness", "source_type": source_type, "storage_compress_algorithm": 0,
+        "storage_encrypt_algorithm": 0, "storage_id": 1, "target_dir": name.replace(" ", "_"),
+        "target_status": "online", "task_id": task_id, "task_name": name,
+        "unikey": f"5c2f1c4e-0000-4000-8000-{task_id:012d}", "verification_policy": 120,
+        "version_count": 6, "versions": [], "view_type": "", "vm_folder": None,
+    }
+
+
+def abb_task_list(request: Request):
+    wanted = json.loads(request.param("filter") or "{}")
+    task_ids = [wanted["task_id"]] if "task_id" in wanted else list(ABB_TASKS)
+    return {
+        "has_devices": True, "has_dsm_agent": False, "has_hyperv_inventories": False, "has_linux_agent": True,
+        "has_mac_agent": False, "has_vmware_inventories": True, "has_windows_agent": True,
+        "tasks": [abb_task(task_id) for task_id in task_ids if task_id in ABB_TASKS],
+        "total": len(task_ids),
+    }
+
+
+def abb_result_list(request: Request):
+    """`SYNO.ActiveBackup.Log list_result`: `task_id` as a plain parameter, the rest
+    (`status`, `job_action`, `from_timestamp`…) in the JSON `filter`."""
+    wanted = json.loads(request.param("filter") or "{}")
+    task_ids = [int(request.param("task_id"))] if request.param("task_id") else list(ABB_TASKS)
+    results = [r for task_id in task_ids if task_id in ABB_TASKS for r in abb_results(task_id)]
+    if "status" in wanted:
+        results = [r for r in results if r["status"] == int(wanted["status"])]
+    if "job_action" in wanted:
+        results = [r for r in results if r["job_action"] == int(wanted["job_action"])]
+    results.sort(key=lambda r: r["time_start"], reverse=True)
+    offset = int(request.param("offset", "0") or 0)
+    limit = int(request.param("limit", "50") or 50)
+    return {"count": len(results), "results": results[offset:offset + limit]}
+
+
 def route(request: Request):
     if request.path != "/webapi/entry.cgi":
         return json_response({"success": False, "error": {"code": 100}}, HTTPStatus.NOT_FOUND)
@@ -244,6 +384,10 @@ def route(request: Request):
             if task_id not in BACKUP_TASKS:
                 return fail(400)
             return ok(backup_status(task_id))
+    if api == "SYNO.ActiveBackup.Task" and method == "list":
+        return ok(abb_task_list(request))
+    if api == "SYNO.ActiveBackup.Log" and method == "list_result":
+        return ok(abb_result_list(request))
     if api in CATALOG:
         return fail(103)  # method does not exist
     return fail(102)  # API does not exist
@@ -251,5 +395,5 @@ def route(request: Request):
 
 if __name__ == "__main__":
     log(f"[fake-synology] account: {USERNAME} / {PASSWORD}")
-    log(f"[fake-synology] disk-warning={DISK_WARNING} backup-old={BACKUP_OLD}")
+    log(f"[fake-synology] disk-warning={DISK_WARNING} backup-old={BACKUP_OLD} abb-fail={ABB_FAIL}")
     serve("fake-synology", PORT, route)

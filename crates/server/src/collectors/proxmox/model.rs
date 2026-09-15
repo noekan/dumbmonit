@@ -299,6 +299,231 @@ pub struct BackupVolume {
     pub size: Option<Num>,
 }
 
+/// Entrée de `GET /api2/json/cluster/ha/status/current` — un tableau mêlant une
+/// entrée `quorum`, une entrée `master`, une entrée `lrm` par nœud et une entrée
+/// `service` par ressource sous haute disponibilité.
+#[derive(Debug, Default, Deserialize)]
+pub struct HaStatusEntry {
+    #[serde(rename = "type", default)]
+    pub entry_type: Option<String>,
+    #[serde(default)]
+    pub node: Option<String>,
+    /// `OK` pour le quorum, `active` / `idle` pour le maître et les LRM, l'état
+    /// courant pour un service.
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub quorate: Option<Num>,
+    /// Identifiant de service : `vm:100` ou `ct:200`.
+    #[serde(default)]
+    pub sid: Option<String>,
+    #[serde(default)]
+    pub state: Option<String>,
+}
+
+impl HaStatusEntry {
+    pub fn is(&self, entry_type: &str) -> bool {
+        self.entry_type.as_deref() == Some(entry_type)
+    }
+
+    /// État d'un service, avec repli sur `status` pour les versions qui ne
+    /// renvoient pas `state`.
+    pub fn service_state(&self) -> &str {
+        self.state.as_deref().or(self.status.as_deref()).unwrap_or("unknown")
+    }
+}
+
+/// Entrée de `GET /api2/json/cluster/backup` : un travail de sauvegarde planifié.
+#[derive(Debug, Default, Deserialize)]
+pub struct BackupJob {
+    pub id: String,
+    #[serde(default)]
+    pub schedule: Option<String>,
+    /// Absent sur les versions anciennes, ce qui vaut « activé ».
+    #[serde(default)]
+    pub enabled: Option<Num>,
+    #[serde(default)]
+    pub storage: Option<String>,
+    /// Prochaine exécution, en secondes Unix. Absent si le travail est désactivé.
+    #[serde(rename = "next-run", default)]
+    pub next_run: Option<Num>,
+}
+
+impl BackupJob {
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.is_none_or(|flag| flag.0 != 0.0)
+    }
+}
+
+/// Entrée de `GET /api2/json/cluster/backup-info/not-backed-up` : un invité
+/// qu'aucun travail planifié ne couvre.
+#[derive(Debug, Default, Deserialize)]
+pub struct NotBackedUp {
+    pub vmid: Num,
+}
+
+/// Entrée de `GET /api2/json/nodes/{node}/qemu/{vmid}/snapshot` (ou `lxc`).
+///
+/// La liste se termine toujours par une pseudo-entrée `current`, sans date, qui
+/// représente l'état courant et non un instantané.
+#[derive(Debug, Default, Deserialize)]
+pub struct Snapshot {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub snaptime: Option<Num>,
+}
+
+impl Snapshot {
+    /// Date de prise, en secondes Unix ; `None` pour la pseudo-entrée `current`.
+    pub fn taken_at(&self) -> Option<i64> {
+        if self.name.as_deref() == Some("current") {
+            return None;
+        }
+        self.snaptime.map(|time| time.0 as i64)
+    }
+}
+
+/// Entrée de `GET /api2/json/nodes/{node}/replication` : l'état d'un travail de
+/// réplication de stockage vers un autre nœud.
+#[derive(Debug, Default, Deserialize)]
+pub struct ReplicationJob {
+    /// `{vmid}-{jobnum}`, par exemple `102-0`.
+    pub id: String,
+    #[serde(default)]
+    pub guest: Option<Num>,
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Nœud de destination. Le nom JSON est `target`, réservé chez nous.
+    #[serde(rename = "target", default)]
+    pub destination: Option<String>,
+    #[serde(default)]
+    pub last_sync: Option<Num>,
+    #[serde(default)]
+    pub next_sync: Option<Num>,
+    #[serde(default)]
+    pub fail_count: Option<Num>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub duration: Option<Num>,
+    #[serde(default)]
+    pub disable: Option<Num>,
+}
+
+impl ReplicationJob {
+    pub fn is_enabled(&self) -> bool {
+        !Num::flag(self.disable)
+    }
+
+    pub fn vmid(&self) -> Option<i64> {
+        self.guest.map(|guest| guest.0 as i64).or_else(|| self.id.split('-').next()?.parse().ok())
+    }
+
+    pub fn has_error(&self) -> bool {
+        self.error.as_deref().is_some_and(|message| !message.trim().is_empty())
+            || Num::get(self.fail_count, 0.0) > 0.0
+    }
+}
+
+/// `GET /api2/json/cluster/ceph/status` — l'objet `ceph status` brut, dont seules
+/// quelques branches nous intéressent.
+///
+/// Deux dispositions coexistent selon la version de Ceph : `osdmap.num_osds`
+/// directement, ou emboîté une fois de plus dans `osdmap.osdmap`.
+#[derive(Debug, Default, Deserialize)]
+pub struct CephStatus {
+    #[serde(default)]
+    pub health: Option<CephHealth>,
+    #[serde(default)]
+    pub osdmap: Option<CephOsdMap>,
+    #[serde(default)]
+    pub pgmap: Option<CephPgMap>,
+    #[serde(default)]
+    pub monmap: Option<CephMonMap>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct CephHealth {
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct CephOsdMap {
+    #[serde(default)]
+    pub num_osds: Option<Num>,
+    #[serde(default)]
+    pub num_up_osds: Option<Num>,
+    #[serde(default)]
+    pub num_in_osds: Option<Num>,
+    /// Ancienne disposition : les mêmes compteurs un niveau plus bas.
+    #[serde(default)]
+    pub osdmap: Option<Box<CephOsdMap>>,
+}
+
+impl CephOsdMap {
+    /// La couche qui porte réellement les compteurs.
+    pub fn counters(&self) -> &CephOsdMap {
+        match &self.osdmap {
+            Some(nested) if self.num_osds.is_none() => nested,
+            _ => self,
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct CephPgMap {
+    #[serde(default)]
+    pub bytes_total: Option<Num>,
+    #[serde(default)]
+    pub bytes_used: Option<Num>,
+    #[serde(default)]
+    pub num_pgs: Option<Num>,
+    #[serde(default)]
+    pub pgs_by_state: Vec<CephPgState>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct CephPgState {
+    #[serde(default)]
+    pub count: Option<Num>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct CephMonMap {
+    /// Le détail de chaque moniteur ne sert pas : on ne fait que les compter.
+    #[serde(default)]
+    pub mons: Vec<de::IgnoredAny>,
+    #[serde(default)]
+    pub num_mons: Option<Num>,
+}
+
+impl CephMonMap {
+    pub fn count(&self) -> f64 {
+        if self.mons.is_empty() { Num::get(self.num_mons, 0.0) } else { self.mons.len() as f64 }
+    }
+}
+
+/// Entrée de `GET /api2/json/nodes/{node}/apt/update` : un paquet à mettre à jour.
+///
+/// Seul leur nombre est publié : les champs (`Package`, `Version`, `OldVersion`…)
+/// sont acceptés et ignorés.
+#[derive(Debug, Default, Deserialize)]
+pub struct AptPackage {}
+
+/// Entrée de `GET /api2/json/nodes/{node}/certificates/info`.
+#[derive(Debug, Default, Deserialize)]
+pub struct CertificateInfo {
+    #[serde(default)]
+    pub filename: Option<String>,
+    #[serde(default)]
+    pub subject: Option<String>,
+    /// Fin de validité, en secondes Unix.
+    #[serde(default)]
+    pub notafter: Option<Num>,
+}
+
 /// `POST /api2/json/access/ticket`
 ///
 /// Pas de `Debug` : cette structure porte le ticket, qui vaut mot de passe
@@ -347,6 +572,46 @@ mod tests {
         assert_eq!(task.vmid(), None);
         task.id = None;
         assert_eq!(task.vmid(), None);
+    }
+
+    #[test]
+    fn la_pseudo_entree_current_nest_pas_un_instantane() {
+        let current: Snapshot = serde_json::from_str(
+            r#"{"name":"current","digest":"abc","running":1,"description":"You are here!"}"#,
+        )
+        .unwrap();
+        assert_eq!(current.taken_at(), None);
+        let vrai: Snapshot =
+            serde_json::from_str(r#"{"name":"avant-maj","snaptime":1724000000}"#).unwrap();
+        assert_eq!(vrai.taken_at(), Some(1724000000));
+    }
+
+    #[test]
+    fn le_vmid_dune_replication_se_deduit_de_lidentifiant() {
+        let job: ReplicationJob = serde_json::from_str(r#"{"id":"102-0"}"#).unwrap();
+        assert_eq!(job.vmid(), Some(102));
+        assert!(job.is_enabled());
+        assert!(!job.has_error());
+        let en_echec: ReplicationJob =
+            serde_json::from_str(r#"{"id":"102-0","guest":102,"fail_count":3}"#).unwrap();
+        assert!(en_echec.has_error());
+    }
+
+    #[test]
+    fn les_deux_dispositions_de_losdmap_ceph_sont_lues() {
+        let plat: CephOsdMap = serde_json::from_str(r#"{"num_osds":6,"num_up_osds":6}"#).unwrap();
+        assert_eq!(Num::get(plat.counters().num_osds, 0.0), 6.0);
+        let emboite: CephOsdMap =
+            serde_json::from_str(r#"{"osdmap":{"num_osds":4,"num_up_osds":3}}"#).unwrap();
+        assert_eq!(Num::get(emboite.counters().num_up_osds, 0.0), 3.0);
+    }
+
+    #[test]
+    fn un_travail_de_sauvegarde_sans_champ_enabled_est_actif() {
+        let job: BackupJob = serde_json::from_str(r#"{"id":"backup-1"}"#).unwrap();
+        assert!(job.is_enabled());
+        let coupe: BackupJob = serde_json::from_str(r#"{"id":"backup-1","enabled":0}"#).unwrap();
+        assert!(!coupe.is_enabled());
     }
 
     #[test]

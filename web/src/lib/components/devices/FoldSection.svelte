@@ -5,9 +5,10 @@
 	 * section costs nothing, whatever it holds. The fold is remembered per
 	 * browser under `dumbmonit-metrics-<kind>`.
 	 */
-	import type { Snippet } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import { ChevronRight } from 'lucide-svelte';
 	import { readFold, writeFold } from './metrics';
+	import { foldRequest } from './fold.svelte';
 
 	interface Props {
 		kind: string;
@@ -35,10 +36,22 @@
 		writeFold(kind, open);
 	}
 
+	// Opened from elsewhere on the page: unfold and bring the section into view.
+	let section = $state<HTMLElement | null>(null);
+	let seenRequest = untrack(() => foldRequest(kind));
+	$effect(() => {
+		const request = foldRequest(kind);
+		if (request === seenRequest) return;
+		seenRequest = request;
+		open = true;
+		writeFold(kind, true);
+		requestAnimationFrame(() => section?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+	});
+
 	const bodyId = $derived(`fold-${kind}`);
 </script>
 
-<section class={`rounded-[var(--radius-card)] border border-line bg-surface shadow-lift ${className}`} aria-label={title}>
+<section bind:this={section} class={`scroll-mt-20 rounded-[var(--radius-card)] border border-line bg-surface shadow-lift ${className}`} aria-label={title}>
 	<div class={`flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-5 ${open ? 'border-b border-line' : ''}`}>
 		<button
 			type="button"

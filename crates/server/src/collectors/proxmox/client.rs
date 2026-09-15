@@ -26,6 +26,21 @@ pub struct PveClient {
     timeout: Duration,
 }
 
+/// Échec d'un appel, avec le statut HTTP quand le serveur a répondu.
+///
+/// Le statut reste interne au client : le reste de l'intégration raisonne en
+/// `ProbeError`, sauf pour décider qu'un 403 ou un 501 est un cas prévu.
+struct Failure {
+    status: Option<StatusCode>,
+    error: ProbeError,
+}
+
+impl From<ProbeError> for Failure {
+    fn from(error: ProbeError) -> Self {
+        Self { status: None, error }
+    }
+}
+
 impl PveClient {
     pub fn new(http: reqwest::Client, base_url: String, auth: AuthMode, timeout: Duration) -> Self {
         Self { http, base_url, auth, timeout }
@@ -41,6 +56,37 @@ impl PveClient {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<T, ProbeError> {
+        self.fetch(path, query).await.map_err(|failure| failure.error)
+    }
+
+    /// Comme [`get`](Self::get), mais certains statuts HTTP sont un cas prévu
+    /// et donnent `Ok(None)` plutôt qu'une erreur.
+    ///
+    /// Deux usages : un endpoint facultatif que le rôle `PVEAuditor` ne couvre
+    /// pas (403 sur `/nodes/{node}/apt/update`), et une fonctionnalité absente de
+    /// l'installation (404 ou 501 sur la réplication d'une machine isolée). Dans
+    /// les deux cas, il n'y a rien à compter comme erreur ni à journaliser au-delà
+    /// du niveau `debug`.
+    pub async fn get_unless<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+        expected: &[StatusCode],
+    ) -> Result<Option<T>, ProbeError> {
+        match self.fetch(path, query).await {
+            Ok(data) => Ok(Some(data)),
+            Err(failure) if failure.status.is_some_and(|status| expected.contains(&status)) => {
+                Ok(None)
+            }
+            Err(failure) => Err(failure.error),
+        }
+    }
+
+    async fn fetch<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<T, Failure> {
         let response = self.send(path, query, false).await?;
 
         let response = if response.status() == StatusCode::UNAUTHORIZED
@@ -54,7 +100,7 @@ impl PveClient {
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(status_error(status, &body, path));
+            return Err(Failure { status: Some(status), error: status_error(status, &body, path) });
         }
 
         let body =
@@ -182,25 +228,6 @@ fn encode_into(out: &mut String, value: &str) {
             _ => out.push_str(&format!("%{byte:02X}")),
         }
     }
-}
-
-/// Construit le client HTTP.
-///
-/// `accept_invalid_certs` désactive toute vérification du certificat présenté.
-/// C'est indispensable sur une installation Proxmox par défaut, qui s'annonce avec
-/// un certificat auto-signé, mais cela expose la connexion à une interception :
-/// l'option n'est donc jamais implicite, elle est portée par une étiquette de la
-/// cible.
-pub fn build_http_client(
-    accept_invalid_certs: bool,
-    connect_timeout: Duration,
-) -> Result<reqwest::Client, ProbeError> {
-    reqwest::Client::builder()
-        .danger_accept_invalid_certs(accept_invalid_certs)
-        .connect_timeout(connect_timeout)
-        .user_agent(concat!("DumbMonit/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|error| ProbeError::Config(format!("HTTP client unavailable: {error}")))
 }
 
 /// Traduit une erreur de transport en `ProbeError`.

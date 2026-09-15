@@ -39,7 +39,19 @@ import type {
 	ProbeReport,
 	Target,
 	TargetId,
-	TargetPayload
+	TargetPayload,
+	NotificationPolicy,
+	NotificationPolicyPayload,
+	RuleOverride,
+	RuleOverridePayload,
+	StatusPage,
+	StatusPagePayload,
+	StatusPageItem,
+	StatusPageItemPayload,
+	Incident,
+	IncidentPayload,
+	IncidentUpdatePayload,
+	PublicStatus
 } from './types';
 
 export * from './types';
@@ -481,4 +493,88 @@ export function createApiToken(name: string, scope: ApiTokenScope): Promise<Crea
 
 export function revokeApiToken(id: number): Promise<void> {
 	return request<void>(`/tokens/${id}`, { method: 'DELETE' });
+}
+
+// --- Notification policy and per-device overrides --------------------------
+
+export function getNotificationPolicy(signal?: AbortSignal): Promise<NotificationPolicy> {
+	return request<NotificationPolicy>('/notify/policy', { signal });
+}
+
+export function updateNotificationPolicy(payload: NotificationPolicyPayload): Promise<NotificationPolicy> {
+	return request<NotificationPolicy>('/notify/policy', { method: 'PUT', body: payload });
+}
+
+/** Overrides of every rule, optionally only those of one device. */
+export function listRuleOverrides(targetId?: TargetId, signal?: AbortSignal): Promise<RuleOverride[]> {
+	const query = targetId === undefined ? '' : `?target_id=${targetId}`;
+	return request<RuleOverride[]>(`/alerts/overrides${query}`, { signal });
+}
+
+/** Sets a rule's override for a device. An empty payload removes it. */
+export function putRuleOverride(
+	ruleId: number,
+	targetId: TargetId,
+	payload: RuleOverridePayload
+): Promise<RuleOverride> {
+	return request<RuleOverride>(`/alerts/rules/${ruleId}/overrides/${targetId}`, {
+		method: 'PUT',
+		body: payload
+	});
+}
+
+export function deleteRuleOverride(ruleId: number, targetId: TargetId): Promise<void> {
+	return request<void>(`/alerts/rules/${ruleId}/overrides/${targetId}`, { method: 'DELETE' });
+}
+
+// --- Status pages -----------------------------------------------------------
+
+export function listStatusPages(signal?: AbortSignal): Promise<StatusPage[]> {
+	return request<StatusPage[]>('/status-pages', { signal });
+}
+
+export function createStatusPage(payload: StatusPagePayload): Promise<StatusPage> {
+	return request<StatusPage>('/status-pages', { method: 'POST', body: payload });
+}
+
+export function updateStatusPage(id: number, payload: StatusPagePayload): Promise<StatusPage> {
+	return request<StatusPage>(`/status-pages/${id}`, { method: 'PUT', body: payload });
+}
+
+export function deleteStatusPage(id: number): Promise<void> {
+	return request<void>(`/status-pages/${id}`, { method: 'DELETE' });
+}
+
+/** Replaces the services of a page; the array order is the display order. */
+export function setStatusPageItems(
+	id: number,
+	items: StatusPageItemPayload[]
+): Promise<StatusPageItem[]> {
+	return request<StatusPageItem[]>(`/status-pages/${id}/items`, { method: 'PUT', body: items });
+}
+
+export function listIncidents(signal?: AbortSignal): Promise<Incident[]> {
+	return request<Incident[]>('/incidents', { signal });
+}
+
+export function createIncident(payload: IncidentPayload): Promise<Incident> {
+	return request<Incident>('/incidents', { method: 'POST', body: payload });
+}
+
+export function updateIncident(id: number, payload: IncidentPayload): Promise<Incident> {
+	return request<Incident>(`/incidents/${id}`, { method: 'PUT', body: payload });
+}
+
+export function deleteIncident(id: number): Promise<void> {
+	return request<void>(`/incidents/${id}`, { method: 'DELETE' });
+}
+
+/** Posts a message and moves the incident to `status` (or keeps it). */
+export function addIncidentUpdate(id: number, payload: IncidentUpdatePayload): Promise<Incident> {
+	return request<Incident>(`/incidents/${id}/updates`, { method: 'POST', body: payload });
+}
+
+/** Public document of a status page: no session, no cookie needed. */
+export function getPublicStatus(slug: string, signal?: AbortSignal): Promise<PublicStatus> {
+	return request<PublicStatus>(`/public/status/${encodeURIComponent(slug)}`, { signal });
 }

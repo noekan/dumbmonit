@@ -143,6 +143,28 @@ impl Operator {
             Self::Le => value <= threshold,
         }
     }
+
+    /// Applique l'opérateur avec hystérésis.
+    ///
+    /// Une condition déjà vraie (`active`) ne retombe que lorsque la valeur repasse
+    /// le seuil de retour dans le sens opposé : pour « > 90 » avec un retour à 80,
+    /// la condition tient tant que la valeur reste au-dessus de 80. Sans seuil de
+    /// retour, ou pour une condition encore fausse, c'est [`Self::test`] tel quel.
+    /// Un seuil de retour incohérent (du mauvais côté du seuil) est ignoré plutôt
+    /// que de rendre l'alerte impossible à résoudre.
+    pub fn holds(self, value: f64, threshold: f64, clear: Option<f64>, active: bool) -> bool {
+        if self.test(value, threshold) {
+            return true;
+        }
+        let Some(clear) = clear.filter(|clear| clear.is_finite()) else { return false };
+        if !active || !value.is_finite() {
+            return false;
+        }
+        match self {
+            Self::Gt | Self::Ge => clear < threshold && value >= clear,
+            Self::Lt | Self::Le => clear > threshold && value <= clear,
+        }
+    }
 }
 
 impl std::fmt::Display for Operator {
@@ -221,6 +243,12 @@ pub struct Rule {
     pub query: String,
     pub operator: Operator,
     pub threshold: f64,
+    /// Seuil de retour au calme (hystérésis). `None` : la condition retombe dès
+    /// que le seuil n'est plus franchi. Renseigné, une alerte déjà active ne se
+    /// résout que lorsque la valeur repasse de l'autre côté de ce seuil, ce qui
+    /// évite qu'une valeur oscillant autour du seuil ne déclenche et résolve en
+    /// boucle.
+    pub clear_threshold: Option<f64>,
     /// Durée pendant laquelle la condition doit tenir avant de déclencher.
     pub for_duration: Duration,
     pub severity: Severity,
@@ -321,6 +349,22 @@ mod tests {
         assert!(Operator::Ge.test(90.0, 90.0));
         assert!(Operator::Lt.test(0.0, 1.0));
         assert!(Operator::Le.test(1.0, 1.0));
+    }
+
+    #[test]
+    fn l_hysteresis_ne_relache_qu_au_seuil_de_retour() {
+        // Déclenche > 90, se résout < 80.
+        assert!(Operator::Gt.holds(85.0, 90.0, Some(80.0), true), "still above the clear line");
+        assert!(!Operator::Gt.holds(85.0, 90.0, Some(80.0), false), "not active: plain test");
+        assert!(!Operator::Gt.holds(79.0, 90.0, Some(80.0), true), "below the clear line");
+        assert!(Operator::Gt.holds(91.0, 90.0, Some(80.0), false));
+        // Sens inverse : déclenche < 10, se résout > 20.
+        assert!(Operator::Lt.holds(15.0, 10.0, Some(20.0), true));
+        assert!(!Operator::Lt.holds(21.0, 10.0, Some(20.0), true));
+        // Seuil de retour incohérent : ignoré.
+        assert!(!Operator::Gt.holds(85.0, 90.0, Some(95.0), true));
+        // Sans seuil de retour : comportement historique.
+        assert!(!Operator::Gt.holds(85.0, 90.0, None, true));
     }
 
     #[test]

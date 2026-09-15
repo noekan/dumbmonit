@@ -94,3 +94,36 @@ plain threshold on PBS's own forecast.
 Built-in rules have no channel attached, which means **every enabled channel**.
 A rule you edit can name specific channels. Channels are configured in
 Settings → Notifications; see [Notification channels](../notifications.md).
+
+## Smart notifications
+
+Everything above decides *whether* an alert may speak. A second stage, the
+notification policy, decides *when* and *on which channel*, so that nobody
+gets spammed. The full path of one alert, in order:
+
+1. **Evaluate** — threshold, anomaly score or forecast, with the rule's
+   hold (`for`) and, when set, its **clear threshold** (hysteresis: fire
+   above 90 %, clear only under 85 %) and any **per-device override**.
+2. **Deduplicate** — one fingerprint per (rule, series); a series that
+   resolves to the same key twice yields one alert.
+3. **Suppress by dependency** — descendants of an unreachable device stay
+   quiet.
+4. **Silence** — maintenance windows mute what they cover.
+5. **Group by device** — one message per device per cycle, reminders and
+   escalation folded in.
+6. **Flap hold** — a fingerprint that fires and clears 4 times in 30 minutes
+   sends a single "flapping" notice, then nothing for 30 minutes.
+7. **Per-channel filters** — minimum severity, "tell me when it clears"
+   on/off, and a minimum interval between two messages about the same alert.
+8. **Quiet hours** (per channel) — only Warning-level alerts come through;
+   the rest waits for a digest when quiet hours end (an alert that clears
+   meanwhile is only mentioned as "resolved during quiet hours").
+9. **Batching** — alerts within the batch window (60 s by default) leave as
+   one message per channel: "3 alerts on 2 devices, 1 resolved".
+10. **Hourly cap** — past `max_per_hour` messages on a channel, alerts wait
+    and arrive as one digest ("…and 7 more alerts").
+11. **Send** — with an "Open in DumbMonit" link per device when a public URL
+    is known.
+
+Steps 6 to 10 are configured in Settings → Notification policy (global) and
+on each channel (Delivery options). See [Notification policy](notifications.md).

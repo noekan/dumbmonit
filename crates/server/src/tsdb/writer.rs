@@ -16,8 +16,14 @@ use super::Victoria;
 /// Correspond à plusieurs minutes de collecte pour une centaine d'équipements.
 const MAX_BUFFERED: usize = 200_000;
 
-/// Taille de lot déclenchant un envoi immédiat, sans attendre l'échéance.
-const FLUSH_AT: usize = 10_000;
+/// Taille de lot déclenchant un envoi immédiat, sans attendre l'échéance, quand
+/// l'appelant n'en précise pas (`EZYMONIT_FLUSH_BATCH` côté serveur).
+pub const DEFAULT_FLUSH_SIZE: usize = 5_000;
+
+/// Capacité initiale du tampon. Il grandit à la demande jusqu'à la taille de lot
+/// puis garde cette capacité : inutile de réserver d'emblée la place d'un lot
+/// complet que la plupart des instances n'atteignent jamais.
+const INITIAL_CAPACITY: usize = 512;
 
 /// Point d'entrée des échantillons. Clonable, à distribuer aux collecteurs.
 #[derive(Clone)]
@@ -44,10 +50,20 @@ impl SampleSink {
 
 /// Démarre la tâche d'écriture et renvoie le point d'entrée à distribuer.
 pub fn spawn_writer(victoria: Victoria, flush_interval: Duration) -> SampleSink {
-    let (tx, mut rx) = mpsc::channel::<Vec<Sample>>(1024);
+    spawn_writer_with(victoria, flush_interval, DEFAULT_FLUSH_SIZE)
+}
+
+/// Comme [`spawn_writer`], avec la taille de lot choisie par l'appelant.
+pub fn spawn_writer_with(
+    victoria: Victoria,
+    flush_interval: Duration,
+    flush_size: usize,
+) -> SampleSink {
+    let (tx, mut rx) = mpsc::channel::<Vec<Sample>>(256);
+    let flush_at = flush_size.max(1);
 
     tokio::spawn(async move {
-        let mut buffer: Vec<Sample> = Vec::with_capacity(FLUSH_AT);
+        let mut buffer: Vec<Sample> = Vec::with_capacity(INITIAL_CAPACITY);
         let mut ticker = tokio::time::interval(flush_interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -57,7 +73,7 @@ pub fn spawn_writer(victoria: Victoria, flush_interval: Duration) -> SampleSink 
                     match received {
                         Some(samples) => {
                             buffer.extend(samples);
-                            if buffer.len() >= FLUSH_AT {
+                            if buffer.len() >= flush_at {
                                 flush(&victoria, &mut buffer).await;
                             }
                         }

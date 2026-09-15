@@ -44,6 +44,23 @@
 		return kinds.find((k) => k.kind === kind)?.label ?? kind;
 	}
 
+	/** One line on what the channel hears; empty when it hears everything, always. */
+	function policySummary(channel: Channel): string {
+		const p = channel.policy;
+		if (!p) return '';
+		const parts: string[] = [];
+		if (p.min_severity === 'critical') parts.push('Warning only');
+		else if (p.min_severity === 'warning') parts.push('Advisory and up');
+		if (!p.notify_resolved) parts.push('no recoveries');
+		if (p.min_interval_secs > 0) parts.push(`same alert every ${Math.round(p.min_interval_secs / 60)} min at most`);
+		if (p.quiet_hours) {
+			const pad = (n: number) => String(n).padStart(2, '0');
+			const clock = (m: number) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+			parts.push(`quiet ${clock(p.quiet_hours.start_minute)}–${clock(p.quiet_hours.end_minute)}`);
+		}
+		return parts.join(' · ');
+	}
+
 	// --- Form -----------------------------------------------------------------
 
 	/** `null`: closed; `'new'`: adding; a channel: editing it. */
@@ -174,6 +191,9 @@
 										Last sent
 										<time class="tnum" title={formatDateTime(channel.last_sent_at)}>{formatRelative(channel.last_sent_at)}</time>
 									</p>
+									{#if policySummary(channel)}
+										<p class="mt-0.5 text-[0.8125rem] text-ink-2">{policySummary(channel)}</p>
+									{/if}
 									{#if channel.last_error}
 										<p class="mt-1 text-sm break-words text-warning-ink">Last error: {channel.last_error}</p>
 									{/if}

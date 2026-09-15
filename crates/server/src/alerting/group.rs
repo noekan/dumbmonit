@@ -9,12 +9,14 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use chrono::{DateTime, TimeDelta, Utc};
+use serde::{Deserialize, Serialize};
 
 use crate::alerting::machine::{AlertState, EffectivePhase, Phase};
 use crate::alerting::model::{Severity, TargetId};
 
 /// Pourquoi une alerte prend la parole à ce cycle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum NotifyReason {
     /// Première notification depuis le déclenchement.
     Firing,
@@ -24,6 +26,10 @@ pub enum NotifyReason {
     Reminder,
     /// La sévérité est relevée d'un cran, l'alerte s'éternisant.
     Escalation,
+    /// L'empreinte bat (déclenche et se résout en boucle) : un seul avis part,
+    /// puis plus rien pendant la durée de retenue. Produit par la politique de
+    /// notification, jamais par [`decide`].
+    Flapping,
 }
 
 impl NotifyReason {
@@ -33,7 +39,25 @@ impl NotifyReason {
             Self::Resolved => "resolved",
             Self::Reminder => "reminder",
             Self::Escalation => "escalation",
+            Self::Flapping => "flapping",
         }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "firing" => Some(Self::Firing),
+            "resolved" => Some(Self::Resolved),
+            "reminder" => Some(Self::Reminder),
+            "escalation" => Some(Self::Escalation),
+            "flapping" => Some(Self::Flapping),
+            _ => None,
+        }
+    }
+
+    /// Vrai pour tout ce qui annonce un problème en cours, par opposition à une
+    /// résolution.
+    pub fn is_firing_like(self) -> bool {
+        !matches!(self, Self::Resolved)
     }
 }
 
@@ -132,7 +156,7 @@ pub fn decide(outcome: &AlertOutcome, now: DateTime<Utc>) -> Option<NotifyReason
 }
 
 /// Une ligne d'un message groupé.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GroupItem {
     pub fingerprint: String,
     pub rule_name: String,
@@ -146,6 +170,10 @@ pub struct GroupItem {
     pub series_key: String,
     pub since: Option<DateTime<Utc>>,
     pub phase: EffectivePhase,
+    /// Précision ajoutée par la politique de notification (« flapping: 4 changes
+    /// in 30 min »), affichée en fin de ligne.
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 /// Un message : un hôte, ses alertes du cycle.
@@ -206,6 +234,7 @@ pub fn group(outcomes: &[AlertOutcome], now: DateTime<Utc>) -> Vec<AlertGroup> {
             series_key: outcome.series_key.clone(),
             since: outcome.state.firing_since,
             phase: outcome.effective_phase(),
+            note: None,
         };
 
         let group = groups.entry(outcome.target_id).or_insert_with(|| AlertGroup {

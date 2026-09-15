@@ -13,8 +13,11 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+use crate::collect::docker::DEFAULT_MAX_CONTAINERS;
+use crate::collect::filter::NameFilter;
 use crate::collect::plakar::{self, PlakarConfig};
 use crate::collect::system_health::SystemHealthConfig;
+use crate::collect::{DEFAULT_INTERFACES_IGNORE, DEFAULT_MOUNTS_IGNORE, ProbeConfig};
 
 /// Période d'échantillonnage par défaut. Trente secondes donnent des graphes
 /// lisibles sans peser sur une machine modeste.
@@ -59,7 +62,12 @@ struct FileConfig {
     docker: Option<bool>,
     docker_socket: Option<String>,
     docker_update_check: Option<bool>,
+    docker_max_containers: Option<usize>,
     commands: Option<bool>,
+    interfaces_ignore: Option<Patterns>,
+    interfaces_only: Option<Patterns>,
+    mounts_ignore: Option<Patterns>,
+    cpu_per_core: Option<bool>,
     plakar_bin: Option<String>,
     plakar_klosets: Option<Vec<String>>,
     plakar_home: Option<String>,
@@ -67,6 +75,30 @@ struct FileConfig {
     max_buffered_samples: Option<usize>,
     log_level: Option<String>,
     system_health: Option<SystemHealthFile>,
+}
+
+/// Liste de motifs, écrite en YAML soit comme une liste, soit comme une seule
+/// chaîne dont les éléments sont séparés par des virgules — la même forme que
+/// la variable d'environnement, pour qu'un exemple se copie de l'une à l'autre.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+enum Patterns {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Patterns {
+    fn into_items(self) -> Vec<String> {
+        match self {
+            Self::One(text) => split_list(&text),
+            Self::Many(items) => items
+                .iter()
+                .map(|item| item.trim())
+                .filter(|i| !i.is_empty())
+                .map(String::from)
+                .collect(),
+        }
+    }
 }
 
 /// Section `system_health` du fichier : santé du système d'exploitation.
@@ -98,9 +130,13 @@ pub struct Config {
     pub docker_socket: PathBuf,
     /// Comparer les images des conteneurs à leur dépôt, une fois par heure.
     pub docker_update_check: bool,
+    /// Au-delà, les conteneurs sont comptés mais plus détaillés.
+    pub docker_max_containers: usize,
     /// Accepter les actions envoyées par le serveur (redémarrage, mise à jour
     /// de conteneur). Faux : l'agent ne fait que mesurer.
     pub commands: bool,
+    /// Périmètre de la collecte système : interfaces, montages, détail par cœur.
+    pub probe: ProbeConfig,
     /// Santé du système : mises à jour, redémarrage, unités en échec, SELinux.
     pub system_health: SystemHealthConfig,
     /// Sauvegardes Plakar.
@@ -125,7 +161,9 @@ impl fmt::Debug for Config {
             .field("docker", &self.docker)
             .field("docker_socket", &self.docker_socket)
             .field("docker_update_check", &self.docker_update_check)
+            .field("docker_max_containers", &self.docker_max_containers)
             .field("commands", &self.commands)
+            .field("probe", &self.probe)
             .field("max_buffered_samples", &self.max_buffered_samples)
             .field("log_level", &self.log_level)
             .field("system_health", &self.system_health)
@@ -219,6 +257,50 @@ impl Config {
         let docker_update_check =
             flag("EZYMONIT_AGENT_DOCKER_UPDATE_CHECK", file.docker_update_check, true)?;
         let commands = flag("EZYMONIT_AGENT_COMMANDS", file.commands, true)?;
+        let cpu_per_core = flag("EZYMONIT_AGENT_CPU_PER_CORE", file.cpu_per_core, false)?;
+
+        let docker_max_containers = match env.get("EZYMONIT_AGENT_DOCKER_MAX_CONTAINERS") {
+            Some(raw) => raw.trim().parse::<usize>().with_context(|| {
+                format!("EZYMONIT_AGENT_DOCKER_MAX_CONTAINERS: invalid value '{raw}'")
+            })?,
+            None => file.docker_max_containers.unwrap_or(DEFAULT_MAX_CONTAINERS),
+        };
+
+        // Trois listes de motifs, même règle : l'environnement remplace le
+        // fichier, le fichier remplace la valeur par défaut — jamais de fusion,
+        // qui empêcherait de retirer un motif par défaut.
+        let patterns =
+            |variable: &str, key: &str, from_file: Option<Patterns>, default: &[&str]| {
+                let items = match env.get(variable) {
+                    Some(raw) => split_list(&raw),
+                    None => match from_file {
+                        Some(patterns) => patterns.into_items(),
+                        None => default.iter().map(|d| d.to_string()).collect(),
+                    },
+                };
+                NameFilter::parse(key, &items)
+            };
+        let probe = ProbeConfig {
+            interfaces_ignore: patterns(
+                "EZYMONIT_AGENT_INTERFACES_IGNORE",
+                "interfaces_ignore",
+                file.interfaces_ignore,
+                &[DEFAULT_INTERFACES_IGNORE],
+            )?,
+            interfaces_only: patterns(
+                "EZYMONIT_AGENT_INTERFACES_ONLY",
+                "interfaces_only",
+                file.interfaces_only,
+                &[],
+            )?,
+            mounts_ignore: patterns(
+                "EZYMONIT_AGENT_MOUNTS_IGNORE",
+                "mounts_ignore",
+                file.mounts_ignore,
+                &[DEFAULT_MOUNTS_IGNORE],
+            )?,
+            cpu_per_core,
+        };
 
         let plakar_interval_secs = match env.get("EZYMONIT_AGENT_PLAKAR_INTERVAL_SECS") {
             Some(raw) => raw.trim().parse::<u64>().with_context(|| {
@@ -293,7 +375,9 @@ impl Config {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from(DEFAULT_DOCKER_SOCKET)),
             docker_update_check,
+            docker_max_containers,
             commands,
+            probe,
             system_health,
             plakar,
             max_buffered_samples,
@@ -413,6 +497,116 @@ mod tests {
         assert!(config.docker_update_check);
         assert!(config.commands, "les actions du serveur sont acceptées par défaut");
         assert_eq!(config.plakar, PlakarConfig::default());
+        assert_eq!(config.probe, ProbeConfig::default());
+        assert_eq!(config.docker_max_containers, DEFAULT_MAX_CONTAINERS);
+        assert!(!config.probe.cpu_per_core, "le détail par cœur est désactivé par défaut");
+        assert!(config.probe.interfaces_only.is_empty());
+        assert!(!config.probe.keeps_interface("veth0abc"));
+        assert!(!config.probe.keeps_mount("/var/lib/docker/volumes/x", "ext4"));
+    }
+
+    #[test]
+    fn collection_scope_is_read_from_the_file() {
+        let yaml = r#"
+interfaces_ignore:
+  - ^veth
+  - wlan0
+interfaces_only: "eth0, ^en"
+mounts_ignore: ^/mnt/scratch
+cpu_per_core: true
+docker_max_containers: 20
+"#;
+        let file = FileConfig {
+            server_url: Some("http://s:8080".into()),
+            token: Some("ezym_abc".into()),
+            ..serde_yaml_ng::from_str(yaml).expect("YAML valide")
+        };
+        let config = Config::merge(file, env(&[])).expect("configuration");
+        assert_eq!(config.probe.interfaces_ignore.source(), ["^veth", "wlan0"]);
+        assert_eq!(config.probe.interfaces_only.source(), ["eth0", "^en"]);
+        assert_eq!(config.probe.mounts_ignore.source(), ["^/mnt/scratch"]);
+        assert!(config.probe.cpu_per_core);
+        assert_eq!(config.docker_max_containers, 20);
+        // La liste explicite remplace la valeur par défaut : un montage Docker
+        // n'est plus ignoré par son chemin (mais `overlay` l'est par son type).
+        assert!(config.probe.keeps_mount("/var/lib/docker/volumes/x", "ext4"));
+        assert!(!config.probe.keeps_mount("/mnt/scratch", "ext4"));
+        // L'allow-list prime : `eth0` passe, `wlan0` non, `enp3s0` oui.
+        assert!(config.probe.keeps_interface("eth0"));
+        assert!(config.probe.keeps_interface("enp3s0"));
+        assert!(!config.probe.keeps_interface("wlan0"));
+    }
+
+    #[test]
+    fn collection_scope_follows_the_environment() {
+        let yaml = "interfaces_ignore: ^veth\ncpu_per_core: true\n";
+        let file = FileConfig {
+            server_url: Some("http://s:8080".into()),
+            token: Some("ezym_abc".into()),
+            ..serde_yaml_ng::from_str(yaml).expect("YAML valide")
+        };
+        let config = Config::merge(
+            file,
+            env(&[
+                ("EZYMONIT_AGENT_INTERFACES_IGNORE", "^br-, docker0"),
+                ("EZYMONIT_AGENT_MOUNTS_IGNORE", "^/boot"),
+                ("EZYMONIT_AGENT_CPU_PER_CORE", "no"),
+                ("EZYMONIT_AGENT_DOCKER_MAX_CONTAINERS", "0"),
+            ]),
+        )
+        .expect("configuration");
+        assert_eq!(config.probe.interfaces_ignore.source(), ["^br-", "docker0"]);
+        assert!(config.probe.keeps_interface("veth0"), "le fichier est remplacé, pas fusionné");
+        assert!(!config.probe.keeps_interface("docker0"));
+        assert_eq!(config.probe.mounts_ignore.source(), ["^/boot"]);
+        assert!(!config.probe.cpu_per_core);
+        assert_eq!(config.docker_max_containers, 0, "zéro : compter sans détailler");
+    }
+
+    #[test]
+    fn an_empty_list_disables_a_filter() {
+        let yaml = "interfaces_ignore: []\nmounts_ignore: []\n";
+        let file = FileConfig {
+            server_url: Some("http://s:8080".into()),
+            token: Some("ezym_abc".into()),
+            ..serde_yaml_ng::from_str(yaml).expect("YAML valide")
+        };
+        let config = Config::merge(file, env(&[])).expect("configuration");
+        assert!(config.probe.interfaces_ignore.is_empty());
+        assert!(config.probe.keeps_interface("veth0"));
+        assert!(config.probe.keeps_mount("/var/lib/docker/volumes/x", "ext4"));
+    }
+
+    #[test]
+    fn an_invalid_pattern_is_refused_at_startup_with_its_key() {
+        for (variable, key) in [
+            ("EZYMONIT_AGENT_INTERFACES_IGNORE", "interfaces_ignore"),
+            ("EZYMONIT_AGENT_INTERFACES_ONLY", "interfaces_only"),
+            ("EZYMONIT_AGENT_MOUNTS_IGNORE", "mounts_ignore"),
+        ] {
+            let error = Config::merge(file_with_url_and_token(), env(&[(variable, "^(oops")]))
+                .expect_err("expression invalide")
+                .to_string();
+            assert!(error.contains(key), "{variable}: {error}");
+        }
+
+        let yaml = "mounts_ignore:\n  - '[unclosed'\n";
+        let file = FileConfig {
+            server_url: Some("http://s:8080".into()),
+            token: Some("ezym_abc".into()),
+            ..serde_yaml_ng::from_str(yaml).expect("YAML valide")
+        };
+        let error = Config::merge(file, env(&[])).expect_err("expression invalide").to_string();
+        assert!(error.contains("mounts_ignore"), "{error}");
+        assert!(error.contains("[unclosed"), "{error}");
+
+        assert!(
+            Config::merge(
+                file_with_url_and_token(),
+                env(&[("EZYMONIT_AGENT_DOCKER_MAX_CONTAINERS", "beaucoup")])
+            )
+            .is_err()
+        );
     }
 
     #[test]

@@ -382,6 +382,89 @@ pub struct BackupStatus {
     pub next_bkp_time: Option<String>,
 }
 
+/// `SYNO.ActiveBackup.Task&method=list` : les tâches Active Backup for Business.
+///
+/// L'API n'est pas documentée par Synology. La forme retenue ici est celle relevée
+/// par le projet `N4S4/synology-api` (`core_active_backup.py`, exemple de réponse
+/// obtenu avec `load_status`, `load_result` et `load_devices` à vrai) : voir
+/// [`crate::collectors::synology::abb`] pour les sources. Tout est optionnel,
+/// sauf `task_id` — sans lui, rien ne rattache une mesure à une tâche.
+#[derive(Debug, Default, Deserialize)]
+pub struct AbbTaskList {
+    #[serde(default)]
+    pub tasks: Vec<AbbTask>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AbbTask {
+    pub task_id: Num,
+    #[serde(default)]
+    pub task_name: Option<String>,
+    /// Nature de la source : 1 machine virtuelle, 2 PC, 3 serveur physique,
+    /// 4 serveur de fichiers, 5 NAS.
+    #[serde(default)]
+    pub source_type: Option<Num>,
+    /// Même codage que `source_type` ; sert de repli si celui-ci manque.
+    #[serde(default)]
+    pub backup_type: Option<Num>,
+    /// État de fonctionnement en texte (`backingup`, `waiting`, `unscheduled`…).
+    /// Ce sont les valeurs acceptées par le filtre de l'API ; leur présence dans
+    /// la réponse n'est pas confirmée par les relevés, d'où l'option.
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub device_count: Option<Num>,
+    #[serde(default)]
+    pub devices: Vec<AbbDevice>,
+    /// Prochaine exécution planifiée, en secondes Unix ; 0 ou absent sans planning.
+    #[serde(default)]
+    pub next_trigger_time: Option<Num>,
+    #[serde(default)]
+    pub last_result: Option<AbbResult>,
+    #[serde(default)]
+    pub sched_content: Option<AbbSchedule>,
+}
+
+/// Appareil rattaché à une tâche. Seul le nombre sert : la structure reste vide
+/// pour que `devices` se compte sans qu'un champ inattendu fasse échouer la lecture.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AbbDevice {}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AbbSchedule {
+    /// Sauvegarde continue mise en pause par l'utilisateur.
+    #[serde(default)]
+    pub is_continuous_paused: Option<Num>,
+}
+
+/// Résultat d'une exécution : `last_result` d'une tâche, ou élément de `results`
+/// dans `SYNO.ActiveBackup.Log&method=list_result`.
+///
+/// Les dates sont en secondes Unix — contrairement à Hyper Backup, aucune horloge
+/// du NAS n'est nécessaire pour en tirer une ancienneté.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AbbResult {
+    /// 2 réussite, 3 réussite partielle, 4 échec, 5 annulation, 6 sans sauvegarde.
+    #[serde(default)]
+    pub status: Option<Num>,
+    /// 1 sauvegarde ; les autres valeurs sont des restaurations, migrations ou
+    /// suppressions, dont le résultat ne dit rien de l'état de la sauvegarde.
+    #[serde(default)]
+    pub job_action: Option<Num>,
+    #[serde(default)]
+    pub time_start: Option<Num>,
+    /// 0 tant que l'exécution est en cours.
+    #[serde(default)]
+    pub time_end: Option<Num>,
+}
+
+/// `SYNO.ActiveBackup.Log&method=list_result` : historique des exécutions.
+#[derive(Debug, Default, Deserialize)]
+pub struct AbbResultList {
+    #[serde(default)]
+    pub results: Vec<AbbResult>,
+}
+
 /// Nombre tolérant : accepte entier, flottant, booléen ou chaîne numérique.
 ///
 /// Indispensable ici : DSM renvoie les tailles de volume en chaînes (elles

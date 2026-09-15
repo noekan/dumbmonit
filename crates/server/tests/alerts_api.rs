@@ -729,3 +729,194 @@ async fn two_channels_cannot_share_a_name() {
     assert_eq!(status, StatusCode::CONFLICT);
     assert!(body["error"].as_str().unwrap().contains("already exists"));
 }
+
+// --------------------------------------------------------------------------
+// Politique de notification
+// --------------------------------------------------------------------------
+
+#[tokio::test]
+async fn the_notification_policy_has_defaults_and_accepts_partial_updates() {
+    let app = setup().await;
+
+    let (status, policy) = app.request("GET", "/api/notify/policy", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(policy["batch_window_secs"], json!(60));
+    assert_eq!(policy["max_per_hour"], json!(20));
+    assert_eq!(policy["flap_events"], json!(4));
+    assert_eq!(policy["public_url"], json!(""));
+
+    let (status, updated) = app
+        .request(
+            "PUT",
+            "/api/notify/policy",
+            Some(json!({ "batch_window_secs": 0, "public_url": "https://monit.lan/" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "update refused: {updated}");
+    assert_eq!(updated["batch_window_secs"], json!(0));
+    assert_eq!(updated["max_per_hour"], json!(20), "untouched field kept");
+    assert_eq!(updated["public_url"], json!("https://monit.lan"), "trailing slash dropped");
+
+    // La politique est persistée : une relecture la retrouve.
+    let (_, again) = app.request("GET", "/api/notify/policy", None).await;
+    assert_eq!(again, updated);
+
+    let (status, body) =
+        app.request("PUT", "/api/notify/policy", Some(json!({ "max_per_hour": -3 }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("negative"));
+}
+
+#[tokio::test]
+async fn a_channel_carries_its_own_policy() {
+    let app = setup().await;
+    let channel = app.create_channel("Phone").await;
+    let id = channel["id"].as_i64().unwrap();
+    assert_eq!(channel["policy"]["min_severity"], json!("info"), "defaults on creation");
+    assert_eq!(channel["policy"]["notify_resolved"], json!(true));
+    assert_eq!(channel["policy"]["quiet_hours"], Value::Null);
+
+    let (status, updated) = app
+        .request(
+            "PUT",
+            &format!("/api/notify/channels/{id}"),
+            Some(json!({
+                "name": "Phone",
+                "kind": "discord",
+                "policy": {
+                    "min_severity": "critical",
+                    "notify_resolved": false,
+                    "min_interval_secs": 900,
+                    "quiet_hours": {
+                        "kind": "weekly", "days": [0, 1, 2, 3, 4], "start_minute": 1320,
+                        "end_minute": 420, "utc_offset_minutes": 120
+                    }
+                }
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "update refused: {updated}");
+    assert_eq!(updated["policy"]["min_severity"], json!("critical"));
+    assert_eq!(updated["policy"]["notify_resolved"], json!(false));
+    assert_eq!(updated["policy"]["min_interval_secs"], json!(900));
+    assert_eq!(updated["policy"]["quiet_hours"]["kind"], json!("weekly"));
+    assert_eq!(updated["policy"]["quiet_hours"]["start_minute"], json!(1320));
+
+    // Une modification sans `policy` conserve la politique, comme les secrets.
+    let (status, renamed) = app
+        .request(
+            "PUT",
+            &format!("/api/notify/channels/{id}"),
+            Some(json!({ "name": "Phone (me)", "kind": "discord" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "rename refused: {renamed}");
+    assert_eq!(renamed["policy"]["min_severity"], json!("critical"));
+    assert_eq!(renamed["policy"]["quiet_hours"]["days"], json!([0, 1, 2, 3, 4]));
+
+    let (status, body) = app
+        .request(
+            "PUT",
+            &format!("/api/notify/channels/{id}"),
+            Some(
+                json!({ "name": "Phone", "kind": "discord", "policy": { "min_severity": "loud" } }),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("severity"));
+}
+
+#[tokio::test]
+async fn a_rule_accepts_a_clear_threshold_on_the_right_side_only() {
+    let app = setup().await;
+    let rule = app.create_rule("CPU hot", json!({ "clear_threshold": 80.0 })).await;
+    assert_eq!(rule["clear_threshold"], json!(80.0));
+    assert_eq!(rule["overrides"], json!([]));
+
+    let (status, body) = app
+        .request(
+            "POST",
+            "/api/alerts/rules",
+            Some(json!({
+                "name": "CPU wrong", "query": "up", "operator": ">", "threshold": 90.0,
+                "clear_threshold": 95.0
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("below the threshold"), "{body}");
+
+    // Les règles livrées CPU et disque partent avec une hystérésis.
+    let (_, rules) = app.request("GET", "/api/alerts/rules", None).await;
+    let cpu = rules.as_array().unwrap().iter().find(|r| r["uid"] == json!("cpu_high")).unwrap();
+    assert_eq!(cpu["clear_threshold"], json!(85.0));
+}
+
+#[tokio::test]
+async fn a_rule_can_be_overridden_per_device() {
+    let app = setup().await;
+    sqlx::query(
+        "INSERT INTO targets (id, name, address, kind, parent_id, tags)
+         VALUES (7, 'backup-nas', '10.0.0.7', 'dummy', NULL, '{}')",
+    )
+    .execute(&app.pool)
+    .await
+    .expect("insert target");
+
+    let rule = app.create_rule("Disk full", json!({ "operator": ">=", "unit": "%" })).await;
+    let id = rule["id"].as_i64().unwrap();
+
+    let (status, over) = app
+        .request(
+            "PUT",
+            &format!("/api/alerts/rules/{id}/overrides/7"),
+            Some(json!({ "threshold": 97.0, "clear_threshold": 95.0 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "override refused: {over}");
+    assert_eq!(over["rule_uid"], json!("disk_full"));
+    assert_eq!(over["target_id"], json!(7));
+    assert_eq!(over["threshold"], json!(97.0));
+    assert_eq!(over["enabled"], Value::Null);
+
+    // Elle apparaît dans la règle et dans la vue par équipement.
+    let (_, rules) = app.request("GET", "/api/alerts/rules", None).await;
+    let view = rules.as_array().unwrap().iter().find(|r| r["id"] == json!(id)).unwrap();
+    assert_eq!(view["overrides"].as_array().unwrap().len(), 1);
+    let (_, by_device) = app.request("GET", "/api/alerts/overrides?target_id=7", None).await;
+    assert_eq!(by_device.as_array().unwrap().len(), 1);
+    let (_, none) = app.request("GET", "/api/alerts/overrides?target_id=8", None).await;
+    assert_eq!(none.as_array().unwrap().len(), 0);
+
+    // Un seuil de retour incohérent avec le seuil surchargé est refusé.
+    let (status, body) = app
+        .request(
+            "PUT",
+            &format!("/api/alerts/rules/{id}/overrides/7"),
+            Some(json!({ "threshold": 97.0, "clear_threshold": 98.0 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+    // Un équipement inconnu est refusé.
+    let (status, _) = app
+        .request(
+            "PUT",
+            &format!("/api/alerts/rules/{id}/overrides/999"),
+            Some(json!({ "enabled": false })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Une surcharge vidée disparaît.
+    let (status, _) =
+        app.request("PUT", &format!("/api/alerts/rules/{id}/overrides/7"), Some(json!({}))).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, list) = app.request("GET", &format!("/api/alerts/rules/{id}/overrides"), None).await;
+    assert_eq!(list.as_array().unwrap().len(), 0);
+
+    let (status, _) =
+        app.request("DELETE", &format!("/api/alerts/rules/{id}/overrides/7"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

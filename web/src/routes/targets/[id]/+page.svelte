@@ -69,6 +69,7 @@
 	import SilenceControl from '$lib/components/devices/SilenceControl.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import DockerPanel from '$lib/components/devices/docker/DockerPanel.svelte';
+	import DockerStrip from '$lib/components/devices/docker/DockerStrip.svelte';
 	import PlakarPanel from '$lib/components/devices/docker/PlakarPanel.svelte';
 	import {
 		Button,
@@ -551,6 +552,11 @@
 			</p>
 		{/if}
 	</section>
+
+	<!-- Containers at a glance, with the fleet-wide policies; the list itself sits with the metrics -->
+	{#if target.kind === 'agent'}
+		<DockerStrip {target} />
+	{/if}
 
 	<!-- The story of this device: what fires now, what fired before -->
 	<section class="mt-6" aria-labelledby="device-alerts">

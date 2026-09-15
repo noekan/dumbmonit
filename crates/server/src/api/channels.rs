@@ -11,14 +11,21 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Row, SqlitePool};
 
+use crate::alerting::notify_policy::ChannelPolicy;
+use crate::alerting::silence::Schedule;
 use crate::api::{ApiError, ApiResult};
 use crate::db;
+use crate::notify::policy_store;
 use crate::notify::{self, CHANNEL_KINDS, ChannelConfig, ChannelSummary, DeliveryReport};
 use crate::state::AppState;
+
+/// Délai minimal maximal entre deux messages d'une même empreinte : une semaine.
+/// Au-delà, c'est une désactivation déguisée.
+const MAX_MIN_INTERVAL_SECS: i64 = 7 * 24 * 3600;
 
 /// Clés qui désignent un secret quel que soit le type de canal.
 ///
@@ -54,6 +61,29 @@ pub struct ChannelPayload {
     /// effacer, envoyer explicitement un objet vide `{}`.
     #[serde(default)]
     pub secrets: Option<Value>,
+    /// Politique du canal. Absent ou `null` lors d'une modification : la politique
+    /// enregistrée est conservée ; à la création, les défauts s'appliquent.
+    #[serde(default)]
+    pub policy: Option<Value>,
+}
+
+/// Politique telle que soumise, chaque champ retombant sur la valeur en place.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct ChannelPolicyPayload {
+    min_severity: Option<String>,
+    notify_resolved: Option<bool>,
+    /// Signé : une valeur négative doit être expliquée, pas refusée par serde.
+    min_interval_secs: Option<i64>,
+    /// `Some(Value::Null)` efface les heures calmes ; absent les conserve. Le
+    /// désérialiseur dédié est ce qui distingue `null` de l'absence, que serde
+    /// confond par défaut pour un `Option`.
+    #[serde(deserialize_with = "present")]
+    quiet_hours: Option<Value>,
+}
+
+fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(deserializer).map(Some)
 }
 
 /// Compte rendu d'un message de test.
@@ -97,7 +127,7 @@ pub(crate) async fn existing_ids(pool: &SqlitePool) -> ApiResult<HashSet<i64>> {
 async fn summaries(pool: &SqlitePool, only: Option<i64>) -> ApiResult<Vec<ChannelSummary>> {
     let rows = sqlx::query(
         "SELECT id, name, kind, enabled, settings, secret_enc IS NOT NULL AS has_secret,
-                last_error, last_sent_at
+                last_error, last_sent_at, policy
          FROM notification_channels
          WHERE (? IS NULL OR id = ?)
          ORDER BY name",
@@ -110,6 +140,7 @@ async fn summaries(pool: &SqlitePool, only: Option<i64>) -> ApiResult<Vec<Channe
     rows.iter()
         .map(|row| {
             let settings: String = row.try_get("settings")?;
+            let policy: String = row.try_get("policy")?;
             Ok(ChannelSummary {
                 id: row.try_get("id")?,
                 name: row.try_get("name")?,
@@ -119,6 +150,7 @@ async fn summaries(pool: &SqlitePool, only: Option<i64>) -> ApiResult<Vec<Channe
                 has_secret: row.try_get::<i64, _>("has_secret")? != 0,
                 last_error: row.try_get("last_error")?,
                 last_sent_at: row.try_get("last_sent_at")?,
+                policy: serde_json::from_str(&policy).unwrap_or_default(),
             })
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()
@@ -135,25 +167,29 @@ async fn summary(pool: &SqlitePool, id: i64) -> ApiResult<ChannelSummary> {
 
 pub async fn create(
     State(state): State<AppState>,
-    Json(payload): Json<ChannelPayload>,
+    Json(mut payload): Json<ChannelPayload>,
 ) -> ApiResult<(StatusCode, Json<ChannelSummary>)> {
+    let policy = parse_policy(payload.policy.take(), &ChannelPolicy::default())?;
     let draft = payload.validate(None)?;
     let id = db::alerts::upsert_channel(&state.pool, &state.cipher, &draft)
         .await
         .map_err(duplicate_name_to_conflict)?;
+    policy_store::save_channel_policy(&state.pool, id, &policy).await?;
     Ok((StatusCode::CREATED, Json(summary(&state.pool, id).await?)))
 }
 
 pub async fn update(
     State(state): State<AppState>,
     Path(id): Path<i64>,
-    Json(payload): Json<ChannelPayload>,
+    Json(mut payload): Json<ChannelPayload>,
 ) -> ApiResult<Json<ChannelSummary>> {
     // Le canal est relu avec ses secrets : sans eux, on ne saurait pas valider la
     // configuration résultante quand la requête n'en fournit pas de nouveaux.
     let current = db::alerts::get_channel(&state.pool, &state.cipher, id)
         .await?
         .ok_or_else(|| not_found(id))?;
+    let current_policy = summary(&state.pool, id).await?.policy;
+    let policy = parse_policy(payload.policy.take(), &current_policy)?;
 
     let mut draft = payload.validate(Some(&current))?;
     draft.id = Some(id);
@@ -161,6 +197,7 @@ pub async fn update(
     db::alerts::upsert_channel(&state.pool, &state.cipher, &draft)
         .await
         .map_err(duplicate_name_to_conflict)?;
+    policy_store::save_channel_policy(&state.pool, id, &policy).await?;
     Ok(Json(summary(&state.pool, id).await?))
 }
 
@@ -298,6 +335,71 @@ impl ChannelPayload {
     }
 }
 
+/// Traduit la politique soumise, champ par champ, par-dessus celle en place.
+fn parse_policy(raw: Option<Value>, current: &ChannelPolicy) -> ApiResult<ChannelPolicy> {
+    let Some(value) = raw.filter(|value| !value.is_null()) else { return Ok(current.clone()) };
+    if !value.is_object() {
+        return Err(ApiError::BadRequest("\"policy\" must be a JSON object.".into()));
+    }
+    let payload: ChannelPolicyPayload = serde_json::from_value(value).map_err(|_| {
+        ApiError::BadRequest(
+            "Invalid channel policy. \"min_severity\" is info, warning or critical; \
+             \"notify_resolved\" a boolean; \"min_interval_secs\" a number of seconds; \
+             \"quiet_hours\" a weekly schedule or null."
+                .into(),
+        )
+    })?;
+
+    let min_severity = match payload.min_severity.as_deref().map(str::trim) {
+        None => current.min_severity,
+        Some("info") => crate::alerting::model::Severity::Info,
+        Some("warning") => crate::alerting::model::Severity::Warning,
+        Some("critical") => crate::alerting::model::Severity::Critical,
+        Some(other) => {
+            return Err(ApiError::BadRequest(format!(
+                "Unknown minimum severity \"{other}\" (expected: info, warning, critical)."
+            )));
+        }
+    };
+
+    let min_interval_secs = match payload.min_interval_secs {
+        None => current.min_interval_secs,
+        Some(value) if value < 0 => {
+            return Err(ApiError::BadRequest("\"min_interval_secs\" cannot be negative.".into()));
+        }
+        Some(value) if value > MAX_MIN_INTERVAL_SECS => {
+            return Err(ApiError::BadRequest(format!(
+                "\"min_interval_secs\" is limited to {MAX_MIN_INTERVAL_SECS} (one week). To \
+                 stop a channel, disable it."
+            )));
+        }
+        Some(value) => value as u32,
+    };
+
+    let quiet_hours = match payload.quiet_hours {
+        None => current.quiet_hours.clone(),
+        Some(Value::Null) => None,
+        Some(raw) => {
+            let schedule = crate::api::alerts::parse_schedule(raw)?;
+            if !matches!(schedule, Schedule::Weekly { .. }) {
+                return Err(ApiError::BadRequest(
+                    "Quiet hours are a weekly schedule ({\"kind\":\"weekly\", …}). For a \
+                     one-off pause, schedule a maintenance window instead."
+                        .into(),
+                ));
+            }
+            Some(schedule)
+        }
+    };
+
+    Ok(ChannelPolicy {
+        min_severity,
+        notify_resolved: payload.notify_resolved.unwrap_or(current.notify_resolved),
+        min_interval_secs,
+        quiet_hours,
+    })
+}
+
 fn reject_secrets_in_settings(kind: &str, settings: &Value) -> ApiResult<()> {
     let Some(object) = settings.as_object() else { return Ok(()) };
     for key in SECRET_KEYS.iter().chain(extra_secret_keys(kind)) {
@@ -334,6 +436,7 @@ mod tests {
             enabled: None,
             settings: Some(settings),
             secrets,
+            policy: None,
         }
     }
 
@@ -374,6 +477,54 @@ mod tests {
         // ntfy sans sujet : le notificateur lui-même dit ce qui manque.
         let message = refus(payload("ntfy", json!({}), None).validate(None));
         assert!(message.contains("topic"), "message inattendu : {message}");
+    }
+
+    #[test]
+    fn la_politique_d_un_canal_se_complete_par_dessus_l_existante() {
+        let current = ChannelPolicy {
+            min_interval_secs: 300,
+            notify_resolved: false,
+            ..ChannelPolicy::default()
+        };
+        let Ok(policy) = parse_policy(Some(json!({ "min_severity": "critical" })), &current) else {
+            panic!("a partial policy should be accepted");
+        };
+        assert_eq!(policy.min_severity, crate::alerting::model::Severity::Critical);
+        assert_eq!(policy.min_interval_secs, 300, "untouched field kept");
+        assert!(!policy.notify_resolved);
+
+        let Ok(kept) = parse_policy(None, &current) else {
+            panic!("absent policy keeps the current one");
+        };
+        assert_eq!(kept, current);
+
+        let message = refus(parse_policy(Some(json!({ "min_severity": "loud" })), &current));
+        assert!(message.contains("severity"), "{message}");
+        let message = refus(parse_policy(Some(json!({ "min_interval_secs": -1 })), &current));
+        assert!(message.contains("negative"), "{message}");
+        let message = refus(parse_policy(
+            Some(
+                json!({ "quiet_hours": { "kind": "once", "starts_at": "2026-01-01T00:00:00Z", "ends_at": "2026-01-02T00:00:00Z" } }),
+            ),
+            &current,
+        ));
+        assert!(message.contains("weekly"), "{message}");
+
+        let Ok(cleared) = parse_policy(
+            Some(json!({ "quiet_hours": null })),
+            &ChannelPolicy {
+                quiet_hours: Some(Schedule::Weekly {
+                    days: vec![0],
+                    start_minute: 0,
+                    end_minute: 60,
+                    utc_offset_minutes: 0,
+                }),
+                ..ChannelPolicy::default()
+            },
+        ) else {
+            panic!("null clears the quiet hours");
+        };
+        assert!(cleared.quiet_hours.is_none());
     }
 
     #[test]

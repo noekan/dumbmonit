@@ -24,11 +24,25 @@ Severities are shown with the UI word; the API value is in parentheses.
 | PBS backup verification failed | Verification of the latest snapshot for this machine failed (`ezymonit_pbs_backup_last_verified < 1`). | < 1 | 30 min | Warning (`critical`) | 24 h |
 | PBS task failed | At least one PBS task failed in the review window. | > 0 | 10 min | Advisory (`warning`) | 24 h |
 | PBS garbage collection too old | No successful garbage collection on this datastore for more than eight days. | > 8 d | 1 h | Advisory (`warning`) | 24 h |
-| Service down | The service has not responded correctly for three minutes (`ezymonit_probe_success == 0`). | > 0 | 3 min | Warning (`critical`) | 30 min |
+| Service down | The service has not responded correctly for three minutes (`ezymonit_probe_success == bool 0`). | > 0 | 3 min | Warning (`critical`) | 30 min |
 | Service flapping | The service changed state more than six times in thirty minutes (`changes(ezymonit_probe_success[30m])`). | > 6 | 5 min | Advisory (`warning`) | 1 h |
 | Slow service | The service takes more than three seconds to respond. | > 3 s | 10 min | Advisory (`warning`) | 6 h |
 | Certificate expiring soon | The certificate expires in less than fourteen days. | < 14 d | 1 h | Advisory (`warning`) | 24 h |
 | Certificate expired | The certificate has expired. | < 0 d | 5 min | Warning (`critical`) | 24 h |
+| VM or container stopped | The guest was running within the last two hours and has been stopped for five minutes (`1 - ezymonit_proxmox_guest_running`, and'd with `max_over_time(…[2h]) == 1`). | > 0 | 5 min | Advisory (`warning`) | 6 h |
+| HA resource in error | A Proxmox HA resource is in state `error`, `fence` or `recovery` (`ezymonit_proxmox_ha_resource_error`). | > 0 | 2 min | Warning (`critical`) | 1 h |
+| Cluster lost quorum | The Proxmox cluster is not quorate (`1 - ezymonit_proxmox_cluster_quorate`). | > 0 | 1 min | Warning (`critical`) | 30 min |
+| Proxmox node offline | A cluster node is reported offline (`1 - ezymonit_proxmox_node_up`). | > 0 | 2 min | Warning (`critical`) | 30 min |
+| Proxmox storage almost full | A Proxmox storage is more than 85% full (`ezymonit_proxmox_storage_used_percent`); "Disk almost full" takes over at 90%. | > 85 % | 15 min | Advisory (`warning`) | 24 h |
+| Backup job failed | The last vzdump job on a node, or a scheduled backup job, failed (`1 - ezymonit_proxmox_backup_job_last_ok`). | > 0 | 10 min | Warning (`critical`) | 24 h |
+| Old snapshot | The oldest snapshot of a guest is more than thirty days old (`ezymonit_proxmox_guest_snapshot_oldest_age_seconds`). | > 30 d | 1 h | Info (`info`) | 7 d |
+| Replication failed | A replication job reports an error or a non-zero fail count (`ezymonit_proxmox_replication_job_error`). | > 0 | 10 min | Warning (`critical`) | 6 h |
+| Ceph health error | Ceph reports `HEALTH_ERR` (`ezymonit_proxmox_ceph_health`, 0 OK, 1 WARN, 2 ERR). | ≥ 2 | 2 min | Warning (`critical`) | 30 min |
+| Ceph health warning | Ceph reports `HEALTH_WARN` for more than fifteen minutes (`ezymonit_proxmox_ceph_health == 1`). | > 0 | 15 min | Advisory (`warning`) | 6 h |
+| Proxmox updates pending | More than twenty package updates are pending on a node (`ezymonit_proxmox_node_updates_pending`). | > 20 | 1 h | Info (`info`) | 7 d |
+| Node certificate expiring | A Proxmox node certificate expires in less than fourteen days (`ezymonit_proxmox_node_certificate_expiry_days`). | < 14 d | 1 h | Advisory (`warning`) | 24 h |
+| PBS sync job failed | The last run of a PBS sync job failed (`ezymonit_pbs_sync_job_last_ok < 1`). | < 1 | 10 min | Warning (`critical`) | 24 h |
+| PBS updates pending | More than twenty package updates are pending on the backup server (`ezymonit_pbs_node_updates_pending`). | > 20 | 1 h | Info (`info`) | 7 d |
 
 Every built-in rule applies to all devices and to every enabled channel.
 

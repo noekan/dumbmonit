@@ -10,8 +10,10 @@
 	import { PageHeader } from '$lib/ui';
 	import AppearanceSection from '$lib/components/settings/AppearanceSection.svelte';
 	import ChannelsSection from '$lib/components/settings/ChannelsSection.svelte';
+	import NotificationPolicySection from '$lib/components/settings/NotificationPolicySection.svelte';
 	import AgentsSection from '$lib/components/settings/AgentsSection.svelte';
 	import AssistantSection from '$lib/components/settings/AssistantSection.svelte';
+	import StatusPagesSection from '$lib/components/settings/StatusPagesSection.svelte';
 	import UsersSection from '$lib/components/settings/UsersSection.svelte';
 	import SsoSection from '$lib/components/settings/SsoSection.svelte';
 	import SecuritySection from '$lib/components/settings/SecuritySection.svelte';
@@ -23,8 +25,10 @@
 	const SECTIONS = $derived([
 		{ id: 'appearance', label: 'Appearance' },
 		{ id: 'notifications', label: 'Notifications' },
+		{ id: 'notifications-policy', label: 'Notification policy' },
 		{ id: 'agents', label: 'Agents' },
 		{ id: 'assistant', label: 'Assistant' },
+		{ id: 'status', label: 'Status pages' },
 		...(showAccounts
 			? [
 					{ id: 'users', label: 'Users' },
@@ -86,8 +90,10 @@
 	<div class="grid min-w-0 gap-6 [&_section[id]]:scroll-mt-20">
 		<div class="min-w-0 rise-in" style="--rise-delay: 0ms"><AppearanceSection /></div>
 		<div class="min-w-0 rise-in" style="--rise-delay: 40ms"><ChannelsSection /></div>
+		<div class="min-w-0 rise-in" style="--rise-delay: 60ms"><NotificationPolicySection /></div>
 		<div class="min-w-0 rise-in" style="--rise-delay: 80ms"><AgentsSection /></div>
 		<div class="min-w-0 rise-in" style="--rise-delay: 100ms"><AssistantSection /></div>
+		<div class="min-w-0 rise-in" style="--rise-delay: 110ms"><StatusPagesSection /></div>
 		{#if showAccounts}
 			<div class="min-w-0 rise-in" style="--rise-delay: 120ms"><UsersSection /></div>
 			<div class="min-w-0 rise-in" style="--rise-delay: 160ms"><SsoSection /></div>

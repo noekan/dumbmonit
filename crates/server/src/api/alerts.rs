@@ -21,10 +21,12 @@ use crate::alerting::machine::{EffectivePhase, Phase};
 use crate::alerting::model::{
     AnomalyParams, Operator, RULE_HOST_DOWN, Rule, RuleKind, Severity, TargetSelector,
 };
+use crate::alerting::overrides::RuleOverride;
 use crate::alerting::silence::{MINUTES_PER_DAY, Schedule, Silence};
 use crate::api::channels;
 use crate::api::{ApiError, ApiResult};
 use crate::db;
+use crate::notify::policy_store;
 use crate::state::AppState;
 
 /// Longueur maximale d'un identifiant stable de règle.
@@ -70,6 +72,8 @@ pub struct RuleView {
     pub query: String,
     pub operator: Operator,
     pub threshold: f64,
+    /// Seuil de retour au calme (hystérésis), `null` sans.
+    pub clear_threshold: Option<f64>,
     pub for_secs: u64,
     pub severity: Severity,
     pub selector: TargetSelector,
@@ -80,6 +84,8 @@ pub struct RuleView {
     pub escalate_after_secs: Option<u64>,
     pub enabled: bool,
     pub builtin: bool,
+    /// Surcharges par équipement de cette règle.
+    pub overrides: Vec<RuleOverride>,
 }
 
 impl From<Rule> for RuleView {
@@ -93,6 +99,7 @@ impl From<Rule> for RuleView {
             query: rule.query,
             operator: rule.operator,
             threshold: rule.threshold,
+            clear_threshold: rule.clear_threshold,
             for_secs: rule.for_duration.as_secs(),
             severity: rule.severity,
             selector: rule.selector,
@@ -103,8 +110,42 @@ impl From<Rule> for RuleView {
             escalate_after_secs: rule.escalate_after.map(|d| d.as_secs()),
             enabled: rule.enabled,
             builtin: rule.builtin,
+            overrides: Vec::new(),
         }
     }
+}
+
+/// Complète des vues de règles avec leurs surcharges par équipement.
+async fn with_overrides(
+    pool: &sqlx::SqlitePool,
+    mut views: Vec<RuleView>,
+) -> ApiResult<Vec<RuleView>> {
+    let overrides = policy_store::list_overrides(pool, None, None).await?;
+    for view in &mut views {
+        view.overrides = overrides.iter().filter(|o| o.rule_uid == view.uid).cloned().collect();
+    }
+    Ok(views)
+}
+
+async fn view_with_overrides(pool: &sqlx::SqlitePool, rule: Rule) -> ApiResult<RuleView> {
+    let mut views = with_overrides(pool, vec![RuleView::from(rule)]).await?;
+    Ok(views.remove(0))
+}
+
+/// Surcharge soumise par l'interface. Chaque champ absent ou `null` laisse la
+/// valeur de la règle s'appliquer ; une surcharge entièrement vide est effacée.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct OverridePayload {
+    pub threshold: Option<f64>,
+    pub clear_threshold: Option<f64>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OverridesQuery {
+    #[serde(default)]
+    pub target_id: Option<i64>,
 }
 
 /// Alerte active, telle que l'interface doit l'afficher.
@@ -220,6 +261,9 @@ pub struct RulePayload {
     pub operator: Option<String>,
     #[serde(default)]
     pub threshold: Option<f64>,
+    /// Seuil de retour au calme. Absent ou `null` : pas d'hystérésis.
+    #[serde(default)]
+    pub clear_threshold: Option<f64>,
     /// Signé volontairement : une valeur négative doit produire un message clair
     /// plutôt qu'un refus de désérialisation en anglais.
     #[serde(default)]
@@ -295,7 +339,9 @@ pub struct HistoryQuery {
 
 pub async fn list_rules(State(state): State<AppState>) -> ApiResult<Json<Vec<RuleView>>> {
     let rules = db::alerts::list_rules(&state.pool).await?;
-    Ok(Json(rules.into_iter().map(RuleView::from).collect()))
+    let views =
+        with_overrides(&state.pool, rules.into_iter().map(RuleView::from).collect()).await?;
+    Ok(Json(views))
 }
 
 pub async fn create_rule(
@@ -305,7 +351,7 @@ pub async fn create_rule(
     let existing = db::alerts::list_rules(&state.pool).await?;
     let mut rule = payload.validate(&state, None, &existing).await?;
     rule.id = db::alerts::upsert_rule(&state.pool, &rule).await?;
-    Ok((StatusCode::CREATED, Json(RuleView::from(rule))))
+    Ok((StatusCode::CREATED, Json(view_with_overrides(&state.pool, rule).await?)))
 }
 
 pub async fn update_rule(
@@ -319,7 +365,7 @@ pub async fn update_rule(
 
     let mut rule = payload.validate(&state, Some(&current), &existing).await?;
     rule.id = db::alerts::upsert_rule(&state.pool, &rule).await?;
-    Ok(Json(RuleView::from(rule)))
+    Ok(Json(view_with_overrides(&state.pool, rule).await?))
 }
 
 /// Supprime une règle créée par l'utilisateur.
@@ -361,7 +407,117 @@ pub async fn set_rule_enabled(
     }
     let rules = db::alerts::list_rules(&state.pool).await?;
     let rule = rules.into_iter().find(|rule| rule.id == id).ok_or_else(|| rule_not_found(id))?;
-    Ok(Json(RuleView::from(rule)))
+    Ok(Json(view_with_overrides(&state.pool, rule).await?))
+}
+
+// --------------------------------------------------------------------------
+// Surcharges par équipement
+// --------------------------------------------------------------------------
+
+async fn rule_by_id(pool: &sqlx::SqlitePool, id: i64) -> ApiResult<Rule> {
+    db::alerts::list_rules(pool)
+        .await?
+        .into_iter()
+        .find(|rule| rule.id == id)
+        .ok_or_else(|| rule_not_found(id))
+}
+
+/// Surcharges d'une règle.
+pub async fn list_overrides(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<Vec<RuleOverride>>> {
+    let rule = rule_by_id(&state.pool, id).await?;
+    Ok(Json(policy_store::list_overrides(&state.pool, Some(&rule.uid), None).await?))
+}
+
+/// Toutes les surcharges, éventuellement pour un seul équipement — c'est la
+/// vue qu'une page d'équipement affiche.
+pub async fn list_all_overrides(
+    State(state): State<AppState>,
+    Query(query): Query<OverridesQuery>,
+) -> ApiResult<Json<Vec<RuleOverride>>> {
+    Ok(Json(policy_store::list_overrides(&state.pool, None, query.target_id).await?))
+}
+
+/// Pose (ou remplace) la surcharge d'une règle pour un équipement.
+pub async fn put_override(
+    State(state): State<AppState>,
+    Path((id, target_id)): Path<(i64, i64)>,
+    Json(payload): Json<OverridePayload>,
+) -> ApiResult<Json<RuleOverride>> {
+    let rule = rule_by_id(&state.pool, id).await?;
+    if !target_exists(&state, target_id).await? {
+        return Err(ApiError::BadRequest(format!("Device {target_id} does not exist.")));
+    }
+    if let Some(threshold) = payload.threshold
+        && !threshold.is_finite()
+    {
+        return Err(ApiError::BadRequest("The threshold must be a finite number.".into()));
+    }
+    let effective_threshold = payload.threshold.unwrap_or(rule.threshold);
+    check_clear_threshold(rule.operator, effective_threshold, payload.clear_threshold)?;
+
+    let over = RuleOverride {
+        rule_uid: rule.uid,
+        target_id,
+        threshold: payload.threshold,
+        clear_threshold: payload.clear_threshold,
+        enabled: payload.enabled,
+    };
+    policy_store::upsert_override(&state.pool, &over).await?;
+    Ok(Json(over))
+}
+
+pub async fn delete_override(
+    State(state): State<AppState>,
+    Path((id, target_id)): Path<(i64, i64)>,
+) -> ApiResult<StatusCode> {
+    let rule = rule_by_id(&state.pool, id).await?;
+    if policy_store::delete_override(&state.pool, &rule.uid, target_id).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::NotFound(format!("No override of rule {id} for device {target_id}.")))
+    }
+}
+
+async fn target_exists(state: &AppState, target_id: i64) -> ApiResult<bool> {
+    Ok(sqlx::query("SELECT 1 FROM targets WHERE id = ?")
+        .bind(target_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(anyhow::Error::from)?
+        .is_some())
+}
+
+/// Un seuil de retour doit être du côté « calme » du seuil : en dessous pour
+/// « > » ou « ≥ », au-dessus pour « < » ou « ≤ ». Sinon l'alerte ne se
+/// résoudrait jamais, ou l'hystérésis ne servirait à rien.
+fn check_clear_threshold(operator: Operator, threshold: f64, clear: Option<f64>) -> ApiResult<()> {
+    let Some(clear) = clear else { return Ok(()) };
+    if !clear.is_finite() {
+        return Err(ApiError::BadRequest("The clear threshold must be a finite number.".into()));
+    }
+    let ok = match operator {
+        Operator::Gt | Operator::Ge => clear < threshold,
+        Operator::Lt | Operator::Le => clear > threshold,
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(ApiError::BadRequest(match operator {
+            Operator::Gt | Operator::Ge => format!(
+                "The clear threshold ({clear}) must be below the threshold ({threshold}): the \
+                 alert fires above the threshold and clears once the value drops under the \
+                 clear threshold."
+            ),
+            Operator::Lt | Operator::Le => format!(
+                "The clear threshold ({clear}) must be above the threshold ({threshold}): the \
+                 alert fires below the threshold and clears once the value rises over the \
+                 clear threshold."
+            ),
+        }))
+    }
 }
 
 impl RulePayload {
@@ -399,6 +555,10 @@ impl RulePayload {
                     .into(),
             ));
         }
+        // L'hystérésis n'a de sens que pour une comparaison à un seuil : une règle
+        // d'anomalie se juge sur un score, pas sur la valeur.
+        let clear_threshold = if kind == RuleKind::Anomaly { None } else { self.clear_threshold };
+        check_clear_threshold(operator, threshold, clear_threshold)?;
 
         let for_duration = parse_duration(self.for_secs, "The hold duration \"for_secs\"")?
             .unwrap_or(Duration::ZERO);
@@ -423,6 +583,7 @@ impl RulePayload {
             query,
             operator,
             threshold,
+            clear_threshold,
             for_duration,
             severity,
             selector,
@@ -889,7 +1050,7 @@ impl SilencePayload {
     }
 }
 
-fn parse_schedule(raw: Value) -> ApiResult<Schedule> {
+pub(crate) fn parse_schedule(raw: Value) -> ApiResult<Schedule> {
     let schedule: Schedule = serde_json::from_value(raw).map_err(|_| {
         ApiError::BadRequest(
             "Invalid schedule. Accepted forms: \
@@ -1010,6 +1171,18 @@ mod tests {
     fn l_identifiant_reserve_de_la_regle_injoignable_est_protege() {
         assert!(refus(check_uid_shape(RULE_HOST_DOWN)).contains("reserved"));
         assert!(refus(check_uid_shape("Accentué")).contains("lowercase"));
+    }
+
+    #[test]
+    fn un_seuil_de_retour_du_mauvais_cote_est_refuse() {
+        assert!(refus(check_clear_threshold(Operator::Gt, 90.0, Some(95.0))).contains("below"));
+        assert!(refus(check_clear_threshold(Operator::Lt, 10.0, Some(5.0))).contains("above"));
+        assert!(
+            refus(check_clear_threshold(Operator::Gt, 90.0, Some(f64::NAN))).contains("finite")
+        );
+        accepte(check_clear_threshold(Operator::Gt, 90.0, Some(80.0)));
+        accepte(check_clear_threshold(Operator::Le, 10.0, Some(12.0)));
+        accepte(check_clear_threshold(Operator::Gt, 90.0, None));
     }
 
     #[test]

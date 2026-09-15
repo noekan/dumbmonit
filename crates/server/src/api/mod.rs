@@ -10,8 +10,10 @@ mod health;
 mod ingest;
 mod mcp;
 mod metrics;
+mod notify_policy;
 mod oidc;
 mod spa;
+mod status_pages;
 mod targets;
 mod tokens;
 mod users;
@@ -70,6 +72,10 @@ pub fn router(state: AppState) -> Router {
         .route("/tokens/{id}", delete(tokens::revoke))
         // Actions sur les conteneurs d'une machine (`agent_commands.rs`).
         .merge(agent_commands::ui_routes())
+        // Politique de notification et surcharges par équipement (`notify_policy.rs`).
+        .merge(notify_policy::routes())
+        // Pages de statut et incidents (`status_pages.rs`).
+        .merge(status_pages::routes())
         // `route_layer` plutôt que `layer` : le garde ne s'applique qu'aux routes
         // effectivement déclarées ici, jamais au repli qui sert l'interface.
         .route_layer(middleware::from_fn_with_state(
@@ -99,7 +105,9 @@ pub fn router(state: AppState) -> Router {
         // et le refuserait à chaque nouvelle tentative, sans issue.
         .route("/ingest", post(ingest::receive).layer(DefaultBodyLimit::max(16 * 1024 * 1024)))
         // Canal de commandes des agents : même jeton, même raison d'être ouvert.
-        .merge(agent_commands::agent_routes());
+        .merge(agent_commands::agent_routes())
+        // Pages de statut publiques : lecture seule, sans session, par conception.
+        .merge(status_pages::public_routes());
 
     // Serveur MCP : authentifié par jeton d'API, pas par session — un assistant
     // n'a pas de navigateur. Le garde ne couvre que cette route ; `GET` reste

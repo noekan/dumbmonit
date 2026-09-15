@@ -7,19 +7,33 @@ use ezymonit_server::{alerting, api, auth, collectors, crypto, db, scheduler, ts
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     init_tracing();
 
     let config = Config::from_env().context("invalid configuration")?;
-    info!(version = env!("CARGO_PKG_VERSION"), "starting DumbMonit");
+    info!(version = env!("CARGO_PKG_VERSION"), workers = config.workers, "starting DumbMonit");
 
+    // Le runtime est construit à la main plutôt que par `#[tokio::main]` : c'est
+    // le seul moyen de fixer le nombre de threads d'après la configuration.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(config.workers)
+        // Le pool bloquant ne sert qu'aux lectures de fichiers (`tokio::fs`) et à
+        // quelques résolutions DNS : 512 threads par défaut, seize suffisent.
+        .max_blocking_threads(16)
+        .thread_name("ezymonit-worker")
+        .enable_all()
+        .build()
+        .context("building the async runtime")?;
+    runtime.block_on(run(config))
+}
+
+async fn run(config: Config) -> Result<()> {
     tokio::fs::create_dir_all(&config.data_dir)
         .await
         .with_context(|| format!("creating directory {}", config.data_dir.display()))?;
 
     let secret = resolve_secret(&config).await?;
-    let pool = db::open(&config.database_path()).await?;
+    let pool = db::open_with(&config.database_path(), config.db_pool_size).await?;
     let cipher = db::init_cipher(&pool, &secret).await?;
     if config.reset_password {
         auth::reset_password(&pool).await?;
@@ -40,7 +54,11 @@ async fn main() -> Result<()> {
         }
     }
 
-    let sink = tsdb::spawn_writer(victoria.clone(), config.write_flush_interval);
+    let sink = tsdb::spawn_writer_with(
+        victoria.clone(),
+        config.write_flush_interval,
+        config.write_flush_size,
+    );
 
     let mut registry = collectors::Registry::new();
 

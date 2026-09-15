@@ -75,9 +75,9 @@ impl Agent {
         Ok(Self {
             interval: config.interval,
             buffer: PendingBuffer::new(config.max_buffered_samples),
-            probe: SystemProbe::new(),
+            probe: SystemProbe::new(&config.probe),
             health: SystemHealthProbe::new(&config.system_health),
-            docker: DockerProbe::new(&config.docker_socket),
+            docker: DockerProbe::new(&config.docker_socket, config.docker_max_containers),
             updates: UpdateChecker::new(),
             plakar: PlakarProbe::new(&config.plakar),
             backoff: Backoff::new(BACKOFF_BASE, BACKOFF_MAX),
@@ -95,8 +95,8 @@ impl Agent {
         snapshot.services = services::probe(&self.config.services).await;
         if self.config.docker {
             snapshot.containers = self.docker.read().await;
-            if let Some(containers) = snapshot.containers.as_mut() {
-                self.check_updates(containers);
+            if let Some(inventory) = snapshot.containers.as_mut() {
+                self.check_updates(&mut inventory.detailed);
             }
         }
         snapshot.system_health = self.health.read().await;
@@ -301,7 +301,9 @@ mod tests {
             docker: false,
             docker_socket: std::path::PathBuf::from("/inexistant.sock"),
             docker_update_check: false,
+            docker_max_containers: 200,
             commands: false,
+            probe: crate::collect::ProbeConfig::default(),
             system_health: crate::collect::system_health::SystemHealthConfig::default(),
             plakar: crate::collect::plakar::PlakarConfig::default(),
             max_buffered_samples: 1_000,
@@ -338,6 +340,37 @@ mod tests {
         assert!(samples.iter().all(|s| s.value.is_finite()));
         assert!(samples.iter().any(|s| s.metric == "memory_total_bytes"));
         assert!(samples.iter().any(|s| s.metric == "agent_collect_seconds"));
+        // Le périmètre par défaut : pas de détail par cœur, pas d'interface
+        // virtuelle, pas de montage de conteneur, et une entrée d'E/S par disque.
+        assert!(samples.iter().all(|s| s.metric != "cpu_core_usage_percent"));
+        assert!(
+            samples
+                .iter()
+                .all(|s| { s.labels.get("ifname").is_none_or(|name| !name.starts_with("veth")) })
+        );
+        assert!(samples.iter().all(|s| {
+            s.labels.get("mountpoint").is_none_or(|m| !m.starts_with("/var/lib/docker/"))
+        }));
+        assert!(
+            samples.iter().all(|s| {
+                !s.metric.starts_with("disk_") || !s.labels.contains_key("mountpoint")
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn the_mount_list_is_reread_only_every_tenth_cycle() {
+        // Deux cycles consécutifs : le second ne relit pas la liste des montages,
+        // et doit pourtant remonter les mêmes systèmes de fichiers que le premier.
+        let mut probe = SystemProbe::new(&crate::collect::ProbeConfig::default());
+        let first = probe.read();
+        let second = probe.read();
+        let mounts = |snapshot: &crate::collect::Snapshot| -> Vec<String> {
+            snapshot.filesystems.iter().map(|fs| fs.mount_point.clone()).collect()
+        };
+        assert_eq!(mounts(&first), mounts(&second));
+        assert_eq!(first.disk_io.len(), second.disk_io.len());
+        assert_eq!(first.cpu.core_count, second.cpu.core_count);
     }
 
     #[tokio::test]

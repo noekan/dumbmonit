@@ -9,14 +9,24 @@
 //! distant, un aller-retour réseau : la lecture tourne dans une tâche de fond,
 //! au plus une fois par `interval`, et son dernier résultat est réémis à chaque
 //! cycle — le même schéma que l'inventaire des mises à jour système.
+//!
+//! Sans liste explicite, les klosets sont **découverts** : Plakar range ses
+//! dépôts nommés dans `~/.config/plakar/stores.yml` (clé `stores`, un
+//! `location` par entrée, référencés par `plakar at @nom`) et son dépôt par
+//! défaut dans `~/.plakar`. L'agent tournant souvent sous root alors que les
+//! sauvegardes appartiennent à un utilisateur, on parcourt le foyer de l'agent,
+//! `/root` et chaque `/home/*`, et l'on passe `-configdir` à Plakar pour qu'il
+//! résolve `@nom` dans le bon fichier. Seul `location` est lu : les phrases de
+//! passe qui voisinent dans ce fichier ne sont ni conservées ni journalisées.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use ezymonit_proto::{MetricKind, Sample};
 use tokio::task::JoinHandle;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// Période par défaut entre deux lectures. Dix minutes : une sauvegarde
 /// nocturne ne se surveille pas à la seconde.
@@ -39,7 +49,8 @@ const EXIT_CANNOT_OPEN: i32 = 66;
 pub struct PlakarConfig {
     /// Binaire, nom nu (cherché dans `PATH`) ou chemin complet.
     pub bin: String,
-    /// Klosets à lire, tels qu'on les passe à `plakar at …`.
+    /// Klosets à lire, tels qu'on les passe à `plakar at …`. Vide : ils sont
+    /// découverts dans les fichiers de configuration de Plakar.
     pub klosets: Vec<String>,
     /// Répertoire utilisé comme `HOME` pour Plakar, quand l'agent ne tourne pas
     /// sous le compte qui a créé les klosets.
@@ -96,11 +107,50 @@ pub struct KlosetStat {
     pub readable: bool,
 }
 
-/// Traduit les klosets en échantillons.
-pub fn samples(klosets: &[KlosetStat], now_ms: i64) -> Vec<Sample> {
+/// Résultat d'une lecture complète : Plakar est-il là, et que dit chaque kloset.
+///
+/// Distinguer « pas installé » de « installé mais aucun kloset » est ce qui
+/// permet à l'interface de proposer la bonne prochaine étape.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlakarReport {
+    pub installed: bool,
+    pub klosets: Vec<KlosetStat>,
+}
+
+/// Un kloset à lire : ce qu'on passe à `plakar at`, et le répertoire de
+/// configuration où Plakar doit résoudre un éventuel `@nom`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Kloset {
+    /// Étiquette `kloset` des séries : `@diskext`, `/home/noe/.plakar`, ou la
+    /// valeur explicite de la configuration.
+    pub label: String,
+    /// Argument de `plakar at`.
+    pub at: String,
+    /// `-configdir` à passer à Plakar. `None` : celui de l'agent.
+    pub configdir: Option<PathBuf>,
+    /// Clé de dédoublonnage : l'emplacement du dépôt, jamais son secret.
+    pub location: String,
+}
+
+impl Kloset {
+    /// Un kloset donné explicitement dans la configuration de l'agent.
+    fn explicit(at: &str) -> Self {
+        Self {
+            label: at.to_string(),
+            at: at.to_string(),
+            configdir: None,
+            location: at.to_string(),
+        }
+    }
+}
+
+/// Traduit le rapport en échantillons.
+pub fn samples(report: &PlakarReport, now_ms: i64) -> Vec<Sample> {
     let gauge = |metric: &str, value: f64| Sample::new(metric, value, MetricKind::Gauge, now_ms);
-    let mut samples = Vec::with_capacity(klosets.len() * 4);
-    for kloset in klosets {
+    let mut samples = Vec::with_capacity(report.klosets.len() * 4 + 2);
+    samples.push(gauge("backup_plakar_present", f64::from(u8::from(report.installed))));
+    samples.push(gauge("backup_klosets_found", report.klosets.len() as f64));
+    for kloset in &report.klosets {
         if !kloset.readable {
             // Un kloset illisible est une sauvegarde en échec : la série existe,
             // à zéro, plutôt que de disparaître sans bruit.
@@ -239,17 +289,177 @@ pub fn group_by_source(
     sources.into_values().collect()
 }
 
+// --------------------------------------------------------------- découverte
+
+/// Clés de premier niveau qui listent des dépôts. `stores` est celle de Plakar
+/// 1.1 ; les deux autres couvrent d'anciens fichiers `plakar.yml`.
+const STORE_KEYS: &[&str] = &["stores", "repositories", "klosets"];
+
+/// Fichiers de configuration lus dans `~/.config/plakar`.
+const STORE_FILES: &[&str] = &["stores.yml", "stores.yaml", "plakar.yml", "plakar.yaml"];
+
+/// Lit les dépôts nommés d'un fichier de configuration Plakar : `(nom,
+/// location)` dans l'ordre du fichier. Une entrée sans `location` est ignorée,
+/// tout autre champ (phrase de passe comprise) n'est jamais regardé.
+pub fn parse_stores(text: &str) -> Vec<(String, String)> {
+    let Ok(root) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(text) else {
+        return Vec::new();
+    };
+    let mut stores = Vec::new();
+    for key in STORE_KEYS {
+        let Some(serde_yaml_ng::Value::Mapping(entries)) = root.get(*key) else { continue };
+        for (name, entry) in entries {
+            let Some(name) = name.as_str() else { continue };
+            let Some(location) = entry.get("location").and_then(|l| l.as_str()) else { continue };
+            if name.is_empty() || location.is_empty() {
+                continue;
+            }
+            stores.push((name.to_string(), location.to_string()));
+        }
+    }
+    stores
+}
+
+/// Un foyer à fouiller : son répertoire de configuration Plakar et l'endroit
+/// de son kloset par défaut.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Home {
+    /// Nom court, pour désambiguïser deux `@nom` homonymes.
+    pub user: String,
+    pub configdir: PathBuf,
+    /// `~/.plakar`, s'il existe.
+    pub default_kloset: PathBuf,
+}
+
+impl Home {
+    fn at(home: &Path) -> Self {
+        Self {
+            user: home.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            configdir: home.join(".config").join("plakar"),
+            default_kloset: home.join(".plakar"),
+        }
+    }
+}
+
+/// Fouille les foyers, dans l'ordre donné, et rend les klosets trouvés sans
+/// doublon : un même emplacement vu depuis deux comptes n'est lu qu'une fois.
+pub fn discover_in(homes: &[Home]) -> Vec<Kloset> {
+    let mut found: Vec<Kloset> = Vec::new();
+    let mut locations = BTreeSet::new();
+    let mut labels = BTreeSet::new();
+    let mut push = |home: &Home, mut kloset: Kloset| {
+        if !locations.insert(kloset.location.clone()) {
+            return;
+        }
+        if !labels.insert(kloset.label.clone()) {
+            kloset.label = format!("{}:{}", home.user, kloset.label);
+            labels.insert(kloset.label.clone());
+        }
+        found.push(kloset);
+    };
+    for home in homes {
+        for file in STORE_FILES {
+            let path = home.configdir.join(file);
+            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            for (name, location) in parse_stores(&text) {
+                let at = format!("@{name}");
+                push(
+                    home,
+                    Kloset {
+                        label: at.clone(),
+                        at,
+                        configdir: Some(home.configdir.clone()),
+                        location: normalise_location(&location, &home.configdir),
+                    },
+                );
+            }
+        }
+        if home.default_kloset.is_dir() {
+            let path = home.default_kloset.to_string_lossy().into_owned();
+            push(
+                home,
+                Kloset {
+                    label: path.clone(),
+                    at: path.clone(),
+                    configdir: Some(home.configdir.clone()),
+                    location: path,
+                },
+            );
+        }
+    }
+    found
+}
+
+/// Un emplacement sous forme de chemin relatif est relatif au répertoire de
+/// configuration ; on le rend absolu pour que le dédoublonnage soit juste.
+fn normalise_location(location: &str, configdir: &Path) -> String {
+    let path = Path::new(location);
+    if location.contains("://") || location.contains(':') || path.is_absolute() {
+        location.to_string()
+    } else {
+        configdir.join(path).to_string_lossy().into_owned()
+    }
+}
+
+/// Les foyers à fouiller sur cette machine : celui de l'agent d'abord (avec
+/// `$XDG_CONFIG_HOME` et `plakar_home` honorés), puis `/root`, puis chaque
+/// `/home/*` dans l'ordre alphabétique.
+fn homes(config: &PlakarConfig) -> Vec<Home> {
+    let mut homes = Vec::new();
+    let own_home = config.home.clone().or_else(|| std::env::var("HOME").ok()).map(PathBuf::from);
+    if let Some(home) = &own_home {
+        let mut own = Home::at(home);
+        if config.home.is_none()
+            && let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
+            && !xdg.trim().is_empty()
+        {
+            own.configdir = PathBuf::from(xdg).join("plakar");
+        }
+        homes.push(own);
+    }
+    homes.push(Home::at(Path::new("/root")));
+    if let Ok(entries) = std::fs::read_dir("/home") {
+        let mut users: Vec<PathBuf> =
+            entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        users.sort();
+        homes.extend(users.iter().map(|p| Home::at(p)));
+    }
+    // Le foyer de l'agent est souvent `/root` ou l'un des `/home/*` : on ne le
+    // fouille pas deux fois.
+    let mut seen = BTreeSet::new();
+    homes.retain(|h| seen.insert(h.configdir.clone()));
+    homes
+}
+
+/// Les klosets à lire : la liste explicite si elle existe, sinon la découverte.
+fn klosets_to_read(config: &PlakarConfig) -> Vec<Kloset> {
+    if !config.klosets.is_empty() {
+        return config.klosets.iter().map(|k| Kloset::explicit(k)).collect();
+    }
+    discover_in(&homes(config))
+}
+
 // ------------------------------------------------------------------- lecture
 
 /// Lecteur des klosets, conservé d'un cycle à l'autre pour porter le cache et
 /// la tâche de fond.
 pub struct PlakarProbe {
     config: PlakarConfig,
-    last: Option<Vec<KlosetStat>>,
+    last: Option<PlakarReport>,
     refreshed_at: Option<tokio::time::Instant>,
-    task: Option<JoinHandle<Vec<KlosetStat>>>,
-    /// Le binaire est absent : on l'a dit une fois, inutile d'insister.
+    task: Option<JoinHandle<Outcome>>,
+    /// Le binaire est absent : on l'a dit une fois, inutile d'insister — mais on
+    /// revérifie à chaque période, une installation ultérieure doit se voir.
     binary_missing: bool,
+    /// Étiquettes annoncées la dernière fois : on ne rejournalise que si la
+    /// liste change.
+    announced: Option<Vec<String>>,
+}
+
+/// Ce que rend la tâche de fond : le rapport, et les klosets qu'elle a lus.
+struct Outcome {
+    report: PlakarReport,
+    labels: Vec<String>,
 }
 
 impl PlakarProbe {
@@ -260,15 +470,14 @@ impl PlakarProbe {
             refreshed_at: None,
             task: None,
             binary_missing: false,
+            announced: None,
         }
     }
 
     /// Un cycle : relance la lecture si elle a vieilli, récolte la précédente si
-    /// elle a fini, et rend le dernier état connu. `None` sans kloset configuré.
-    pub async fn read(&mut self) -> Option<Vec<KlosetStat>> {
-        if self.config.klosets.is_empty() || self.binary_missing {
-            return None;
-        }
+    /// elle a fini, et rend le dernier état connu. `None` tant que la première
+    /// lecture n'a pas abouti.
+    pub async fn read(&mut self) -> Option<PlakarReport> {
         if self.task.is_none() {
             let stale = self.refreshed_at.is_none_or(|at| at.elapsed() >= self.config.interval);
             if stale {
@@ -285,13 +494,9 @@ impl PlakarProbe {
                     self.task = None;
                     self.refreshed_at = Some(tokio::time::Instant::now());
                     match outcome {
-                        Ok(stats) => {
-                            if stats.is_empty() {
-                                // Vide avec des klosets configurés : le binaire manque.
-                                self.binary_missing = true;
-                                return None;
-                            }
-                            self.last = Some(stats);
+                        Ok(outcome) => {
+                            self.announce(&outcome);
+                            self.last = Some(outcome.report);
                         }
                         Err(error) => debug!(%error, "plakar reading aborted"),
                     }
@@ -300,23 +505,60 @@ impl PlakarProbe {
         }
         self.last.clone()
     }
+
+    /// Dit une fois ce qui a été trouvé — et le redit seulement si ça change.
+    fn announce(&mut self, outcome: &Outcome) {
+        if !outcome.report.installed {
+            if !self.binary_missing {
+                warn!(bin = self.config.bin, "plakar not found, backups not reported");
+                self.binary_missing = true;
+            }
+            self.announced = None;
+            return;
+        }
+        self.binary_missing = false;
+        let changed = self.announced.as_ref() != Some(&outcome.labels);
+        if !changed {
+            debug!(klosets = outcome.labels.len(), "plakar klosets unchanged");
+            return;
+        }
+        if outcome.labels.is_empty() {
+            if self.config.klosets.is_empty() {
+                info!(
+                    "plakar is installed but no kloset was found (~/.config/plakar/stores.yml, ~/.plakar)"
+                );
+            }
+        } else if self.config.klosets.is_empty() {
+            info!(klosets = ?outcome.labels, "plakar klosets discovered");
+        } else {
+            info!(klosets = ?outcome.labels, "plakar klosets from the configuration");
+        }
+        self.announced = Some(outcome.labels.clone());
+    }
 }
 
-/// Lit tous les klosets, l'un après l'autre. Une liste vide signifie que le
-/// binaire est introuvable.
-async fn read_all(config: PlakarConfig) -> Vec<KlosetStat> {
-    let mut stats = Vec::with_capacity(config.klosets.len());
-    for kloset in &config.klosets {
+/// Vérifie que Plakar est là, puis lit tous les klosets, l'un après l'autre.
+async fn read_all(config: PlakarConfig) -> Outcome {
+    match run(&config, None, &["version"]).await {
+        Ok(_) | Err(RunError::Failed(_)) => {}
+        Err(RunError::Missing) => {
+            return Outcome { report: PlakarReport::default(), labels: Vec::new() };
+        }
+    }
+    let klosets = klosets_to_read(&config);
+    let labels: Vec<String> = klosets.iter().map(|k| k.label.clone()).collect();
+    let mut stats = Vec::with_capacity(klosets.len());
+    for kloset in &klosets {
         match read_kloset(&config, kloset).await {
             Ok(stat) => stats.push(stat),
             Err(RunError::Missing) => {
-                warn!(bin = config.bin, "plakar not found, backups not reported");
-                return Vec::new();
+                // Disparu entre deux commandes : autant le dire tout de suite.
+                return Outcome { report: PlakarReport::default(), labels: Vec::new() };
             }
             Err(RunError::Failed(why)) => {
-                warn!(kloset, %why, "cannot read the Plakar kloset");
+                warn!(kloset = kloset.label, %why, "cannot read the Plakar kloset");
                 stats.push(KlosetStat {
-                    kloset: kloset.clone(),
+                    kloset: kloset.label.clone(),
                     storage_bytes: None,
                     sources: Vec::new(),
                     readable: false,
@@ -324,13 +566,15 @@ async fn read_all(config: PlakarConfig) -> Vec<KlosetStat> {
             }
         }
     }
-    stats
+    Outcome { report: PlakarReport { installed: true, klosets: stats }, labels }
 }
 
-async fn read_kloset(config: &PlakarConfig, kloset: &str) -> Result<KlosetStat, RunError> {
-    let ls = run(config, &["at", kloset, "ls"]).await?;
+async fn read_kloset(config: &PlakarConfig, kloset: &Kloset) -> Result<KlosetStat, RunError> {
+    let configdir = kloset.configdir.as_deref();
+    let at = kloset.at.as_str();
+    let ls = run(config, configdir, &["at", at, "ls"]).await?;
     let snapshots = parse_ls(&ls);
-    let info = parse_info(&run(config, &["at", kloset, "info"]).await?);
+    let info = parse_info(&run(config, configdir, &["at", at, "info"]).await?);
 
     // Une inspection par source, sur son instantané le plus récent seulement :
     // c'est lui qui dit si la dernière sauvegarde s'est bien passée.
@@ -349,19 +593,21 @@ async fn read_kloset(config: &PlakarConfig, kloset: &str) -> Result<KlosetStat, 
         }
     }
     for id in newest_ids {
-        match run(config, &["at", kloset, "info", id]).await {
+        match run(config, configdir, &["at", at, "info", id]).await {
             Ok(text) => {
                 if let Some(count) = parse_snapshot_errors(&text) {
                     errors.insert(id.to_string(), count);
                 }
             }
             Err(RunError::Missing) => return Err(RunError::Missing),
-            Err(RunError::Failed(why)) => debug!(kloset, id, %why, "snapshot detail skipped"),
+            Err(RunError::Failed(why)) => {
+                debug!(kloset = kloset.label, id, %why, "snapshot detail skipped")
+            }
         }
     }
 
     Ok(KlosetStat {
-        kloset: kloset.to_string(),
+        kloset: kloset.label.clone(),
         storage_bytes: info.storage_bytes,
         sources: group_by_source(&snapshots, &errors),
         readable: true,
@@ -385,9 +631,18 @@ impl std::fmt::Display for RunError {
     }
 }
 
-/// Lance `plakar` sans interpréteur, avec un délai strict.
-async fn run(config: &PlakarConfig, args: &[&str]) -> Result<String, RunError> {
+/// Lance `plakar` sans interpréteur, avec un délai strict. `configdir` est
+/// passé en option globale, avant le sous-commande : c'est là que Plakar résout
+/// les `@nom`.
+async fn run(
+    config: &PlakarConfig,
+    configdir: Option<&Path>,
+    args: &[&str],
+) -> Result<String, RunError> {
     let mut command = tokio::process::Command::new(&config.bin);
+    if let Some(dir) = configdir {
+        command.arg("-configdir").arg(dir);
+    }
     command
         .args(args)
         .env("LC_ALL", "C")
@@ -486,6 +741,95 @@ mod tests {
         assert!(!photos.last_ok, "the newest snapshot has errors");
     }
 
+    const STORES: &str = "version: v1.0.0\nstores:\n    diskext:\n        location: /mnt/diskext/plakar\n        passphrase: secret\n    nas:\n        location: rclone://\n        rclone_pass: secret\n    broken:\n        passphrase: only\n";
+
+    #[test]
+    fn stores_are_read_by_name_and_location_only() {
+        let stores = parse_stores(STORES);
+        assert_eq!(
+            stores,
+            vec![
+                ("diskext".to_string(), "/mnt/diskext/plakar".to_string()),
+                ("nas".to_string(), "rclone://".to_string()),
+            ]
+        );
+        assert!(parse_stores("stores: {}\n").is_empty());
+        assert!(parse_stores("not: yaml: at: all").is_empty());
+    }
+
+    #[test]
+    fn legacy_repository_keys_are_accepted_too() {
+        let stores = parse_stores(
+            "repositories:\n  main:\n    location: /srv/backups\nklosets:\n  lab:\n    location: /tmp/lab\n",
+        );
+        assert_eq!(stores.len(), 2);
+        assert_eq!(stores[0].0, "main");
+        assert_eq!(stores[1].1, "/tmp/lab");
+    }
+
+    /// Une arborescence jetable : deux foyers avec des dépôts, un avec `~/.plakar`.
+    fn lab_tree() -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "ezymonit-plakar-{}-{}",
+            std::process::id(),
+            rand_suffix()
+        ));
+        let write = |path: PathBuf, text: &str| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(
+            root.join("root/.config/plakar/stores.yml"),
+            "stores:\n  diskext:\n    location: /mnt/diskext/plakar\n",
+        );
+        write(
+            root.join("home/alice/.config/plakar/stores.yml"),
+            "stores:\n  diskext:\n    location: /mnt/alice/plakar\n  shared:\n    location: /mnt/diskext/plakar\n",
+        );
+        std::fs::create_dir_all(root.join("home/bob/.plakar")).unwrap();
+        root
+    }
+
+    fn rand_suffix() -> u128 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn discovery_walks_the_homes_and_deduplicates_by_location() {
+        let root = lab_tree();
+        let homes = vec![
+            Home::at(&root.join("root")),
+            Home::at(&root.join("home/alice")),
+            Home::at(&root.join("home/bob")),
+        ];
+        let found = discover_in(&homes);
+        std::fs::remove_dir_all(&root).ok();
+
+        let labels: Vec<&str> = found.iter().map(|k| k.label.as_str()).collect();
+        let bob = root.join("home/bob/.plakar").to_string_lossy().into_owned();
+        assert_eq!(labels, vec!["@diskext", "alice:@diskext", bob.as_str()]);
+        assert_eq!(found[0].at, "@diskext");
+        assert_eq!(found[0].configdir.as_deref(), Some(root.join("root/.config/plakar").as_path()));
+        assert_eq!(found[1].at, "@diskext", "same name, other location: read from alice's config");
+        assert_eq!(
+            found[1].configdir.as_deref(),
+            Some(root.join("home/alice/.config/plakar").as_path())
+        );
+        assert_eq!(found[2].at, bob);
+    }
+
+    #[test]
+    fn an_explicit_list_short_circuits_discovery() {
+        let config =
+            PlakarConfig { klosets: vec!["/srv/backups".into()], ..PlakarConfig::default() };
+        let klosets = klosets_to_read(&config);
+        assert_eq!(klosets, vec![Kloset::explicit("/srv/backups")]);
+        assert!(klosets[0].configdir.is_none());
+    }
+
     #[test]
     fn a_kloset_becomes_four_series_per_source_plus_its_size() {
         let kloset = KlosetStat {
@@ -500,8 +844,10 @@ mod tests {
             readable: true,
         };
         let now_ms = (1_789_492_803 + 3_600) * 1000;
-        let samples = samples(&[kloset], now_ms);
+        let samples = samples(&PlakarReport { installed: true, klosets: vec![kloset] }, now_ms);
         let find = |key: &str| samples.iter().find(|s| s.series_key() == key).map(|s| s.value);
+        assert_eq!(find("backup_plakar_present"), Some(1.0));
+        assert_eq!(find("backup_klosets_found"), Some(1.0));
         assert_eq!(find(r#"backup_size_bytes{kloset="/srv/backups"}"#), Some(4_584_931.0));
         assert_eq!(
             find(r#"backup_last_success_seconds{kloset="/srv/backups",source="/srv/photos"}"#),
@@ -525,28 +871,44 @@ mod tests {
             sources: Vec::new(),
             readable: false,
         };
-        let samples = samples(&[kloset], 0);
-        assert_eq!(samples.len(), 1);
-        assert_eq!(samples[0].series_key(), r#"backup_last_status{kloset="/missing",source="*"}"#);
-        assert_eq!(samples[0].value, 0.0);
+        let samples = samples(&PlakarReport { installed: true, klosets: vec![kloset] }, 0);
+        assert_eq!(samples.len(), 3);
+        assert_eq!(samples[2].series_key(), r#"backup_last_status{kloset="/missing",source="*"}"#);
+        assert_eq!(samples[2].value, 0.0);
+    }
+
+    #[test]
+    fn without_plakar_only_the_presence_series_are_emitted() {
+        let samples = samples(&PlakarReport::default(), 0);
+        let find = |key: &str| samples.iter().find(|s| s.series_key() == key).map(|s| s.value);
+        assert_eq!(samples.len(), 2);
+        assert_eq!(find("backup_plakar_present"), Some(0.0));
+        assert_eq!(find("backup_klosets_found"), Some(0.0));
     }
 
     #[tokio::test]
-    async fn without_klosets_nothing_is_read() {
-        let mut probe = PlakarProbe::new(&PlakarConfig::default());
-        assert!(probe.read().await.is_none());
-    }
-
-    #[tokio::test]
-    async fn a_missing_binary_is_noticed_once_and_then_silent() {
+    async fn a_missing_binary_is_reported_as_absent_and_noticed_once() {
         let config = PlakarConfig {
             bin: "/nonexistent/plakar-binary".into(),
             klosets: vec!["/tmp/x".into()],
             ..PlakarConfig::default()
         };
         let mut probe = PlakarProbe::new(&config);
-        assert!(probe.read().await.is_none());
+        let report = probe.read().await.expect("the first read completes at once");
+        assert!(!report.installed);
+        assert!(report.klosets.is_empty());
         assert!(probe.binary_missing);
+        // Un second cycle rend le même rapport sans relancer la lecture.
+        assert_eq!(probe.read().await, Some(report));
+    }
+
+    #[tokio::test]
+    async fn without_klosets_the_binary_is_still_looked_up() {
+        let config =
+            PlakarConfig { bin: "/nonexistent/plakar-binary".into(), ..PlakarConfig::default() };
+        let mut probe = PlakarProbe::new(&config);
+        let report = probe.read().await.expect("report");
+        assert_eq!(report, PlakarReport::default());
     }
 
     /// Demande le kloset de laboratoire créé sur cette machine.
@@ -556,8 +918,9 @@ mod tests {
         let config =
             PlakarConfig { klosets: vec!["/tmp/plakar-lab".into()], ..PlakarConfig::default() };
         let mut probe = PlakarProbe::new(&config);
-        let stats = probe.read().await.expect("kloset");
-        assert!(stats[0].readable);
-        assert!(!stats[0].sources.is_empty());
+        let report = probe.read().await.expect("kloset");
+        assert!(report.installed);
+        assert!(report.klosets[0].readable);
+        assert!(!report.klosets[0].sources.is_empty());
     }
 }

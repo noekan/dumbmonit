@@ -40,6 +40,22 @@ over the last 24 hours or 7 days, **Response time**, the number of **Checks**,
 and a **History** bar of slots (oldest on the left) showing when the service
 was down.
 
+## Container policies
+
+On a machine with an agent and Docker, a **Docker** strip sits under the
+header: container count, how many run, updates available, and how many
+containers have a policy. **Manage containers** opens the list; **Policies…**
+opens a table with two switches per container and an "Apply to all" row:
+
+- **Restart if down** — the server restarts the container within a minute of
+  it stopping (at most once every ten minutes);
+- **Auto-update in maintenance windows** — when the registry has a newer image
+  for the same tag, the container is recreated during a scheduled maintenance
+  window (Alerts page → Scheduled) and rolled back if it fails its healthcheck.
+
+Each switch saves on its own. Details and safety rules: [Docker
+containers](../devices/agent.md#docker-containers).
+
 ## Adding and editing
 
 See [Add your first device](../install/first-device.md) for the form and the

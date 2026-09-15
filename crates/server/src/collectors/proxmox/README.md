@@ -1,8 +1,10 @@
 # Collecteur Proxmox VE
 
-Intégration de Proxmox VE : nœuds, machines virtuelles, conteneurs, stockages et
-sauvegardes. Le module est autonome ; il ne dépend que de `ezymonit-proto`,
-`reqwest`, `serde`, `chrono` et `futures`, tous déjà présents.
+Intégration de Proxmox VE : nœuds, machines virtuelles, conteneurs, stockages,
+sauvegardes, haute disponibilité, instantanés, réplication, Ceph, mises à jour
+et certificats. Le module ne dépend que de `ezymonit-proto`, `reqwest`, `serde`,
+`chrono`, `tokio` et `futures`, tous déjà présents, et du client HTTP partagé
+`crate::collectors::http`.
 
 ## Câblage
 
@@ -41,7 +43,20 @@ Les cibles de type `proxmox` sont alors interrogées par le planificateur.
     ticket est obtenu puis mis en cache et renouvelé dix minutes avant sa fin de
     vie (deux heures).
 * **Droits nécessaires** : le rôle `PVEAuditor` sur `/`, en lecture seule. Rien de
-  plus n'est requis, le collecteur ne fait que des `GET`.
+  plus n'est requis, le collecteur ne fait que des `GET` — à une exception près :
+  `GET /nodes/{node}/apt/update` exige `Sys.Modify` sur `/nodes`. Ce droit est
+  facultatif : sans lui, le 403 est journalisé en `debug` et la métrique
+  `node_updates_pending` n'est simplement pas publiée.
+
+| Endpoint | Droit |
+|---|---|
+| `/version`, `/cluster/status`, `/nodes`, `/nodes/{n}/status` | `Sys.Audit` |
+| `/nodes/{n}/qemu`, `/nodes/{n}/lxc`, `/nodes/{n}/{qemu,lxc}/{vmid}/snapshot` | `VM.Audit` |
+| `/nodes/{n}/storage`, `/nodes/{n}/storage/{s}/content` | `Datastore.Audit` |
+| `/nodes/{n}/tasks` | `Sys.Audit` |
+| `/cluster/ha/status/current`, `/cluster/backup`, `/cluster/backup-info/not-backed-up`, `/cluster/ceph/status` | `Sys.Audit` |
+| `/nodes/{n}/replication`, `/nodes/{n}/certificates/info` | `Sys.Audit` |
+| `/nodes/{n}/apt/update` | `Sys.Modify` sur `/nodes` (facultatif) |
 
 ### Certificat auto-signé
 
@@ -66,6 +81,14 @@ interception, et ce doit rester un choix conscient.
 | `backup_lookback_days` | `31` | Profondeur d'examen des tâches `vzdump`. |
 | `scan_backup_storage` | `true` | Inventorie les archives pour dater les sauvegardes par machine. |
 | `nodes` | tous | Liste de nœuds à collecter, séparés par des virgules. |
+| `ha` | `true` | État de la haute disponibilité. |
+| `backup_jobs` | `true` | Travaux de sauvegarde planifiés et invités non couverts. |
+| `scan_snapshots` | `true` | Inventaire des instantanés, un appel par invité, quatre en vol par nœud. |
+| `max_snapshot_guests` | `200` | Plafond d'invités inventoriés par collecte (1 à 10000). |
+| `replication` | `true` | État de la réplication de stockage. |
+| `ceph` | `true` | Santé Ceph ; toute erreur de l'endpoint vaut « pas de Ceph ». |
+| `updates` | `true` | Mises à jour en attente (droit facultatif, voir plus haut). |
+| `certificates` | `true` | Expiration des certificats de chaque nœud. |
 
 Ces étiquettes sont aussi recopiées en `tag_*` sur les séries, par le registre.
 
@@ -78,10 +101,14 @@ Ces étiquettes sont aussi recopiées en `tag_*` sur les séries, par le registr
 | `auth.rs` | En-tête de jeton, cycle de vie du ticket. |
 | `options.rs` | Lecture des étiquettes, composition de l'URL de base. |
 | `model.rs` | Désérialisation des réponses de l'API. |
-| `metrics.rs` | Conversion en `Sample`. Pur, donc testé en totalité. |
-| `backup.rs` | Datation des sauvegardes, par nœud et par machine. |
+| `metrics.rs` | Conversion en `Sample` (cluster, nœuds, invités, stockages, mises à jour, certificats). Pur, donc testé en totalité. |
+| `backup.rs` | Datation des sauvegardes, par nœud et par machine ; travaux planifiés et couverture. |
+| `ha.rs` | Haute disponibilité : quorum, maître, LRM, ressources. |
+| `snapshots.rs` | Nombre et âge des instantanés par invité. |
+| `replication.rs` | État des travaux de réplication (`to_node` pour la destination, `target` étant réservé). |
+| `ceph.rs` | Santé et capacité Ceph, deux dispositions de réponse tolérées. |
 
-Tout ce qui est testable l'est sans réseau : `metrics.rs` et `backup.rs` partent
-d'extraits de réponses réelles en constantes, `client.rs` teste la traduction des
-statuts HTTP en `ProbeError`, `auth.rs` la validation du jeton et l'expiration du
-ticket.
+Tout ce qui est testable l'est sans réseau : les modules de conversion partent
+d'extraits de réponses en constantes, copiés tels quels du faux
+`docker/lab/fakes/pve.py` ; `client.rs` teste la traduction des statuts HTTP en
+`ProbeError`, `auth.rs` la validation du jeton et l'expiration du ticket.

@@ -7,7 +7,10 @@
 
 use ezymonit_proto::{MetricKind, Sample};
 
-use super::model::{ClusterStatusEntry, GuestEntry, NodeStatus, Num, StorageEntry, Version};
+use super::model::{
+    AptPackage, CertificateInfo, ClusterStatusEntry, GuestEntry, NodeStatus, Num, StorageEntry,
+    Version,
+};
 
 /// Préfixe commun à toutes les métriques de l'intégration.
 ///
@@ -32,7 +35,7 @@ impl GuestKind {
     }
 }
 
-fn gauge(metric: &str, value: f64, ts_ms: i64) -> Sample {
+pub(super) fn gauge(metric: &str, value: f64, ts_ms: i64) -> Sample {
     Sample::new(format!("{P}{metric}"), value, MetricKind::Gauge, ts_ms)
 }
 
@@ -294,6 +297,39 @@ pub fn storage_samples(node: &str, storages: &[StorageEntry], ts_ms: i64) -> Vec
     samples
 }
 
+/// `GET /nodes/{node}/apt/update` : le nombre de paquets en attente.
+///
+/// Le détail des paquets n'est pas repris : une étiquette par paquet ferait
+/// autant de séries que de mises à jour, pour une information qui change à
+/// chaque publication de Proxmox.
+pub fn updates_samples(node: &str, packages: &[AptPackage], ts_ms: i64) -> Vec<Sample> {
+    vec![gauge("node_updates_pending", packages.len() as f64, ts_ms).with_label("node", node)]
+}
+
+/// `GET /nodes/{node}/certificates/info` : jours restants avant expiration.
+///
+/// La valeur devient négative une fois le certificat expiré, ce qui permet à une
+/// même règle de couvrir « expire bientôt » et « déjà expiré ».
+pub fn certificate_samples(
+    node: &str,
+    certs: &[CertificateInfo],
+    now_s: i64,
+    ts_ms: i64,
+) -> Vec<Sample> {
+    certs
+        .iter()
+        .filter_map(|cert| {
+            let notafter = cert.notafter?.0;
+            Some(
+                gauge("node_certificate_expiry_days", (notafter - now_s as f64) / 86_400.0, ts_ms)
+                    .with_label("node", node)
+                    .with_label("filename", cert.filename.clone().unwrap_or_default())
+                    .with_label("subject", cert.subject.clone().unwrap_or_default()),
+            )
+        })
+        .collect()
+}
+
 /// État de joignabilité d'un nœud, publié même — et surtout — quand le nœud n'a
 /// pas répondu : c'est cette série qui porte l'alerte.
 pub fn node_up_sample(node: &str, up: bool, ts_ms: i64) -> Sample {
@@ -537,6 +573,57 @@ mod tests {
             ),
             Some(25.0)
         );
+    }
+
+    /// `GET /nodes/pve1/apt/update` du faux : trois paquets.
+    const APT_UPDATES: &str = r#"{"data":[
+      {"Package":"pve-manager","Title":"Proxmox Virtual Environment Management Tools","Description":"Proxmox Virtual Environment Management Tools\n","Section":"admin","Priority":"optional","Origin":"Proxmox","Arch":"amd64","OldVersion":"8.2.4","Version":"8.2.7","ChangeLogUrl":"https://enterprise.proxmox.com/debian/pve/pve-manager"},
+      {"Package":"pve-kernel-6.8","Title":"Latest Proxmox VE Kernel Image","Description":"Latest Proxmox VE Kernel Image\n","Section":"admin","Priority":"optional","Origin":"Proxmox","Arch":"amd64","OldVersion":"6.8.8-2","Version":"6.8.12-2","ChangeLogUrl":"https://enterprise.proxmox.com/debian/pve/pve-kernel-6.8"},
+      {"Package":"libpve-common-perl","Title":"Proxmox VE base library","Description":"Proxmox VE base library\n","Section":"admin","Priority":"optional","Origin":"Proxmox","Arch":"amd64","OldVersion":"8.2.1","Version":"8.2.3","ChangeLogUrl":"https://enterprise.proxmox.com/debian/pve/libpve-common-perl"}
+    ]}"#;
+
+    /// `GET /nodes/pve1/certificates/info` du faux avec `LAB_SCENARIO=cert-expiring` :
+    /// le certificat de pveproxy expire dans sept jours.
+    const CERTIFICATES: &str = r#"{"data":[
+      {"filename":"pve-root-ca.pem","subject":"CN=Proxmox Virtual Environment,OU=homelab,O=PVE Cluster Manager CA","issuer":"CN=Proxmox Virtual Environment,OU=homelab,O=PVE Cluster Manager CA","notbefore":1723241835,"notafter":2038601835,"fingerprint":"11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00","public-key-type":"rsaEncryption","public-key-bits":4096,"pem":"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"},
+      {"filename":"pve-ssl.pem","subject":"OU=PVE Cluster Node,O=Proxmox Virtual Environment,CN=pve1.lab","issuer":"CN=Proxmox Virtual Environment,OU=homelab,O=PVE Cluster Manager CA","notbefore":1783894638,"notafter":1815430638,"san":["pve1","pve1.lab","192.168.10.11"],"fingerprint":"AB:CD:AB:CD:EF","public-key-type":"rsaEncryption","public-key-bits":2048,"pem":"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"},
+      {"filename":"pveproxy-ssl.pem","subject":"CN=pve1.lab.example.net","issuer":"C=US,O=Let's Encrypt,CN=R11","notbefore":1783894638,"notafter":1790115438,"san":["pve1.lab.example.net"],"fingerprint":"12:34:12:34:56","public-key-type":"id-ecPublicKey","public-key-bits":256,"pem":"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"}
+    ]}"#;
+
+    #[test]
+    fn les_mises_a_jour_en_attente_sont_comptees_par_noeud() {
+        let packages: Vec<AptPackage> = extraire(APT_UPDATES);
+        let samples = updates_samples("pve1", &packages, 1000);
+        assert_eq!(valeur(&samples, r#"proxmox_node_updates_pending{node="pve1"}"#), Some(3.0));
+        assert_eq!(
+            valeur(
+                &updates_samples("pve2", &[], 1000),
+                r#"proxmox_node_updates_pending{node="pve2"}"#
+            ),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn lexpiration_des_certificats_est_donnee_en_jours_par_fichier() {
+        let certs: Vec<CertificateInfo> = extraire(CERTIFICATES);
+        let now_s = 1790115438 - 7 * 86_400;
+        let samples = certificate_samples("pve1", &certs, now_s, 1000);
+
+        assert_eq!(samples.len(), 3, "les trois fichiers sont publiés");
+        assert_eq!(
+            valeur(
+                &samples,
+                r#"proxmox_node_certificate_expiry_days{filename="pveproxy-ssl.pem",node="pve1",subject="CN=pve1.lab.example.net"}"#
+            ),
+            Some(7.0)
+        );
+        let expire = certificate_samples("pve1", &certs, 1790115438 + 86_400, 1000);
+        let proxy = expire
+            .iter()
+            .find(|s| s.labels["filename"] == "pveproxy-ssl.pem")
+            .expect("le certificat expiré reste publié");
+        assert_eq!(proxy.value, -1.0, "négatif une fois expiré");
     }
 
     #[test]

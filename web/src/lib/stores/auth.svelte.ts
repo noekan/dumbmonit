@@ -42,8 +42,19 @@ export function validatePassword(value: string): string | null {
 /** Pages reachable without an open session. */
 export const PUBLIC_ROUTES = ['/login', '/setup'];
 
+/**
+ * Prefixes of pages served to anyone, outside the app shell: the public status
+ * pages (`/s/<slug>`). They never redirect to sign-in, and never bounce a
+ * signed-in user away either.
+ */
+export const STANDALONE_PREFIXES = ['/s/'];
+
+export function isStandaloneRoute(pathname: string): boolean {
+	return STANDALONE_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
 export function isPublicRoute(pathname: string): boolean {
-	return PUBLIC_ROUTES.includes(pathname);
+	return PUBLIC_ROUTES.includes(pathname) || isStandaloneRoute(pathname);
 }
 
 /**

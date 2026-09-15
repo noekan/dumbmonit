@@ -17,6 +17,7 @@ use crate::alerting::machine::{self, AlertState, Phase, Transition};
 use crate::alerting::model::{
     self, Rule, TARGET_ADDRESS_LABELS, TARGET_ID_LABELS, TARGET_NAME_LABELS, TargetId, TargetNode,
 };
+use crate::alerting::overrides::{Effective, OverrideIndex, RuleOverride};
 use crate::alerting::silence::Silence;
 use crate::alerting::source::SeriesPoint;
 use crate::alerting::suppress::{self, Topology};
@@ -94,6 +95,8 @@ pub struct CycleInput {
     pub targets: Vec<TargetNode>,
     pub previous: Vec<StoredAlert>,
     pub silences: Vec<Silence>,
+    /// Surcharges par équipement (seuil, seuil de retour, désactivation).
+    pub overrides: Vec<RuleOverride>,
 }
 
 /// Une transition à journaliser.
@@ -191,6 +194,9 @@ struct Evaluated {
     transition: Option<Transition>,
     value: Option<f64>,
     score: Option<f64>,
+    /// Seuil réellement appliqué, surcharge comprise : c'est lui que le message
+    /// doit citer, pas celui de la règle.
+    threshold: f64,
 }
 
 /// Évalue un cycle complet.
@@ -201,6 +207,7 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
     let now = input.now;
     let index = TargetIndex::new(&input.targets);
     let topology = Topology::new(&input.targets);
+    let overrides = OverrideIndex::new(&input.overrides);
 
     let previous: HashMap<&str, &StoredAlert> =
         input.previous.iter().map(|alert| (alert.fingerprint.as_str(), alert)).collect();
@@ -229,6 +236,13 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
             if !rule.selector.matches(target) {
                 continue;
             }
+            let effective = overrides.effective(rule, target.map(|t| t.id));
+            // Règle retirée pour cet équipement : la série est ignorée, ce qui
+            // résout proprement une alerte en cours par le passage « séries
+            // disparues » plus bas.
+            if !effective.enabled {
+                continue;
+            }
 
             let series_key = model::series_key(&point.labels);
             let fingerprint = model::fingerprint(&rule.uid, &series_key);
@@ -247,8 +261,11 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
             before.suppressed_by = None;
             before.silenced = false;
 
+            // Hystérésis : la condition était vraie au cycle précédent si elle est
+            // datée, que l'alerte soit encore en attente ou déjà partie.
+            let active = before.condition_since.is_some();
             let (condition, score, learning) =
-                evaluate_point(rule, &series_key, point, now, baselines);
+                evaluate_point(rule, &effective, active, &series_key, point, now, baselines);
             let (mut state, transition) =
                 machine::advance(&before, condition, now, rule.for_duration);
             state.value = Some(point.value);
@@ -271,6 +288,7 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
                 transition,
                 value: Some(point.value),
                 score,
+                threshold: effective.threshold,
             });
         }
 
@@ -307,6 +325,7 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
                 transition,
                 value: None,
                 score: None,
+                threshold: overrides.effective(rule, stored.target_id).threshold,
             });
         }
     }
@@ -374,7 +393,7 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
             score: entry.score,
             unit: rule.unit.clone(),
             operator: rule.operator.as_str().to_string(),
-            threshold: rule.threshold,
+            threshold: entry.threshold,
             channels: rule.channels.clone(),
             repeat_interval: rule.repeat_interval,
             escalate_after: rule.escalate_after,
@@ -407,6 +426,8 @@ fn history_reason(state: &AlertState) -> String {
 /// Renvoie `(condition_remplie, score_d_anomalie, en_apprentissage)`.
 fn evaluate_point(
     rule: &Rule,
+    effective: &Effective,
+    active: bool,
     series_key: &str,
     point: &SeriesPoint,
     now: DateTime<Utc>,
@@ -417,9 +438,16 @@ fn evaluate_point(
     match rule.kind {
         // Une règle prédictive n'est qu'un seuil sur une requête `predict_linear` :
         // c'est VictoriaMetrics qui extrapole, pas nous.
-        RuleKind::Threshold | RuleKind::Predict => {
-            (rule.operator.test(point.value, rule.threshold), None, false)
-        }
+        RuleKind::Threshold | RuleKind::Predict => (
+            rule.operator.holds(
+                point.value,
+                effective.threshold,
+                effective.clear_threshold,
+                active,
+            ),
+            None,
+            false,
+        ),
         RuleKind::Anomaly => {
             let bucket_index = baseline::bucket_of(now);
             let series = baselines
@@ -477,6 +505,7 @@ mod tests {
             query: "q".to_string(),
             operator: Operator::Gt,
             threshold,
+            clear_threshold: None,
             for_duration: Duration::from_secs(for_secs),
             severity: Severity::Warning,
             selector: TargetSelector::All,
@@ -552,7 +581,14 @@ mod tests {
         targets: Vec<TargetNode>,
         previous: Vec<StoredAlert>,
     ) -> CycleInput {
-        CycleInput { now, observations, targets, previous, silences: Vec::new() }
+        CycleInput {
+            now,
+            observations,
+            targets,
+            previous,
+            silences: Vec::new(),
+            overrides: Vec::new(),
+        }
     }
 
     #[test]
@@ -950,5 +986,99 @@ mod tests {
             .find(|entry| entry.target_id == Some(2))
             .expect("logged transition");
         assert!(supprimee.reason.contains("unreachable"), "reason: {}", supprimee.reason);
+    }
+
+    #[test]
+    fn l_hysteresis_garde_l_alerte_entre_le_seuil_et_le_seuil_de_retour() {
+        let mut cpu = rule("cpu_high", RuleKind::Threshold, 90.0, 0);
+        cpu.clear_threshold = Some(80.0);
+        let mut baselines = BaselineStore::default();
+
+        let obs = |value: f64| RuleObservations {
+            rule: cpu.clone(),
+            series: Some(vec![point(1, value)]),
+        };
+
+        let cycle1 = plan_cycle(
+            input(at(0), vec![obs(95.0)], vec![node(1, None)], Vec::new()),
+            &mut baselines,
+        );
+        assert_eq!(cycle1.alerts[0].state.phase, Phase::Firing);
+
+        // 85 % : sous le seuil de déclenchement, au-dessus du seuil de retour →
+        // l'alerte tient, aucune résolution.
+        let mut stored = to_stored(&cycle1);
+        mark_notified(&mut stored, &cycle1, at(0));
+        let cycle2 =
+            plan_cycle(input(at(30), vec![obs(85.0)], vec![node(1, None)], stored), &mut baselines);
+        assert_eq!(cycle2.alerts[0].state.phase, Phase::Firing, "hovering: still firing");
+        assert!(cycle2.groups.is_empty());
+
+        // 79 % : sous le seuil de retour → résolution.
+        let stored = to_stored(&cycle2);
+        let cycle3 =
+            plan_cycle(input(at(60), vec![obs(79.0)], vec![node(1, None)], stored), &mut baselines);
+        assert_eq!(cycle3.alerts[0].state.phase, Phase::Resolved);
+        assert_eq!(cycle3.groups[0].items[0].reason, NotifyReason::Resolved);
+
+        // 85 % après résolution : la condition n'est pas active, pas de redéclenchement.
+        let stored = to_stored(&cycle3);
+        let cycle4 =
+            plan_cycle(input(at(90), vec![obs(85.0)], vec![node(1, None)], stored), &mut baselines);
+        assert_eq!(cycle4.alerts[0].state.phase, Phase::Ok);
+    }
+
+    #[test]
+    fn une_surcharge_par_equipement_change_le_seuil_cite_dans_le_message() {
+        let disk = rule("disk", RuleKind::Threshold, 90.0, 0);
+        let mut baselines = BaselineStore::default();
+        let mut cycle_input = input(
+            at(0),
+            vec![RuleObservations {
+                rule: disk.clone(),
+                series: Some(vec![point(1, 93.0), point(2, 93.0)]),
+            }],
+            vec![node(1, None), node(2, None)],
+            Vec::new(),
+        );
+        cycle_input.overrides = vec![RuleOverride {
+            rule_uid: "disk".to_string(),
+            target_id: 2,
+            threshold: Some(97.0),
+            clear_threshold: None,
+            enabled: None,
+        }];
+        let outcome = plan_cycle(cycle_input, &mut baselines);
+
+        let device1 = outcome.alerts.iter().find(|a| a.target_id == Some(1)).unwrap();
+        let device2 = outcome.alerts.iter().find(|a| a.target_id == Some(2)).unwrap();
+        assert_eq!(device1.state.phase, Phase::Firing);
+        assert_eq!(device1.threshold, 90.0);
+        assert_eq!(device2.state.phase, Phase::Ok, "97 % override: 93 % is fine");
+        assert_eq!(device2.threshold, 97.0, "the override is what the message cites");
+    }
+
+    #[test]
+    fn une_surcharge_desactivee_resout_l_alerte_en_cours() {
+        let disk = rule("disk", RuleKind::Threshold, 90.0, 0);
+        let mut baselines = BaselineStore::default();
+        let obs = || RuleObservations { rule: disk.clone(), series: Some(vec![point(1, 95.0)]) };
+
+        let cycle1 =
+            plan_cycle(input(at(0), vec![obs()], vec![node(1, None)], Vec::new()), &mut baselines);
+        assert_eq!(cycle1.alerts[0].state.phase, Phase::Firing);
+
+        let mut stored = to_stored(&cycle1);
+        mark_notified(&mut stored, &cycle1, at(0));
+        let mut cycle_input = input(at(30), vec![obs()], vec![node(1, None)], stored);
+        cycle_input.overrides = vec![RuleOverride {
+            rule_uid: "disk".to_string(),
+            target_id: 1,
+            threshold: None,
+            clear_threshold: None,
+            enabled: Some(false),
+        }];
+        let cycle2 = plan_cycle(cycle_input, &mut baselines);
+        assert_eq!(cycle2.alerts[0].state.phase, Phase::Resolved, "the series is ignored");
     }
 }

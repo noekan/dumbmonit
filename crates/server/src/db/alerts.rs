@@ -54,10 +54,10 @@ pub async fn seed_builtin_rules(pool: &SqlitePool) -> Result<usize> {
     for rule in rules::builtin_rules() {
         let result = sqlx::query(
             "INSERT OR IGNORE INTO alert_rules
-                 (uid, name, description, kind, query, operator, threshold, for_secs, severity,
-                  selector, channels, params, unit, repeat_secs, escalate_after_secs,
-                  enabled, builtin)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)",
+                 (uid, name, description, kind, query, operator, threshold, clear_threshold,
+                  for_secs, severity, selector, channels, params, unit, repeat_secs,
+                  escalate_after_secs, enabled, builtin)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)",
         )
         .bind(&rule.uid)
         .bind(&rule.name)
@@ -66,6 +66,7 @@ pub async fn seed_builtin_rules(pool: &SqlitePool) -> Result<usize> {
         .bind(&rule.query)
         .bind(rule.operator.as_str())
         .bind(rule.threshold)
+        .bind(rule.clear_threshold)
         .bind(rule.for_duration.as_secs() as i64)
         .bind(rule.severity.as_str())
         .bind(serde_json::to_string(&rule.selector)?)
@@ -82,13 +83,16 @@ pub async fn seed_builtin_rules(pool: &SqlitePool) -> Result<usize> {
         // Le libellé d'une règle livrée est du texte produit, pas un réglage : il suit
         // les versions (traduction, reformulation) sans toucher aux seuils, canaux ou
         // à l'activation, qui restent la propriété de l'utilisateur.
+        // La requête d'une règle livrée est aussi du code produit : une correction
+        // (par exemple `== bool 0`) doit atteindre les bases existantes.
         sqlx::query(
-            "UPDATE alert_rules SET name = ?, description = ?, unit = ?
+            "UPDATE alert_rules SET name = ?, description = ?, unit = ?, query = ?
              WHERE uid = ? AND builtin = 1",
         )
         .bind(&rule.name)
         .bind(&rule.description)
         .bind(&rule.unit)
+        .bind(&rule.query)
         .bind(&rule.uid)
         .execute(pool)
         .await
@@ -117,6 +121,7 @@ fn rule_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Rule> {
         query: row.try_get("query")?,
         operator: Operator::parse(&operator),
         threshold: row.try_get("threshold")?,
+        clear_threshold: row.try_get("clear_threshold")?,
         for_duration: std::time::Duration::from_secs(for_secs.max(0) as u64),
         severity: Severity::parse(&severity),
         // Une règle dont le JSON serait corrompu retombe sur le sélecteur le plus
@@ -139,8 +144,8 @@ fn rule_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Rule> {
 
 pub async fn list_rules(pool: &SqlitePool) -> Result<Vec<Rule>> {
     let rows = sqlx::query(
-        "SELECT id, uid, name, description, kind, query, operator, threshold, for_secs,
-                severity, selector, channels, params, unit, repeat_secs,
+        "SELECT id, uid, name, description, kind, query, operator, threshold, clear_threshold,
+                for_secs, severity, selector, channels, params, unit, repeat_secs,
                 escalate_after_secs, enabled, builtin
          FROM alert_rules ORDER BY builtin DESC, name",
     )
@@ -152,8 +157,8 @@ pub async fn list_rules(pool: &SqlitePool) -> Result<Vec<Rule>> {
 
 pub async fn list_enabled_rules(pool: &SqlitePool) -> Result<Vec<Rule>> {
     let rows = sqlx::query(
-        "SELECT id, uid, name, description, kind, query, operator, threshold, for_secs,
-                severity, selector, channels, params, unit, repeat_secs,
+        "SELECT id, uid, name, description, kind, query, operator, threshold, clear_threshold,
+                for_secs, severity, selector, channels, params, unit, repeat_secs,
                 escalate_after_secs, enabled, builtin
          FROM alert_rules WHERE enabled = 1 ORDER BY id",
     )
@@ -167,14 +172,15 @@ pub async fn list_enabled_rules(pool: &SqlitePool) -> Result<Vec<Rule>> {
 pub async fn upsert_rule(pool: &SqlitePool, rule: &Rule) -> Result<i64> {
     let row = sqlx::query(
         "INSERT INTO alert_rules
-             (uid, name, description, kind, query, operator, threshold, for_secs, severity,
-              selector, channels, params, unit, repeat_secs, escalate_after_secs,
-              enabled, builtin, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+             (uid, name, description, kind, query, operator, threshold, clear_threshold,
+              for_secs, severity, selector, channels, params, unit, repeat_secs,
+              escalate_after_secs, enabled, builtin, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
          ON CONFLICT(uid) DO UPDATE SET
              name = excluded.name, description = excluded.description, kind = excluded.kind,
              query = excluded.query, operator = excluded.operator,
-             threshold = excluded.threshold, for_secs = excluded.for_secs,
+             threshold = excluded.threshold, clear_threshold = excluded.clear_threshold,
+             for_secs = excluded.for_secs,
              severity = excluded.severity, selector = excluded.selector,
              channels = excluded.channels, params = excluded.params, unit = excluded.unit,
              repeat_secs = excluded.repeat_secs,
@@ -189,6 +195,7 @@ pub async fn upsert_rule(pool: &SqlitePool, rule: &Rule) -> Result<i64> {
     .bind(&rule.query)
     .bind(rule.operator.as_str())
     .bind(rule.threshold)
+    .bind(rule.clear_threshold)
     .bind(rule.for_duration.as_secs() as i64)
     .bind(rule.severity.as_str())
     .bind(serde_json::to_string(&rule.selector)?)

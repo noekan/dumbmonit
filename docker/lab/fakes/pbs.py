@@ -10,9 +10,19 @@ Authentication, like the real thing:
                  (note the ':' between token id and secret — PBS differs from PVE)
   * ticket     — `POST /api2/json/access/ticket` then `Cookie: PBSAuthCookie=…`
 
+Job configurations (`/admin/sync`, `/admin/verify`, `/admin/prune`) are
+served flattened with their schedule status, as PBS does, and their
+`last-run-*` fields point at the matching tasks. `/nodes/localhost/apt/update`
+lists two pending package updates.
+
 Failure scenarios (`LAB_SCENARIO`, comma separated):
-  verify-failed — last verification of vm/101 failed, and so did the verify job
-  backup-old    — the last backups are five days old
+  verify-failed  — last verification of vm/101 failed, and so did the verify job
+  backup-old     — the last backups are five days old
+  sync-failed    — the offsite sync job failed last night (job state + task)
+  prune-failed   — the daily prune job on `main` failed last night
+  gc-failed      — last GC on `main` failed (task + `/gc` last-run-state)
+  updates-many   — 25 pending package updates instead of 2
+  datastore-full — `main` is 93 % full
 """
 
 from __future__ import annotations
@@ -31,6 +41,11 @@ PASSWORD = "lab-password"
 FLAGS = scenarios()
 VERIFY_FAILED = "verify-failed" in FLAGS
 BACKUP_OLD = "backup-old" in FLAGS
+SYNC_FAILED = "sync-failed" in FLAGS
+PRUNE_FAILED = "prune-failed" in FLAGS
+GC_FAILED = "gc-failed" in FLAGS
+UPDATES_MANY = "updates-many" in FLAGS
+DATASTORE_FULL = "datastore-full" in FLAGS
 
 BOOT = now() - 52 * 86400
 TICKETS: set[str] = set()
@@ -39,6 +54,32 @@ STORES = {
     "main": {"total": 2_000_398_934_016, "used": 812_431_990_784, "namespaces": ["", "pve"]},
     "archive": {"total": 4_000_787_030_016, "used": 1_402_411_990_784, "namespaces": [""]},
 }
+if DATASTORE_FULL:
+    STORES["main"]["used"] = int(STORES["main"]["total"] * 0.93)
+
+# Task status texts, as PBS words them.
+SYNC_ERROR = "TASK ERROR: sync failed: error trying to connect: tcp connect error: Connection refused (os error 111)"
+PRUNE_ERROR = "TASK ERROR: prune failed: unable to acquire lock on datastore 'main'"
+GC_ERROR = "TASK ERROR: garbage collection failed: unable to open chunk store 'main': No such file or directory (os error 2)"
+VERIFY_ERROR = "TASK ERROR: verification failed - please check the log for details"
+
+# Job configurations: (kind, id, store, schedule, extra fields). Their runs are
+# the tasks `tasks()` lists, so `last-run-*` and the task list agree.
+JOBS = [
+    ("sync", "s-offsite", "archive", "daily", {"remote": "offsite", "remote-store": "archive",
+                                              "owner": "root@pam", "remove-vanished": False}),
+    ("verify", "v-daily", "main", "daily", {"ignore-verified": True, "outdated-after": 7}),
+    ("prune", "p-daily", "main", "daily", {"keep-daily": 7, "keep-weekly": 4}),
+    ("prune", "p-weekly", "archive", "weekly", {"keep-weekly": 8}),
+]
+
+PENDING_UPDATES = [
+    ("proxmox-backup-server", "3.2.7-1", "3.2.8-1", "Proxmox Backup Server daemon with tools and docs"),
+    ("proxmox-backup-client", "3.2.7-1", "3.2.8-1", "Proxmox Backup Client tools"),
+    ("libc6", "2.36-9+deb12u7", "2.36-9+deb12u8", "GNU C Library: Shared libraries"),
+    ("openssl", "3.0.13-1~deb12u1", "3.0.14-1~deb12u1", "Secure Sockets Layer toolkit - cryptographic utility"),
+    ("proxmox-kernel-6.8", "6.8.8-2", "6.8.12-2", "Proxmox Kernel Image"),
+]
 
 # (store, namespace, backup-type, backup-id, number of snapshots kept, size)
 GROUPS = [
@@ -157,11 +198,12 @@ def namespaces(store: str):
 
 def gc_status(store: str):
     last_gc = last_backup_time() + 2 * 3600 if not BACKUP_OLD else now() - 86400 + 7200
+    failed = GC_FAILED and store == "main"
     return {
         "store": store, "schedule": "daily", "next-run": last_gc + 86400,
         "upid": upid("garbage_collection", store, last_gc),
         "last-run-upid": upid("garbage_collection", store, last_gc),
-        "last-run-state": "OK", "last-run-endtime": last_gc + 512,
+        "last-run-state": GC_ERROR if failed else "OK", "last-run-endtime": last_gc + 512,
         "index-file-count": 213, "index-data-bytes": STORES[store]["used"] * 3,
         "disk-bytes": STORES[store]["used"], "disk-chunks": 195_412,
         "removed-bytes": 12_884_901_888, "removed-chunks": 3_110,
@@ -182,15 +224,72 @@ def tasks(since: int):
             t = base + (int(bid, 36) % 50) * 10
             wid = f"{s}:{ns + '/' if ns else ''}{btype}/{bid}"
             out.append(task("backup", wid, t, t + 240, "OK", "pve@pbs!pve1" if ns else "root@pam"))
+        for kind, job_id, store, schedule, _extra in JOBS:
+            if schedule == "weekly" and day % 7:
+                continue
+            start, end, state = job_run(kind, job_id, base)
+            out.append(task(JOB_WORKER_TYPE[kind], f"{store}:{job_id}", start, end,
+                            state if day == 0 else "OK"))
         for store in STORES:
-            out.append(task("prune", f"{store}", base + 3600, base + 3660, "OK"))
-            out.append(task("garbage_collection", store, base + 7200, base + 7712, "OK"))
-            failed = VERIFY_FAILED and store == "main" and day == 0
-            out.append(task("verificationjob", f"{store}:v-daily", base + 4 * 3600, base + 4 * 3600 + 1900,
-                            "TASK ERROR: verification failed - please check the log for details"
-                            if failed else "OK"))
-        out.append(task("syncjob", "archive:s-offsite", base + 5 * 3600, base + 5 * 3600 + 3200, "OK"))
+            failed = GC_FAILED and store == "main" and day == 0
+            out.append(task("garbage_collection", store, base + 7200, base + 7712,
+                            GC_ERROR if failed else "OK"))
     return [t for t in out if t["starttime"] >= since]
+
+
+JOB_WORKER_TYPE = {"sync": "syncjob", "verify": "verificationjob", "prune": "prune"}
+JOB_OFFSET = {"prune": 3600, "verify": 4 * 3600, "sync": 5 * 3600}
+JOB_DURATION = {"prune": 60, "verify": 1900, "sync": 3200}
+
+
+def job_run(kind: str, job_id: str, base: int) -> tuple[int, int, str]:
+    """Start, end and final state of a job's run on the night starting at `base`
+    (the same numbers feed the task list and the job's `last-run-*` fields)."""
+    start = base + JOB_OFFSET[kind]
+    state = "OK"
+    if kind == "sync" and SYNC_FAILED:
+        state = SYNC_ERROR
+    elif kind == "verify" and VERIFY_FAILED:
+        state = VERIFY_ERROR
+    elif kind == "prune" and PRUNE_FAILED and job_id == "p-daily":
+        state = PRUNE_ERROR
+    return start, start + JOB_DURATION[kind], state
+
+
+def jobs(kind: str):
+    """`GET /admin/{sync,verify,prune}`: the job configs flattened with their
+    schedule status, as `pbs-api-types` `*JobStatus` does."""
+    out = []
+    for job_kind, job_id, store, schedule, extra in JOBS:
+        if job_kind != kind:
+            continue
+        start, end, state = job_run(kind, job_id, last_backup_time())
+        period = 7 * 86400 if schedule == "weekly" else 86400
+        out.append({
+            "id": job_id, "store": store, "schedule": schedule, "comment": f"lab {kind} job",
+            **extra,
+            "next-run": start + period,
+            "last-run-upid": upid(JOB_WORKER_TYPE[kind], f"{store}:{job_id}", start),
+            "last-run-state": state, "last-run-endtime": end,
+        })
+    return out
+
+
+def apt_updates():
+    """`GET /nodes/localhost/apt/update`: pending package updates, PBS style
+    (snake_case keys, unlike PVE)."""
+    updates = PENDING_UPDATES if UPDATES_MANY else PENDING_UPDATES[:2]
+    out = []
+    for i in range(25 if UPDATES_MANY else 2):
+        package, old, new, description = updates[i % len(updates)]
+        if i >= len(updates):
+            package = f"lib{package}-extra{i}"
+        out.append({
+            "package": package, "title": package, "arch": "amd64", "description": description,
+            "version": new, "old_version": old, "origin": "Proxmox", "priority": "optional",
+            "section": "admin", "change_log_url": f"http://download.proxmox.com/changelog/{package}",
+        })
+    return out
 
 
 def task(worker_type: str, worker_id: str, start: int, end: int, status: str, user: str = "root@pam"):
@@ -227,6 +326,10 @@ def route(request: Request):
         return json_response({"data": datastore_usage()})
     if path == "/nodes/localhost/tasks":
         return json_response({"data": tasks(int(request.query.get("since", "0")))})
+    if path == "/nodes/localhost/apt/update":
+        return json_response({"data": apt_updates()})
+    if len(parts) == 2 and parts[0] == "admin" and parts[1] in ("sync", "verify", "prune"):
+        return json_response({"data": jobs(parts[1])})
     if len(parts) == 4 and parts[0] == "admin" and parts[1] == "datastore":
         store, what = parts[2], parts[3]
         if store not in STORES:
@@ -243,5 +346,7 @@ def route(request: Request):
 
 if __name__ == "__main__":
     log(f"[fake-pbs] token: {TOKEN_ID}={TOKEN_SECRET} | user: {USERNAME} / {PASSWORD}")
-    log(f"[fake-pbs] verify-failed={VERIFY_FAILED} backup-old={BACKUP_OLD}")
+    log(f"[fake-pbs] verify-failed={VERIFY_FAILED} backup-old={BACKUP_OLD} sync-failed={SYNC_FAILED} "
+        f"prune-failed={PRUNE_FAILED} gc-failed={GC_FAILED} updates-many={UPDATES_MANY} "
+        f"datastore-full={DATASTORE_FULL}")
     serve("fake-pbs", PORT, route)

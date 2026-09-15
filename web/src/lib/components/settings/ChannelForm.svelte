@@ -10,10 +10,18 @@
 	 */
 	import { untrack } from 'svelte';
 	import { ExternalLink, Search, ChevronLeft } from 'lucide-svelte';
-	import { createChannel, updateChannel, type Channel, type ChannelPayload } from '$lib/api';
+	import {
+		createChannel,
+		updateChannel,
+		type AlertSeverity,
+		type Channel,
+		type ChannelPayload,
+		type QuietHours
+	} from '$lib/api';
 	import { Button, ClickSpark, ErrorNotice, Field, Toggle } from '$lib/ui';
 	import { kindDocUrl, kindIcon, type KindField, type KindInfo } from './kinds';
 	import ChannelFieldInput from './ChannelFieldInput.svelte';
+	import QuietHoursEditor from './QuietHoursEditor.svelte';
 
 	interface Props {
 		kinds: KindInfo[];
@@ -53,6 +61,40 @@
 	let settings = $state<Record<string, Value>>(untrack(() => initialSettings()));
 	let secrets = $state<Record<string, string>>({});
 	let clearSecrets = $state(false);
+
+	// Delivery policy: what this channel accepts and when. The bulletin's ladder
+	// words map onto the API severities (Advisory = warning, Warning = critical).
+	const SEVERITY_FLOORS: { id: AlertSeverity; label: string }[] = [
+		{ id: 'info', label: 'Everything (Info and up)' },
+		{ id: 'warning', label: 'Advisory and up' },
+		{ id: 'critical', label: 'Warning only' }
+	];
+	const INTERVALS: { value: number; label: string }[] = [
+		{ value: 0, label: 'No minimum' },
+		{ value: 300, label: '5 min' },
+		{ value: 900, label: '15 min' },
+		{ value: 3600, label: '1 h' },
+		{ value: 21600, label: '6 h' }
+	];
+	let minSeverity = $state<AlertSeverity>(untrack(() => channel?.policy?.min_severity ?? 'info'));
+	let notifyResolved = $state(untrack(() => channel?.policy?.notify_resolved ?? true));
+	let minInterval = $state(untrack(() => channel?.policy?.min_interval_secs ?? 0));
+	let quietHours = $state<QuietHours | null>(untrack(() => channel?.policy?.quiet_hours ?? null));
+	let showDelivery = $state(
+		untrack(
+			() =>
+				channel !== undefined &&
+				(channel.policy?.min_severity !== 'info' ||
+					channel.policy?.notify_resolved === false ||
+					(channel.policy?.min_interval_secs ?? 0) > 0 ||
+					channel.policy?.quiet_hours != null)
+		)
+	);
+	const intervalOptions = $derived(
+		INTERVALS.some((o) => o.value === minInterval)
+			? INTERVALS
+			: [...INTERVALS, { value: minInterval, label: `${minInterval} s (current)` }].sort((a, b) => a.value - b.value)
+	);
 
 	let step = $state<'kind' | 'fields'>(untrack(() => (channel ? 'fields' : 'kind')));
 	let search = $state('');
@@ -174,7 +216,18 @@
 			if (!isBlank(value)) typed[field.key] = value.trim();
 		}
 
-		const payload: ChannelPayload = { name: name.trim(), kind, enabled, settings: outSettings };
+		const payload: ChannelPayload = {
+			name: name.trim(),
+			kind,
+			enabled,
+			settings: outSettings,
+			policy: {
+				min_severity: minSeverity,
+				notify_resolved: notifyResolved,
+				min_interval_secs: minInterval,
+				quiet_hours: quietHours
+			}
+		};
 		// Rules: on create, always send `secrets` (possibly `{}`). On edit, send
 		// them only if something was typed or a clear was requested — an omitted
 		// `secrets` keeps the stored ones; `{}` clears them.
@@ -351,6 +404,44 @@
 						<Toggle id="channel-enabled" bind:checked={enabled} disabled={saving} label="Enabled" />
 					</Field>
 				</div>
+
+				<fieldset class="grid gap-4 border-t border-line pt-5">
+					<legend class="sr-only">Delivery</legend>
+					<button
+						type="button"
+						class="inline-flex w-fit items-center gap-1.5 text-sm font-semibold text-ink"
+						aria-expanded={showDelivery}
+						aria-controls="channel-delivery"
+						onclick={() => (showDelivery = !showDelivery)}
+					>
+						{showDelivery ? 'Hide delivery options' : 'Delivery options'}
+						<span class="font-normal text-ink-2">— what this channel hears, and when</span>
+					</button>
+					{#if showDelivery}
+						<div id="channel-delivery" class="grid gap-4">
+							<div class="grid gap-4 sm:grid-cols-2">
+								<Field label="Send" for="channel-min-severity" help="Alerts below this level never reach the channel.">
+									<select id="channel-min-severity" class="input" bind:value={minSeverity} disabled={saving}>
+										{#each SEVERITY_FLOORS as option (option.id)}
+											<option value={option.id}>{option.label}</option>
+										{/each}
+									</select>
+								</Field>
+								<Field label="Same alert again no sooner than" for="channel-min-interval" help="Reminders and re-fires of one alert are spaced out by at least this.">
+									<select id="channel-min-interval" class="input" bind:value={minInterval} disabled={saving}>
+										{#each intervalOptions as option (option.value)}
+											<option value={option.value}>{option.label}</option>
+										{/each}
+									</select>
+								</Field>
+							</div>
+							<Field label="Tell me when it clears" for="channel-resolved" inline help="Off: the channel only hears about problems, never recoveries.">
+								<Toggle id="channel-resolved" bind:checked={notifyResolved} disabled={saving} label="Tell me when it clears" />
+							</Field>
+							<QuietHoursEditor value={quietHours} idPrefix="channel-quiet" disabled={saving} onchange={(next) => (quietHours = next)} />
+						</div>
+					{/if}
+				</fieldset>
 
 				{#if apiError}
 					<ErrorNotice error={apiError} title="Could not save the channel" />

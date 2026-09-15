@@ -400,14 +400,11 @@ fn encode_into(out: &mut String, value: &str) {
 /// étiquette de la cible.
 pub fn build_http_client(
     accept_invalid_certs: bool,
-    connect_timeout: Duration,
+    _connect_timeout: Duration,
 ) -> Result<reqwest::Client, ProbeError> {
-    reqwest::Client::builder()
-        .danger_accept_invalid_certs(accept_invalid_certs)
-        .connect_timeout(connect_timeout)
-        .user_agent(concat!("DumbMonit/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|error| ProbeError::Config(format!("HTTP client unavailable: {error}")))
+    // Client partagé entre tous les collecteurs HTTP (un par mode TLS) : le délai
+    // de connexion y est fixé une fois pour toutes.
+    crate::collectors::http::client(accept_invalid_certs)
 }
 
 /// Traduit une erreur de transport en `ProbeError`.

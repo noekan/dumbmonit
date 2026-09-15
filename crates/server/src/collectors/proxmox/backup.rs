@@ -13,15 +13,18 @@
 //!
 //! On publie donc les deux, et l'on complète l'inventaire par les tâches ciblant
 //! explicitement un VMID.
+//!
+//! S'y ajoute la vue *planifiée* : `GET /cluster/backup` liste les travaux
+//! configurés et `GET /cluster/backup-info/not-backed-up` les invités qu'aucun
+//! d'eux ne couvre — la machine créée hier et oubliée du travail de nuit se voit
+//! ainsi avant sa première sauvegarde manquée, pas après.
 
 use std::collections::BTreeMap;
 
-use ezymonit_proto::{MetricKind, Sample};
+use ezymonit_proto::Sample;
 
-use super::metrics::GuestKind;
-use super::model::{BackupVolume, TaskEntry};
-
-const P: &str = "proxmox_";
+use super::metrics::{GuestKind, gauge};
+use super::model::{BackupJob, BackupVolume, NotBackedUp, TaskEntry};
 
 /// Identité d'un invité, pour étiqueter les séries de sauvegarde de façon
 /// lisible dans une notification.
@@ -42,10 +45,6 @@ pub struct Archive {
     /// Date de création, en secondes Unix.
     pub ctime: i64,
     pub size: f64,
-}
-
-fn gauge(metric: &str, value: f64, ts_ms: i64) -> Sample {
-    Sample::new(format!("{P}{metric}"), value, MetricKind::Gauge, ts_ms)
 }
 
 /// Retient les archives exploitables d'un listing de contenu de stockage.
@@ -132,6 +131,102 @@ pub fn task_backups_by_vmid(
             .or_insert(start);
     }
     par_vmid
+}
+
+/// Dernière exécution connue d'un travail planifié, tirée des tâches `vzdump`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JobRun {
+    /// Début, en secondes Unix.
+    pub start: i64,
+    pub ok: bool,
+}
+
+impl JobRun {
+    /// La plus récente des deux, pour fusionner ce que chaque nœud a vu.
+    pub fn latest(self, other: JobRun) -> JobRun {
+        if other.start > self.start { other } else { self }
+    }
+}
+
+/// Dernière exécution par identifiant de travail.
+///
+/// Depuis PVE 7.2, une tâche lancée par le planificateur porte l'identifiant du
+/// travail (`backup-7a2b3c`) dans son champ `id` — là où une sauvegarde manuelle
+/// porte un VMID. On indexe tout ce qui n'est pas un VMID : la correspondance
+/// avec les travaux connus se fait à la publication.
+pub fn task_runs_by_job(
+    tasks: &[TaskEntry],
+    now_s: i64,
+    lookback_s: i64,
+) -> BTreeMap<String, JobRun> {
+    let mut par_travail: BTreeMap<String, JobRun> = BTreeMap::new();
+    for task in vzdump_in_window(tasks, now_s, lookback_s) {
+        let Some(id) = task.id.as_deref().filter(|id| !id.is_empty()) else { continue };
+        if task.vmid().is_some() {
+            continue;
+        }
+        let run = JobRun { start: task.starttime.map_or(0, |s| s.0 as i64), ok: task.succeeded() };
+        par_travail
+            .entry(id.to_string())
+            .and_modify(|current| *current = current.latest(run))
+            .or_insert(run);
+    }
+    par_travail
+}
+
+/// Métriques des travaux planifiés et de la couverture des invités.
+///
+/// `backup_covered` est publié pour chaque invité connu, à 0 pour ceux que PVE
+/// liste comme non couverts : l'alerte se déclenche sur une série présente, pas
+/// sur une absence.
+pub fn cluster_job_samples(
+    jobs: &[BackupJob],
+    not_backed_up: &[NotBackedUp],
+    guests: &GuestIndex,
+    runs: &BTreeMap<String, JobRun>,
+    now_s: i64,
+    ts_ms: i64,
+) -> Vec<Sample> {
+    let mut samples = Vec::new();
+
+    for job in jobs {
+        let mut push = |sample: Sample| {
+            samples.push(
+                sample
+                    .with_label("job", job.id.clone())
+                    .with_label("storage", job.storage.clone().unwrap_or_default())
+                    .with_label("schedule", job.schedule.clone().unwrap_or_default()),
+            );
+        };
+        push(gauge("backup_job_enabled", if job.is_enabled() { 1.0 } else { 0.0 }, ts_ms));
+        if let Some(next) = job.next_run {
+            push(gauge("backup_job_next_run_seconds", next.0 - now_s as f64, ts_ms));
+        }
+        if let Some(run) = runs.get(&job.id) {
+            push(gauge("backup_job_last_ok", if run.ok { 1.0 } else { 0.0 }, ts_ms));
+            push(gauge(
+                "backup_job_last_run_age_seconds",
+                (now_s - run.start).max(0) as f64,
+                ts_ms,
+            ));
+        }
+    }
+    samples.push(gauge("backup_jobs_total", jobs.len() as f64, ts_ms));
+
+    let uncovered: Vec<i64> = not_backed_up.iter().map(|entry| entry.vmid.0 as i64).collect();
+    samples.push(gauge("backup_guests_not_covered", uncovered.len() as f64, ts_ms));
+    for (vmid, guest) in guests {
+        let covered = !uncovered.contains(vmid);
+        samples.push(
+            gauge("backup_covered", if covered { 1.0 } else { 0.0 }, ts_ms)
+                .with_label("vmid", vmid.to_string())
+                .with_label("name", guest.name.clone())
+                .with_label("node", guest.node.clone())
+                .with_label("type", guest.kind.as_str()),
+        );
+    }
+
+    samples
 }
 
 /// Métriques de sauvegarde par machine.
@@ -385,5 +480,93 @@ mod tests {
             guest_backup_samples(&invites(), &inventaire(), &BTreeMap::new(), futur, 1000);
         let cle = r#"proxmox_backup_last_age_seconds{name="nextcloud",node="pve1",type="qemu",vmid="100"}"#;
         assert_eq!(valeur(&samples, cle), Some(0.0));
+    }
+
+    /// `GET /nodes/pve1/tasks?typefilter=vzdump` sur PVE ≥ 7.2 : le travail
+    /// planifié `backup-7a2b3c` porte son identifiant, dernier passage en échec
+    /// (faux, `LAB_SCENARIO=backup-failed`).
+    const JOB_TASKS: &str = r#"{"data":[
+      {"upid":"UPID:pve1:00000BB8:002F9C25:6AA89890:vzdump:backup-7a2b3c:root@pam:","node":"pve1","type":"vzdump","id":"backup-7a2b3c","user":"root@pam","pid":12000,"pstart":3120165,"starttime":1789434000,"endtime":1789434095,"status":"ERROR: Backup of VM 100 failed - no such volume 'local-lvm:vm-100-disk-0'"},
+      {"upid":"UPID:pve1:00000BB9:002E4AA5:6AA74710:vzdump:backup-7a2b3c:root@pam:","node":"pve1","type":"vzdump","id":"backup-7a2b3c","user":"root@pam","pid":12001,"pstart":3033765,"starttime":1789347600,"endtime":1789348910,"status":"OK"},
+      {"upid":"UPID:pve1:00004242:002FC655:6AA8C2C0:vzdump:100:root@pam:","node":"pve1","type":"vzdump","id":"100","user":"root@pam","pid":17000,"pstart":3130965,"starttime":1789444800,"endtime":1789444987,"status":"OK"}
+    ]}"#;
+
+    /// `GET /cluster/backup`
+    const BACKUP_JOBS: &str = r#"{"data":[
+      {"id":"backup-7a2b3c","type":"vzdump","enabled":1,"schedule":"01:00","starttime":"01:00","storage":"pbs-lab","mode":"snapshot","all":1,"exclude":"9000,101","compress":"zstd","mailnotification":"failure","notes-template":"{{guestname}}","prune-backups":"keep-last=3","next-run":1789520400,"comment":"nightly, everything but the template","repeat-missed":0}
+    ]}"#;
+
+    /// `GET /cluster/backup-info/not-backed-up`
+    const NOT_BACKED_UP: &str = r#"{"data":[{"vmid":101,"name":"win11-desktop","type":"qemu"}]}"#;
+
+    const JOB_NOW: i64 = 1789510000;
+
+    #[test]
+    fn la_derniere_execution_dun_travail_planifie_est_reconnue_par_son_identifiant() {
+        let tasks: Vec<TaskEntry> =
+            serde_json::from_str::<Envelope<Vec<TaskEntry>>>(JOB_TASKS).unwrap().data;
+        let runs = task_runs_by_job(&tasks, JOB_NOW, FENETRE);
+        assert_eq!(runs.len(), 1, "la sauvegarde manuelle du VMID 100 n'est pas un travail");
+        assert_eq!(runs["backup-7a2b3c"], JobRun { start: 1789434000, ok: false });
+    }
+
+    #[test]
+    fn un_travail_planifie_publie_son_etat_sa_prochaine_execution_et_son_dernier_resultat() {
+        let jobs: Vec<BackupJob> =
+            serde_json::from_str::<Envelope<Vec<BackupJob>>>(BACKUP_JOBS).unwrap().data;
+        let absents: Vec<NotBackedUp> =
+            serde_json::from_str::<Envelope<Vec<NotBackedUp>>>(NOT_BACKED_UP).unwrap().data;
+        let tasks: Vec<TaskEntry> =
+            serde_json::from_str::<Envelope<Vec<TaskEntry>>>(JOB_TASKS).unwrap().data;
+        let runs = task_runs_by_job(&tasks, JOB_NOW, FENETRE);
+
+        let samples = cluster_job_samples(&jobs, &absents, &invites(), &runs, JOB_NOW, 1000);
+
+        let job = r#"{job="backup-7a2b3c",schedule="01:00",storage="pbs-lab"}"#;
+        assert_eq!(valeur(&samples, &format!("proxmox_backup_job_enabled{job}")), Some(1.0));
+        assert_eq!(
+            valeur(&samples, &format!("proxmox_backup_job_next_run_seconds{job}")),
+            Some(10400.0)
+        );
+        assert_eq!(valeur(&samples, &format!("proxmox_backup_job_last_ok{job}")), Some(0.0));
+        assert_eq!(
+            valeur(&samples, &format!("proxmox_backup_job_last_run_age_seconds{job}")),
+            Some(76000.0)
+        );
+        assert_eq!(valeur(&samples, "proxmox_backup_jobs_total"), Some(1.0));
+        assert_eq!(valeur(&samples, "proxmox_backup_guests_not_covered"), Some(1.0));
+        assert_eq!(
+            valeur(
+                &samples,
+                r#"proxmox_backup_covered{name="windows",node="pve1",type="qemu",vmid="101"}"#
+            ),
+            Some(0.0)
+        );
+        assert_eq!(
+            valeur(
+                &samples,
+                r#"proxmox_backup_covered{name="nextcloud",node="pve1",type="qemu",vmid="100"}"#
+            ),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn un_travail_sans_tache_connue_ne_publie_pas_de_dernier_resultat() {
+        let jobs: Vec<BackupJob> =
+            serde_json::from_str::<Envelope<Vec<BackupJob>>>(BACKUP_JOBS).unwrap().data;
+        let samples =
+            cluster_job_samples(&jobs, &[], &GuestIndex::new(), &BTreeMap::new(), JOB_NOW, 1000);
+        assert!(samples.iter().all(|s| s.metric != "proxmox_backup_job_last_ok"));
+        assert!(samples.iter().all(|s| s.metric != "proxmox_backup_job_last_run_age_seconds"));
+        assert_eq!(valeur(&samples, "proxmox_backup_guests_not_covered"), Some(0.0));
+    }
+
+    #[test]
+    fn la_fusion_des_executions_garde_la_plus_recente() {
+        let ancienne = JobRun { start: 100, ok: true };
+        let recente = JobRun { start: 200, ok: false };
+        assert_eq!(ancienne.latest(recente), recente);
+        assert_eq!(recente.latest(ancienne), recente);
     }
 }

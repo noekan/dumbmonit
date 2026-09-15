@@ -8,8 +8,12 @@
 //!   vérifiée — c'est la panne silencieuse que l'on cherche : la sauvegarde qui ne
 //!   tourne plus, ou qui tourne mais dont les blocs sont corrompus ;
 //! * les **tâches** de la fenêtre d'examen disent ce qui a échoué cette nuit, par
-//!   type de travail, et datent la dernière GC ou vérification réussie par
-//!   datastore.
+//!   type de travail, et datent la dernière GC, vérification ou synchronisation
+//!   réussie par datastore.
+//!
+//! Les instantanés donnent aussi, par espace de noms, un décompte de groupes et
+//! d'instantanés : c'est la granularité à laquelle un PBS mutualisé est
+//! administré (un espace de noms par cluster ou par client).
 
 use std::collections::BTreeMap;
 
@@ -127,15 +131,52 @@ pub fn group_samples(
     samples
 }
 
+/// Décomptes par espace de noms, à partir des groupes déjà regroupés.
+///
+/// `listed` énumère les couples `(datastore, espace de noms)` dont le listing
+/// a abouti : un espace de noms vide produit ainsi des zéros plutôt que rien —
+/// une machine retirée d'un espace doit faire tomber son décompte, pas faire
+/// disparaître la série. Le plafond `max_groups` ne s'applique pas ici : ce
+/// sont des totaux, deux séries par espace de noms.
+pub fn namespace_samples(
+    listed: &[(String, String)],
+    groups: &BTreeMap<GroupKey, GroupSummary>,
+    ts_ms: i64,
+) -> Vec<Sample> {
+    let mut counts: BTreeMap<(&str, &str), (usize, usize)> =
+        listed.iter().map(|(store, ns)| ((store.as_str(), ns.as_str()), (0, 0))).collect();
+    for (key, summary) in groups {
+        let entry = counts.entry((key.datastore.as_str(), key.namespace.as_str())).or_default();
+        entry.0 += 1;
+        entry.1 += summary.count;
+    }
+
+    let mut samples = Vec::with_capacity(counts.len() * 2);
+    for ((store, namespace), (group_count, snapshot_count)) in counts {
+        for (metric, value) in
+            [("namespace_groups", group_count), ("namespace_snapshots", snapshot_count)]
+        {
+            samples.push(
+                gauge(metric, value as f64, ts_ms)
+                    .with_label("datastore", store)
+                    .with_label("namespace", namespace),
+            );
+        }
+    }
+    samples
+}
+
 /// Famille de travail, pour ramener les variantes de PBS à un nom stable.
 ///
 /// PBS distingue `verify`, `verificationjob`, `verify_group` et `verify_snapshot`
 /// selon la façon dont la vérification a été lancée ; pour dater « la dernière
-/// vérification réussie », c'est la même chose.
+/// vérification réussie », c'est la même chose. Idem pour `sync` (lancée à la
+/// main) et `syncjob` (planifiée).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Family {
     GarbageCollection,
     Verify,
+    Sync,
     Other,
 }
 
@@ -145,6 +186,8 @@ pub fn family(worker_type: &str) -> Family {
         Family::GarbageCollection
     } else if lower.starts_with("verif") {
         Family::Verify
+    } else if lower.starts_with("sync") {
+        Family::Sync
     } else {
         Family::Other
     }
@@ -166,6 +209,9 @@ pub struct TaskDigest {
     pub last_gc_ok: BTreeMap<String, i64>,
     /// Date de démarrage de la dernière vérification réussie, par datastore.
     pub last_verify_ok: BTreeMap<String, i64>,
+    /// Date de démarrage de la dernière synchronisation réussie, par datastore
+    /// de destination.
+    pub last_sync_ok: BTreeMap<String, i64>,
 }
 
 /// Dépouille la liste des tâches.
@@ -198,6 +244,7 @@ pub fn digest_tasks(tasks: &[TaskEntry], now_s: i64, lookback_s: i64) -> TaskDig
             let by_store = match family(worker_type) {
                 Family::GarbageCollection => &mut digest.last_gc_ok,
                 Family::Verify => &mut digest.last_verify_ok,
+                Family::Sync => &mut digest.last_sync_ok,
                 Family::Other => continue,
             };
             if let Some(store) = task.datastore() {
@@ -229,7 +276,7 @@ pub fn task_samples(digest: &TaskDigest, ts_ms: i64) -> Vec<Sample> {
     samples
 }
 
-/// Âge de la dernière GC et de la dernière vérification réussies, par datastore.
+/// Âge de la dernière GC, vérification et synchronisation réussies, par datastore.
 ///
 /// La date de GC peut venir de deux sources — la liste des tâches, bornée par la
 /// fenêtre, et le statut `/gc` du datastore, qui n'a pas cette limite : la plus
@@ -257,11 +304,16 @@ pub fn maintenance_samples(
                 .with_label("datastore", store),
         );
     }
-    for (store, date) in &digest.last_verify_ok {
-        samples.push(
-            gauge("verify_last_success_age_seconds", (now_s - date).max(0) as f64, ts_ms)
-                .with_label("datastore", store.clone()),
-        );
+    for (metric, dates) in [
+        ("verify_last_success_age_seconds", &digest.last_verify_ok),
+        ("sync_last_success_age_seconds", &digest.last_sync_ok),
+    ] {
+        for (store, date) in dates {
+            samples.push(
+                gauge(metric, (now_s - date).max(0) as f64, ts_ms)
+                    .with_label("datastore", store.clone()),
+            );
+        }
     }
 
     samples
@@ -311,7 +363,14 @@ mod tests {
        "starttime":1700580000,"endtime":1700589000,"status":"WARNINGS: 1"},
       {"upid":"UPID:pbs:1:2:9:6543F1A0:prune:main:root@pam:","node":"localhost",
        "worker_type":"prune","worker_id":"main:vm/100","user":"root@pam",
-       "starttime":1699000000,"endtime":1699000100,"status":"OK"}
+       "starttime":1699000000,"endtime":1699000100,"status":"OK"},
+      {"upid":"UPID:pbs:1:2:10:6553F1A6:syncjob:archive:root@pam:","node":"localhost",
+       "worker_type":"syncjob","worker_id":"archive:s-offsite","user":"root@pam",
+       "starttime":1700595000,"endtime":1700598200,"status":"OK"},
+      {"upid":"UPID:pbs:1:2:11:6553F1A7:syncjob:archive:root@pam:","node":"localhost",
+       "worker_type":"syncjob","worker_id":"archive:s-offsite","user":"root@pam",
+       "starttime":1700599000,"endtime":1700599100,
+       "status":"TASK ERROR: sync failed: connection refused"}
     ]}"#;
 
     fn extraire<T: serde::de::DeserializeOwned>(json: &str) -> T {
@@ -414,10 +473,16 @@ mod tests {
             TaskTally { running: 0, ok: 1, failed: 1 }
         );
         assert_eq!(digest.by_type["verificationjob"], TaskTally { running: 0, ok: 1, failed: 0 });
+        assert_eq!(digest.by_type["syncjob"], TaskTally { running: 0, ok: 1, failed: 1 });
         assert!(!digest.by_type.contains_key("prune"), "hors fenêtre : {:?}", digest.by_type);
 
         assert_eq!(digest.last_gc_ok, BTreeMap::from([("main".to_string(), 1700590000)]));
         assert_eq!(digest.last_verify_ok, BTreeMap::from([("main".to_string(), 1700580000)]));
+        assert_eq!(
+            digest.last_sync_ok,
+            BTreeMap::from([("archive".to_string(), 1700595000)]),
+            "la synchronisation en échec, plus récente, ne date rien"
+        );
     }
 
     #[test]
@@ -475,6 +540,46 @@ mod tests {
                 .is_none(),
             "aucune date connue : aucune série"
         );
+        assert_eq!(
+            valeur(&samples, r#"pbs_sync_last_success_age_seconds{datastore="archive"}"#),
+            Some((now_s - 1700595000) as f64)
+        );
+        assert!(
+            valeur(&samples, r#"pbs_sync_last_success_age_seconds{datastore="main"}"#).is_none()
+        );
+    }
+
+    #[test]
+    fn chaque_espace_de_noms_liste_compte_ses_groupes_et_ses_instantanes() {
+        let snapshots: Vec<SnapshotEntry> = extraire(SNAPSHOTS);
+        let mut groups = summarize_groups("main", "pve", &snapshots);
+        groups.extend(summarize_groups("archive", "", &snapshots[4..5]));
+        let listed = vec![
+            ("main".to_string(), String::new()),
+            ("main".to_string(), "pve".to_string()),
+            ("archive".to_string(), String::new()),
+        ];
+        let samples = namespace_samples(&listed, &groups, 1000);
+
+        assert_eq!(samples.len(), 6, "deux séries par espace de noms listé : {samples:?}");
+        assert_eq!(
+            valeur(&samples, r#"pbs_namespace_groups{datastore="main",namespace="pve"}"#),
+            Some(3.0)
+        );
+        assert_eq!(
+            valeur(&samples, r#"pbs_namespace_snapshots{datastore="main",namespace="pve"}"#),
+            Some(5.0),
+            "l'orphelin sans type n'est pas compté"
+        );
+        assert_eq!(
+            valeur(&samples, r#"pbs_namespace_groups{datastore="main",namespace=""}"#),
+            Some(0.0),
+            "la racine, listée mais vide, produit des zéros"
+        );
+        assert_eq!(
+            valeur(&samples, r#"pbs_namespace_snapshots{datastore="archive",namespace=""}"#),
+            Some(1.0)
+        );
     }
 
     #[test]
@@ -483,6 +588,8 @@ mod tests {
         assert_eq!(family("verify"), Family::Verify);
         assert_eq!(family("verificationjob"), Family::Verify);
         assert_eq!(family("verify_group"), Family::Verify);
+        assert_eq!(family("syncjob"), Family::Sync);
+        assert_eq!(family("sync"), Family::Sync);
         assert_eq!(family("backup"), Family::Other);
         assert_eq!(family("prune"), Family::Other);
     }

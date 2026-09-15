@@ -35,6 +35,20 @@ services:
       - "-retentionPeriod=12"        # 12 months
       - "-storageDataPath=/vmdata"
       - "-httpListenAddr=:8428"
+      # Memory budget for VictoriaMetrics' caches. Without it VM sizes them for
+      # 60 % of the host's RAM and its RSS grows for days; a homelab of a few
+      # dozen devices fits comfortably in 256 MB. Raise it (or replace by
+      # "-memory.allowedPercent=10") when you monitor hundreds of hosts.
+      - "-memory.allowedBytes=256MB"
+      # One DumbMonit instance never queries more than a few thousand series:
+      # cap a runaway query before it eats the budget above.
+      - "-search.maxUniqueTimeseries=100000"
+      # Collapse duplicate points closer than 10 s (agent retries, a probe run
+      # twice): fewer rows on disk, nothing lost at a 30 s cadence.
+      - "-dedup.minScrapeInterval=10s"
+      # Four concurrent queries are plenty for one UI plus the alert engine, and
+      # each one runs with a bounded memory share of the budget.
+      - "-search.maxConcurrentRequests=4"
     volumes:
       - vm-data:/vmdata
     restart: unless-stopped

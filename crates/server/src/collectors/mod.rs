@@ -5,6 +5,7 @@
 
 pub mod agent;
 mod dummy;
+pub mod http;
 mod pbs;
 mod proxmox;
 pub mod snmp;
