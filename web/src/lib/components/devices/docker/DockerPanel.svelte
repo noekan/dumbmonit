@@ -5,11 +5,19 @@
 	 * (restart, update). The command channel is asynchronous — the agent picks
 	 * commands up after its next batch — so a fired action shows as "Queued",
 	 * then "Running…", and the list polls faster until it settles.
+	 *
+	 * The whole panel folds (closed by default: thirty rows is a wall), and each
+	 * row folds again: one status line, the switches, actions and the
+	 * container's own charts only once it is opened.
 	 */
 	import { untrack } from 'svelte';
 	import type { Target } from '$lib/api';
 	import { formatDuration, formatRelative } from '$lib/format';
-	import { Button, Confirm, ErrorNotice, Led, Panel, Plate, Skeleton, Toggle, type Tone } from '$lib/ui';
+	import { Button, Confirm, ErrorNotice, Led, Plate, Skeleton, Toggle, type Tone } from '$lib/ui';
+	import Chart from '$lib/components/Chart.svelte';
+	import FoldSection from '../FoldSection.svelte';
+	import FoldRow from '../FoldRow.svelte';
+	import type { DeviceMetricGroup } from '../metrics';
 	import {
 		commandContainer,
 		commandLabel,
@@ -27,9 +35,12 @@
 
 	interface Props {
 		target: Target;
+		/** Charts per container name, over the page's range; drawn only inside an open row. */
+		metrics?: Map<string, DeviceMetricGroup[]>;
+		loadingMetrics?: boolean;
 	}
 
-	let { target }: Props = $props();
+	let { target, metrics = new Map(), loadingMetrics = false }: Props = $props();
 
 	let containers = $state<ContainerView[]>([]);
 	let commands = $state<CommandView[]>([]);
@@ -42,9 +53,31 @@
 	let rowError = $state<Record<string, unknown>>({});
 	let showResult = $state<Record<string, boolean>>({});
 	let showAllCommands = $state(false);
+	/** Rows unfolded by the user; nothing is remembered across visits. */
+	let openRows = $state<Record<string, boolean>>({});
 
 	const busy = $derived(containers.some((c) => isPending(c.last_command)));
 	const recent = $derived(showAllCommands ? commands : commands.slice(0, 5));
+
+	/** Header summary: "31 · 30 running · 2 updates available". */
+	const summary = $derived.by(() => {
+		if (loading || error || containers.length === 0) return undefined;
+		const running = containers.filter((c) => c.up).length;
+		const updates = containers.filter((c) => c.update_available === true).length;
+		const parts = [`${containers.length}`, `${running} running`];
+		if (running < containers.length) parts.push(`${containers.length - running} stopped`);
+		if (updates > 0) parts.push(`${updates} ${updates === 1 ? 'update' : 'updates'} available`);
+		return parts.join(' · ');
+	});
+
+	/** The tiny status line of a folded row. */
+	function statusLine(c: ContainerView): string {
+		const parts: string[] = [];
+		if (c.up && c.uptime_seconds !== null) parts.push(`up ${formatDuration(c.uptime_seconds)}`);
+		parts.push(`${c.restart_count} ${c.restart_count === 1 ? 'restart' : 'restarts'}`);
+		if (c.image_age_seconds !== null) parts.push(`image ${formatDuration(c.image_age_seconds)} old`);
+		return parts.join(' · ');
+	}
 
 	// --- Presentation -----------------------------------------------------------
 
@@ -144,7 +177,7 @@
 	}
 </script>
 
-<Panel title="Containers" description={containers.length > 0 ? `${containers.length} on this machine, as the agent sees them.` : undefined} padded={false} class="rise-in">
+<FoldSection kind="containers" title="Containers" {summary} class="rise-in">
 	{#if error}
 		<div class="px-5 py-4">
 			<ErrorNotice {error} title="Could not load the containers" onretry={() => void load()} />
@@ -161,32 +194,26 @@
 				{@const s = stateOf(c)}
 				{@const saving = savingPolicy[c.name] ?? false}
 				{@const working = (acting[c.name] ?? false) || isPending(c.last_command)}
-				<li class="rise-in flex flex-col gap-3 px-5 py-4" style="--rise-delay: {Math.min(i, 8) * 40}ms">
-					<!-- Identity line: LED + word, name, image, plates, figures -->
-					<div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-						<div class="flex min-w-0 gap-3">
-							<Led tone={s.tone} blink={s.blink} class="mt-1.5" label={s.word} />
-							<div class="min-w-0">
-								<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-									<span class="font-semibold text-ink break-all">{c.name}</span>
-									<Plate tone={s.tone} label={s.word} bare />
-									{#if c.update_available === true}
-										<Plate tone="info" label="Update available" />
-									{/if}
-								</div>
-								<p class="mt-0.5 text-sm text-ink-2 break-all">{c.image}</p>
-							</div>
-						</div>
-						<dl class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-2 md:shrink-0 md:justify-end">
-							<div><dt class="sr-only">Restarts</dt><dd class="tnum">{c.restart_count} {c.restart_count === 1 ? 'restart' : 'restarts'}</dd></div>
-							{#if c.up && c.uptime_seconds !== null}
-								<div><dt class="sr-only">Uptime</dt><dd class="tnum">up {formatDuration(c.uptime_seconds)}</dd></div>
+				{@const charts = metrics.get(c.name) ?? []}
+				<FoldRow id={`container-${target.id}-${i}`} bind:open={openRows[c.name]} class="rise-in" style="--rise-delay: {Math.min(i, 8) * 40}ms">
+					{#snippet header()}
+						<span class="flex min-w-0 items-center gap-2">
+							<Led tone={s.tone} blink={s.blink} label={s.word} />
+							<span class="truncate font-semibold text-ink">{c.name}</span>
+							<Plate tone={s.tone} label={s.word} bare />
+							{#if c.update_available === true}
+								<Plate tone="info" label="Update available" bare />
 							{/if}
-							{#if c.image_age_seconds !== null}
-								<div><dt class="sr-only">Image age</dt><dd class="tnum">image {formatDuration(c.image_age_seconds)} old</dd></div>
-							{/if}
-						</dl>
-					</div>
+						</span>
+						<span class="tnum truncate text-[0.8125rem] text-ink-2">{statusLine(c)}</span>
+					{/snippet}
+					{#snippet trailing()}
+						{#if c.last_command && isPending(c.last_command)}
+							<Plate tone={STATUS_TONE[c.last_command.status]} label={`${commandLabel(c.last_command.kind)} · ${STATUS_WORD[c.last_command.status]}`} pulse={c.last_command.status === 'running'} title={c.last_command.created_at} />
+						{/if}
+					{/snippet}
+
+					<p class="text-sm text-ink-2 break-all">{c.image}</p>
 
 					<!-- Policy switches and actions -->
 					<div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -220,7 +247,26 @@
 					{#if rowError[c.name]}
 						<ErrorNotice error={rowError[c.name]} title="The action could not be sent" />
 					{/if}
-				</li>
+
+					<!-- The container's own charts, over the page's range -->
+					{#if loadingMetrics && charts.length === 0}
+						<Skeleton class="h-32 w-full rounded-[var(--radius-card)]" />
+					{:else if charts.length === 0}
+						<p class="text-sm text-ink-2">No metric for this container in this range.</p>
+					{:else}
+						<div class="grid gap-3 lg:grid-cols-2">
+							{#each charts as chart (chart.name)}
+								<div class="rounded-lg border border-line px-3 pt-2 pb-1">
+									<div class="flex items-center justify-between gap-2">
+										<span class="text-sm font-semibold text-ink">{chart.title}</span>
+										{#if chart.unit}<span class="label-tape">{chart.unit}</span>{/if}
+									</div>
+									<Chart series={chart.series} unit={chart.unit} height={140} />
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</FoldRow>
 			{/each}
 		</ul>
 
@@ -228,7 +274,7 @@
 		<div class="graticule border-t border-line px-5 py-4">
 			<h3 class="text-sm font-semibold text-ink">Recent actions</h3>
 			{#if commands.length === 0}
-				<p class="mt-1 text-sm text-ink-2">Nothing yet. Restart or update a container above.</p>
+				<p class="mt-1 text-sm text-ink-2">Nothing yet. Open a container and restart or update it.</p>
 			{:else}
 				<ul class="mt-2 flex flex-col gap-1.5" aria-live="polite">
 					{#each recent as command (command.id)}
@@ -252,4 +298,4 @@
 			{/if}
 		</div>
 	{/if}
-</Panel>
+</FoldSection>

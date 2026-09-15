@@ -1,9 +1,11 @@
 <script lang="ts">
 	/**
 	 * Device detail: one large faceplate band, the alert timeline of this device, then
-	 * the instruments — availability for a service, one chart per metric for a
-	 * device. "Probe now" is the main diagnostic tool: it answers "why is this
-	 * device silent?" without leaving the page.
+	 * the instruments — availability for a service; for a device, the essentials
+	 * open and everything else folded (containers, interfaces, the long tail),
+	 * each chart mounted only once its section is opened. "Probe now" is the
+	 * main diagnostic tool: it answers "why is this device silent?" without
+	 * leaving the page.
 	 */
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
@@ -40,12 +42,10 @@
 		HISTORY_SLOTS,
 		loadProbeStatuses,
 		loadResponseTimes,
-		loadTargetMetrics,
 		loadUptimeHistory,
 		loadUptimeSummary,
 		RANGES,
 		type HistorySlot,
-		type MetricGroup,
 		type RangeId,
 		type UptimeSummary
 	} from '$lib/metrics';
@@ -55,6 +55,17 @@
 	import Segmented from '$lib/components/devices/Segmented.svelte';
 	import UptimeBar from '$lib/components/devices/UptimeBar.svelte';
 	import DeviceTimeline from '$lib/components/devices/DeviceTimeline.svelte';
+	import FoldSection from '$lib/components/devices/FoldSection.svelte';
+	import FoldRow from '$lib/components/devices/FoldRow.svelte';
+	import {
+		formatRate,
+		isVirtualInterface,
+		lastValue,
+		loadDeviceMetrics,
+		sectionize,
+		type DeviceMetricGroup,
+		type MetricRow
+	} from '$lib/components/devices/metrics';
 	import SilenceControl from '$lib/components/devices/SilenceControl.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import DockerPanel from '$lib/components/devices/docker/DockerPanel.svelte';
@@ -71,7 +82,7 @@
 		Toggle,
 		type Tone
 	} from '$lib/ui';
-	import { Activity, ArrowUpRight, ExternalLink, Pencil, ServerOff } from 'lucide-svelte';
+	import { Activity, ArrowUpRight, ExternalLink, Pencil, Search, ServerOff } from 'lucide-svelte';
 
 	const id = $derived(Number(page.params.id));
 
@@ -91,6 +102,26 @@
 
 	const tags = $derived(Object.entries(target?.tags ?? {}));
 
+	/**
+	 * An agent's address is its opaque host id; the machine's own name and OS
+	 * come from the `ezymonit_agent_os_info` labels, read once per device.
+	 */
+	let osInfo = $state<Record<string, string> | null>(null);
+	const hostname = $derived(osInfo?.host || osInfo?.hostname || null);
+	const osLine = $derived.by(() => {
+		if (!osInfo) return null;
+		const system = osInfo.system || osInfo.os || 'Linux';
+		const distro =
+			osInfo.pretty_name || [osInfo.name, osInfo.version_id].filter(Boolean).join(' ') || null;
+		const arch = osInfo.arch || osInfo.machine || null;
+		return [system, distro, arch].filter(Boolean).join(' · ');
+	});
+	/** "13a2a55c…" for an opaque id; a hostname or IP stays whole. */
+	const shortAddress = $derived.by(() => {
+		const address = target?.address ?? '';
+		return target?.kind === 'agent' && /^[0-9a-f]{16,}$/i.test(address) ? `${address.slice(0, 8)}…` : address;
+	});
+
 	// --- Range (kept in the URL so a link carries the view) -----------------
 
 	function validRange(raw: string | null): RangeId {
@@ -108,21 +139,31 @@
 
 	// --- Device metrics -------------------------------------------------------
 
-	let groups = $state<MetricGroup[]>([]);
+	let groups = $state<DeviceMetricGroup[]>([]);
 	let loadingMetrics = $state(true);
 	let metricsError = $state<unknown>(null);
 
-	/** The vital signs first, then everything else alphabetically. */
-	function priority(name: string): number {
-		if (name.includes('cpu')) return 0;
-		if (name.includes('memory') || name.includes('mem_')) return 1;
-		if (name.includes('disk') || name.includes('storage') || name.includes('filesystem')) return 2;
-		if (name.includes('interface') || name.includes('if_') || name.includes('net')) return 3;
-		return 4;
+	const sections = $derived(sectionize(groups));
+
+	/** Interface rows unfolded by the user; the search over the long tail. */
+	let openInterfaces = $state<Record<string, boolean>>({});
+	let otherQuery = $state('');
+	const otherShown = $derived.by(() => {
+		const q = otherQuery.trim().toLowerCase();
+		if (!q) return sections.other;
+		return sections.other.filter(
+			(g) => g.name.toLowerCase().includes(q) || g.title.toLowerCase().includes(q)
+		);
+	});
+
+	/** "↓ 13 kB/s · ↑ 505 kB/s" for the folded interface line. */
+	function interfaceLine(row: MetricRow): string {
+		const octets = row.charts.find((c) => c.name.endsWith('_octets'));
+		if (!octets) return '';
+		const of = (dir: string) => lastValue(octets.series.find((s) => s.label === dir));
+		return `↓ ${formatRate(of('in'), 'B/s')} · ↑ ${formatRate(of('out'), 'B/s')}`;
 	}
-	const sortedGroups = $derived(
-		[...groups].sort((a, b) => priority(a.name) - priority(b.name) || a.title.localeCompare(b.title, 'en'))
-	);
+	const physicalCount = $derived(sections.interfaces.filter((r) => !isVirtualInterface(r.key)).length);
 
 	// --- Service instruments --------------------------------------------------
 
@@ -280,10 +321,19 @@
 		}
 	}
 
+	async function loadOsInfo(signal?: AbortSignal) {
+		try {
+			const series = await queryInstant(`last_over_time(ezymonit_agent_os_info{target="${id}"}[1d])`, signal);
+			osInfo = series[0]?.metric ?? null;
+		} catch {
+			osInfo = null;
+		}
+	}
+
 	async function loadMetrics(signal?: AbortSignal) {
 		metricsError = null;
 		try {
-			groups = await loadTargetMetrics(id, rangeSeconds, signal);
+			groups = await loadDeviceMetrics(id, rangeSeconds, signal);
 		} catch (cause) {
 			if (cause instanceof DOMException && cause.name === 'AbortError') return;
 			metricsError = cause;
@@ -328,6 +378,7 @@
 		history = [];
 		responseTimes = [];
 		alerts = [];
+		osInfo = null;
 		probeResult = null;
 		probeError = null;
 		const controller = new AbortController();
@@ -360,6 +411,7 @@
 			} else {
 				loadingMetrics = groups.length === 0;
 				void loadMetrics(controller.signal);
+				if (kind === 'agent' && osInfo === null) void loadOsInfo(controller.signal);
 			}
 		});
 		return () => controller.abort();
@@ -402,8 +454,12 @@
 					<h1 id="device-name" class="display text-3xl break-words text-ink sm:text-4xl">{target.name}</h1>
 					<div class="mt-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-ink-2">
 						<span class="label-tape">{kindLabel}</span>
+						{#if hostname}
+							<span class="text-ink-3" aria-hidden="true">·</span>
+							<span class="break-all font-semibold text-ink">{hostname}</span>
+						{/if}
 						<span class="text-ink-3" aria-hidden="true">·</span>
-						<span class="break-all">{target.address}</span>
+						<span class="tnum break-all" title={target.address}>{shortAddress}</span>
 						<span class="text-ink-3" aria-hidden="true">·</span>
 						<span class="tnum">every {formatDuration(target.interval_secs)}</span>
 						{#if target.parent_id !== null}
@@ -414,6 +470,9 @@
 							</a>
 						{/if}
 					</div>
+					{#if osLine}
+						<p class="mt-1 text-sm text-ink-2">{osLine}</p>
+					{/if}
 					{#if tags.length > 0}
 						<div class="mt-2 flex flex-wrap gap-1.5">
 							{#each tags as [key, value] (key)}
@@ -499,10 +558,9 @@
 		<DeviceTimeline targetId={id} {alerts} {refreshKey} />
 	</section>
 
-	<!-- What the agent runs on this machine: containers it can act on, backups it watches -->
+	<!-- Backups the agent watches; the containers sit with the metrics below -->
 	{#if target.kind === 'agent'}
-		<section class="mt-6 flex flex-col gap-4" aria-label="Containers and backups">
-			<DockerPanel {target} />
+		<section class="mt-6" aria-label="Backups">
 			<PlakarPanel {target} />
 		</section>
 	{/if}
@@ -565,24 +623,114 @@
 			<div class="grid gap-4 lg:grid-cols-2" aria-busy="true">
 				<Skeleton class="h-72 w-full rounded-[var(--radius-card)]" rows={2} />
 			</div>
-		{:else if sortedGroups.length === 0}
+		{:else if groups.length === 0 && target.kind !== 'agent'}
 			<EmptyState title="No data in this range yet." description="Data appears after the first successful probe. Probe now to check the device answers.">
 				{#snippet action()}
 					<Button variant="secondary" onclick={probe} loading={probing}>Probe now</Button>
 				{/snippet}
 			</EmptyState>
 		{:else}
-			<div class="grid gap-4 lg:grid-cols-2">
-				{#each sortedGroups as group, i (group.name)}
-					<div class="rise-in" style="--rise-delay: {Math.min(i, 8) * 40}ms">
-						<Panel title={group.title}>
-							{#snippet aside()}
-								{#if group.unit}<span class="label-tape">{group.unit}</span>{/if}
-							{/snippet}
-							<Chart series={group.series} unit={group.unit} height={220} />
-						</Panel>
-					</div>
-				{/each}
+			<div class="flex flex-col gap-4">
+				<!-- Essentials: the handful of charts that answer "is it fine?" -->
+				{#if sections.essentials.length > 0}
+					<FoldSection kind="essentials" title="Essentials" defaultOpen summary={`${sections.essentials.length} charts`} class="rise-in">
+						<div class="grid gap-4 px-4 py-4 sm:px-5 lg:grid-cols-2">
+							{#each sections.essentials as group, i (group.name)}
+								<div class="rise-in" style="--rise-delay: {Math.min(i, 8) * 40}ms">
+									<div class="flex items-center justify-between gap-2 pb-1">
+										<h3 class="text-sm font-semibold text-ink">{group.title}</h3>
+										{#if group.unit}<span class="label-tape">{group.unit}</span>{/if}
+									</div>
+									<Chart series={group.series} unit={group.unit} height={200} />
+								</div>
+							{/each}
+						</div>
+					</FoldSection>
+				{/if}
+
+				<!-- Containers: the Docker panel folds, one row per container -->
+				{#if target.kind === 'agent'}
+					<DockerPanel {target} metrics={sections.containers} {loadingMetrics} />
+				{/if}
+
+				<!-- Interfaces: one row each, physical ones first -->
+				{#if sections.interfaces.length > 0}
+					<FoldSection
+						kind="interfaces"
+						title="Network interfaces"
+						summary={physicalCount < sections.interfaces.length ? `${sections.interfaces.length} · ${physicalCount} physical` : `${sections.interfaces.length}`}
+						class="rise-in"
+					>
+						<ul class="divide-y divide-line">
+							{#each sections.interfaces as row, i (row.key)}
+								<FoldRow id={`interface-${i}`} bind:open={openInterfaces[row.key]}>
+									{#snippet header()}
+										<span class="flex min-w-0 items-center gap-2">
+											<span class="truncate font-semibold text-ink">{row.key}</span>
+											{#if isVirtualInterface(row.key)}
+												<Plate tone="ghost" bare label="virtual" />
+											{/if}
+										</span>
+										<span class="tnum truncate text-[0.8125rem] text-ink-2">{interfaceLine(row)}</span>
+									{/snippet}
+									<div class="grid gap-3 lg:grid-cols-2">
+										{#each row.charts as chart (chart.name)}
+											<div class="rounded-lg border border-line px-3 pt-2 pb-1">
+												<div class="flex items-center justify-between gap-2">
+													<span class="text-sm font-semibold text-ink">{chart.title}</span>
+													{#if chart.unit}<span class="label-tape">{chart.unit}</span>{/if}
+												</div>
+												<Chart series={chart.series} unit={chart.unit} height={140} />
+											</div>
+										{/each}
+									</div>
+								</FoldRow>
+							{/each}
+						</ul>
+					</FoldSection>
+				{/if}
+
+				<!-- The long tail, alphabetical, searchable -->
+				{#if sections.other.length > 0}
+					<FoldSection
+						kind="other"
+						title="Everything else"
+						defaultOpen={sections.essentials.length === 0}
+						summary={otherQuery.trim() ? `${otherShown.length} of ${sections.other.length} families` : `${sections.other.length} families`}
+						class="rise-in"
+					>
+						{#snippet aside()}
+							<label class="relative block w-full sm:w-56">
+								<span class="sr-only">Search metric families</span>
+								<Search class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-3" aria-hidden="true" />
+								<input class="input h-8 w-full text-sm" style="padding-left: 2rem" type="search" placeholder="Filter families" bind:value={otherQuery} />
+							</label>
+						{/snippet}
+						{#if otherShown.length === 0}
+							<p class="px-5 py-4 text-sm text-ink-2">No family matches "{otherQuery}".</p>
+						{:else}
+							<div class="grid gap-4 px-4 py-4 sm:px-5 lg:grid-cols-2">
+								{#each otherShown as group (group.name)}
+									<div>
+										<div class="flex items-center justify-between gap-2 pb-1">
+											<h3 class="text-sm font-semibold text-ink" title={group.name}>{group.title}</h3>
+											{#if group.unit}<span class="label-tape">{group.unit}</span>{/if}
+										</div>
+										<Chart series={group.series} unit={group.unit} height={180} />
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</FoldSection>
+				{/if}
+
+				{#if groups.length === 0}
+					<EmptyState title="No data in this range yet." description="Data appears after the first successful probe. Probe now to check the device answers.">
+						{#snippet action()}
+							<Button variant="secondary" onclick={probe} loading={probing}>Probe now</Button>
+						{/snippet}
+					</EmptyState>
+				{/if}
 			</div>
 		{/if}
 	</section>

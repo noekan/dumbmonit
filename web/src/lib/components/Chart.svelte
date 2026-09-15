@@ -70,6 +70,24 @@
 		return unit ? `${rounded} ${unit}` : String(rounded);
 	}
 
+	/** Axis labels stay short: 1200 → "1.2k", 20 000 000 → "20M". */
+	function compactNumber(value: number): string {
+		const abs = Math.abs(value);
+		const units: [number, string][] = [
+			[1e12, 'T'],
+			[1e9, 'G'],
+			[1e6, 'M'],
+			[1e3, 'k']
+		];
+		for (const [size, suffix] of units) {
+			if (abs >= size) {
+				const scaled = value / size;
+				return `${Math.abs(scaled) >= 100 ? Math.round(scaled) : Math.round(scaled * 10) / 10}${suffix}`;
+			}
+		}
+		return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
+	}
+
 	function withAlpha(hex: string, alpha: string): string {
 		return hex.startsWith('#') && hex.length === 7 ? `${hex}${alpha}` : hex;
 	}
@@ -103,8 +121,7 @@
 							ticks: { stroke: grid, width: 1 },
 							size: 52,
 							font,
-							values: (_u, ticks) =>
-								ticks.map((v) => (Math.abs(v) >= 1000 ? `${Math.round(v / 100) / 10}k` : String(v)))
+							values: (_u, ticks) => ticks.map(compactNumber)
 						}
 					],
 			series: [
