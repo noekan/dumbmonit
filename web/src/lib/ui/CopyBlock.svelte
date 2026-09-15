@@ -23,8 +23,8 @@
 	}
 </script>
 
-<div class={`group relative rounded-lg border border-line bg-canvas-deep ${className}`}>
-	<pre class={`overflow-x-auto px-3 py-2.5 pr-12 font-mono text-[0.8125rem] leading-relaxed text-ink ${secret ? 'blur-[3px] transition group-focus-within:blur-0 group-hover:blur-0' : ''}`}><code>{value}</code></pre>
+<div class={`group relative min-w-0 max-w-full rounded-lg border border-line bg-canvas-deep ${className}`}>
+	<pre class={`overflow-x-auto whitespace-pre-wrap break-all px-3 py-2.5 pr-12 font-mono text-[0.8125rem] leading-relaxed text-ink ${secret ? 'blur-[3px] transition group-focus-within:blur-0 group-hover:blur-0' : ''}`}><code>{value}</code></pre>
 	<button
 		type="button"
 		class="absolute top-1.5 right-1.5 inline-flex size-8 items-center justify-center rounded-md border border-line bg-surface text-ink-2 transition hover:text-ink"

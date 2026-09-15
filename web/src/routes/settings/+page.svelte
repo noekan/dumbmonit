@@ -84,15 +84,15 @@
 	</aside>
 
 	<div class="grid min-w-0 gap-6 [&_section[id]]:scroll-mt-20">
-		<div class="rise-in" style="--rise-delay: 0ms"><AppearanceSection /></div>
-		<div class="rise-in" style="--rise-delay: 40ms"><ChannelsSection /></div>
-		<div class="rise-in" style="--rise-delay: 80ms"><AgentsSection /></div>
-		<div class="rise-in" style="--rise-delay: 100ms"><AssistantSection /></div>
+		<div class="min-w-0 rise-in" style="--rise-delay: 0ms"><AppearanceSection /></div>
+		<div class="min-w-0 rise-in" style="--rise-delay: 40ms"><ChannelsSection /></div>
+		<div class="min-w-0 rise-in" style="--rise-delay: 80ms"><AgentsSection /></div>
+		<div class="min-w-0 rise-in" style="--rise-delay: 100ms"><AssistantSection /></div>
 		{#if showAccounts}
-			<div class="rise-in" style="--rise-delay: 120ms"><UsersSection /></div>
-			<div class="rise-in" style="--rise-delay: 160ms"><SsoSection /></div>
+			<div class="min-w-0 rise-in" style="--rise-delay: 120ms"><UsersSection /></div>
+			<div class="min-w-0 rise-in" style="--rise-delay: 160ms"><SsoSection /></div>
 		{/if}
-		<div class="rise-in" style="--rise-delay: 200ms"><SecuritySection /></div>
-		<div class="rise-in" style="--rise-delay: 240ms"><AboutSection /></div>
+		<div class="min-w-0 rise-in" style="--rise-delay: 200ms"><SecuritySection /></div>
+		<div class="min-w-0 rise-in" style="--rise-delay: 240ms"><AboutSection /></div>
 	</div>
 </div>

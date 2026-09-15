@@ -220,7 +220,7 @@
 				</div>
 			</div>
 
-			<div id="assistant-snippets" role="tabpanel" aria-labelledby={`assistant-tab-${client}`} class="mt-3 grid gap-4">
+			<div id="assistant-snippets" role="tabpanel" aria-labelledby={`assistant-tab-${client}`} class="mt-3 grid min-w-0 gap-4">
 				{#if client === 'claude'}
 					<div>
 						<p class="mb-1.5 text-sm text-ink-2">Claude Code — one command:</p>
@@ -231,7 +231,7 @@
 						<CopyBlock value={claudeDesktop} label="Copy JSON" />
 					</div>
 				{:else if client === 'chatgpt'}
-					<div class="grid gap-3">
+					<div class="grid min-w-0 gap-3">
 						<p class="text-sm text-ink-2">
 							In ChatGPT, open Settings → Connectors → Create (developer mode), then fill in the MCP server URL and the authorization header. ChatGPT connects from OpenAI's servers, so the URL must be reachable from the internet over HTTPS.
 						</p>
