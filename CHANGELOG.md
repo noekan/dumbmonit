@@ -5,6 +5,36 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.1.0-alpha.1 — 2026-09-16
+
+First tagged build, for early testers: `ghcr.io/noekan/dumbmonit:0.1.0-alpha.1`
+(also `:latest`). Everything is still moving; see the README status section.
+
+### Added
+
+- Sources: SNMP (auto-profiled), Proxmox VE and PBS, Synology DSM and Active
+  Backup for Business, Linux/Windows agent with Docker (restart, update with
+  rollback, prune) and Plakar backups, HTTP/TCP/DNS/ping/TLS monitors,
+  network discovery.
+- Alerting: 41 built-in rules, dependency suppression, seasonal baseline,
+  forecasts, maintenance windows, notification policy (hysteresis, flap hold,
+  cooldown, quiet hours, batching, hourly cap), 22 channels.
+- Accounts (admin/viewer), OIDC single sign-on, API tokens, built-in MCP
+  server for assistants, public status pages, wall mode, command palette.
+- Single container: the server runs the VictoriaMetrics binary shipped in
+  the image as a child process.
+
+### Fixed
+
+- Alerts are keyed on the device id: deleting, pausing or renaming a device
+  no longer leaves phantom "Device unreachable" alerts.
+- Queued agent commands expire after 10 minutes and can be cancelled; the UI
+  says when an agent must be reinstalled to run commands.
+- OIDC only links an existing local account on a verified e-mail, never a
+  password-holding admin; open redirect on login closed; security headers.
+- Phone layouts in Settings and Alerts; status page banner; notification
+  lines name the VM/container/service concerned.
+
 ### Changed
 
 - **EzyMonit is now DumbMonit.** Every identifier follows: the crates and
