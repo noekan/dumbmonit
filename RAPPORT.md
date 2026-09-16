@@ -15,13 +15,17 @@ Tout ce qui était demandé est construit, testé et poussé (`main`, image mono
 - Qualité : fmt/clippy/tests (≈ 1 100) verts, `svelte-check` 0 erreur, docs `mkdocs --strict` OK.
 - Doc : **tout est sur Read the Docs** désormais ; la page `/docs/notifications` de l'app est supprimée, l'app renvoie vers https://dumbmonit.readthedocs.io.
 
-## Ce qui a cassé (trouvé par les tests de bout en bout)
+## Ce qui a cassé (trouvé par les tests de bout en bout, sur le lab)
 
-1. **Supprimer ou renommer un appareil laisse des alertes fantômes** (`host_down` évalue les anciennes séries pendant 7 jours, un e-mail est parti pour un appareil supprimé). → règles à clé sur `target`, purge de l'état à la suppression. **Priorité 1.**
-2. Nom d'appareil sans limite de longueur (5 000 caractères acceptés, VictoriaMetrics jette tout en silence).
-3. `PUT /api/targets` sans `profile_id` efface le profil détecté ; `parent_id` inexistant → 500.
-4. Erreurs 422 en texte brut au lieu de l'enveloppe `{"error"}` ; erreurs MetricsQL illisibles.
-5. L'agent installé sur nuci3 est **l'ancienne version** (pas de `container_health`/`restart_count`) : à réinstaller (commandes ci-dessous).
+1. **Supprimer ou renommer un appareil laisse des alertes fantômes** (`host_down` évalue les anciennes séries pendant 7 jours, un e-mail est parti pour un appareil supprimé ; l'accueil, le mur et l'historique affichent des cartes sans nom). → règles à clé sur `target`, purge de l'état à la suppression. **Priorité 1.**
+2. **Commandes Docker en attente qui n'expirent jamais** : si l'agent ne répond pas (ancien binaire, `commands: false`), tout nouveau « Restart/Update » renvoie 409 pour toujours et la politique automatique saute le conteneur. → expiration côté serveur + bouton Annuler + afficher la version/capacités de l'agent.
+3. **Mobile (390 px)** : Réglages › Pages de statut et Utilisateurs, la colonne texte s'écrase à 60 px ; titres d'alertes tronqués ; pastille de navigation mal placée quand le badge Alertes se charge.
+4. Page de statut publique : bannière « Major outage » alors que tout est opérationnel.
+5. Notifications de règles par série (« Container stopped ») ne nomment pas le conteneur, seulement l'hôte, et ajoutent « 1 (threshold > 0) ».
+6. Erreurs de configuration (URL invalide, SNMP sans community) affichées « Unreachable » au lieu de « Misconfigured ».
+7. API : nom d'appareil sans limite (5 000 caractères acceptés, VictoriaMetrics jette tout) ; `PUT` sans `profile_id` efface le profil détecté ; `parent_id` inexistant → 500 ; erreurs 422 en texte brut ; erreurs MetricsQL illisibles ; commande d'installation générée avec `http://0.0.0.0:8080`.
+8. Détail appareil : « Proxmox backup guests total » affiché comme un taux (/s) ; pas de vue « Essentials » pour UPS/Proxmox/Synology (noms bruts) ; « 3887999s » au lieu de « 45 j ».
+9. Les agents nuci3 et Windows tournent **l'ancien binaire ezymonit** (pas de `container_health`, pas de canal de commandes) : à réinstaller (commandes en bas).
 
 ## Sécurité (revue complète, détail dans le rapport interne)
 
@@ -45,10 +49,11 @@ Ce que personne d'autre n'a : suppression par dépendance + baseline saisonnièr
 
 ## Prochaines étapes proposées
 
-1. Corriger les alertes fantômes + le lien OIDC non vérifié + la limite de nom (une demi-journée).
-2. Mettre à jour la doc (API : `/tokens`, `/users`, `/status-pages`… ; `settings.md` ; PRODUCT.md dit encore « deux conteneurs »).
-3. Push monitor + jetons API globaux (les deux « petits » à plus forte valeur).
-4. Puis : image ghcr publique + Discussions GitHub.
+1. Corriger les 3 gros : alertes fantômes, commandes Docker bloquées, lien OIDC non vérifié (+ la limite de nom) — une journée.
+2. Mobile Réglages/Alertes + bannière page de statut + libellés des notifications.
+3. Doc : API (`/tokens`, `/users`, `/status-pages`…), `settings.md`, PRODUCT.md (dit encore « deux conteneurs »).
+4. Push monitor + jetons API globaux (les deux « petits » à plus forte valeur).
+5. Puis : première release, image ghcr publique, Discussions GitHub.
 
 ## Réinstaller les agents (migration ezymonit → dumbmonit)
 
