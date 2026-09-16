@@ -136,7 +136,7 @@ timestamp_ms)` with `.with_label(k, v)`; identity labels (`target`, `host`,
 
 ## Headless screenshots
 
-`.claude/skills/headless-browser/SKILL.md` describes how to render every page
+`web/tools/README.md` describes how to render every page
 in a headless Chromium running in Docker (`zenika/alpine-chrome:with-puppeteer`,
 no local browser needed): log in with `curl` to get the `dumbmonit_session`
 cookie, then run `web/tools/screenshot.js` against the preview server or
