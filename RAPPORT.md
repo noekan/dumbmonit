@@ -21,11 +21,12 @@ Tout ce qui était demandé est construit, testé et poussé (`main`, image mono
 2. **Commandes Docker en attente qui n'expirent jamais** : si l'agent ne répond pas (ancien binaire, `commands: false`), tout nouveau « Restart/Update » renvoie 409 pour toujours et la politique automatique saute le conteneur. → expiration côté serveur + bouton Annuler + afficher la version/capacités de l'agent.
 3. **Mobile (390 px)** : Réglages › Pages de statut et Utilisateurs, la colonne texte s'écrase à 60 px ; titres d'alertes tronqués ; pastille de navigation mal placée quand le badge Alertes se charge.
 4. Page de statut publique : bannière « Major outage » alors que tout est opérationnel.
-5. Notifications de règles par série (« Container stopped ») ne nomment pas le conteneur, seulement l'hôte, et ajoutent « 1 (threshold > 0) ».
+5. Notifications de règles par série (« Container stopped », « VM stopped », tâche ABB…) ne nomment pas la VM/le conteneur, seulement l'hôte, et ajoutent « 1 (threshold > 0) » ; sévérité par emoji seul dans mail/ntfy.
 6. Erreurs de configuration (URL invalide, SNMP sans community) affichées « Unreachable » au lieu de « Misconfigured ».
 7. API : nom d'appareil sans limite (5 000 caractères acceptés, VictoriaMetrics jette tout) ; `PUT` sans `profile_id` efface le profil détecté ; `parent_id` inexistant → 500 ; erreurs 422 en texte brut ; erreurs MetricsQL illisibles ; commande d'installation générée avec `http://0.0.0.0:8080`.
 8. Détail appareil : « Proxmox backup guests total » affiché comme un taux (/s) ; pas de vue « Essentials » pour UPS/Proxmox/Synology (noms bruts) ; « 3887999s » au lieu de « 45 j ».
-9. Les agents nuci3 et Windows tournent **l'ancien binaire ezymonit** (pas de `container_health`, pas de canal de commandes) : à réinstaller (commandes en bas).
+9. Règles manquantes : disque Synology en mauvaise santé (SMART/secteurs) et port de switch down / erreurs — métriques collectées, aucune alerte.
+10. Les agents nuci3 et Windows tournent **l'ancien binaire ezymonit** (pas de `container_health`, pas de canal de commandes) : à réinstaller (commandes en bas).
 
 ## Sécurité (revue complète, détail dans le rapport interne)
 
