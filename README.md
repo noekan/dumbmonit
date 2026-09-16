@@ -19,11 +19,11 @@ The UI reads like a weather bulletin for your network. The mascot is a pigeon.
 
 </div>
 
-> **Work in progress.** DumbMonit is under active development and has no release
-> yet. It runs daily on the author's homelab, but expect rough edges, breaking
-> changes and no public Docker image for now: build it from the repository (two
-> commands, see [Quick start](#quick-start)). Feedback and bug reports are very
-> welcome; see [Status](#status) for what is known to be missing.
+> **Work in progress.** DumbMonit is under active development; the current
+> build is an alpha for early testers (`ghcr.io/noekan/dumbmonit:latest`). It
+> runs daily on the author's homelab, but expect rough edges and breaking
+> changes. Feedback and bug reports are very welcome; see [Status](#status)
+> for what is known to be missing.
 
 ## Why
 
@@ -120,13 +120,14 @@ back for a paid edition.
 ## Quick start
 
 ```bash
-git clone https://github.com/noekan/dumbmonit.git
-cd dumbmonit
-docker compose up -d --build
+mkdir dumbmonit && cd dumbmonit
+curl -fsSLO https://raw.githubusercontent.com/noekan/dumbmonit/main/docker-compose.yml
+docker compose up -d
 ```
 
-There is no public image yet: the first start builds it locally (about ten
-minutes; Docker is the only requirement).
+That pulls `ghcr.io/noekan/dumbmonit:latest` (amd64 and arm64). To run from
+source instead, clone the repository and use `docker compose up -d --build`
+(about ten minutes; Docker is the only requirement).
 
 Then open http://localhost:8080. The first visit lands on `/setup`, where you
 choose the instance password. Add a device with its IP address and SNMP
@@ -134,7 +135,8 @@ community: the collection profile is detected automatically.
 
 - **Another port**: `DUMBMONIT_PORT=8099 docker compose up -d` (8080 is busy on
   most homelab machines).
-- **Update**: `git pull && docker compose up -d --build`.
+- **Update**: `docker compose pull && docker compose up -d` (from source:
+  `git pull && docker compose up -d --build`).
 - **Lost password**: `DUMBMONIT_RESET_PASSWORD=1 docker compose up -d` clears the
   password and all sessions at startup; the UI asks for a new one at `/setup`.
   Then run `docker compose up -d` again without the variable.
@@ -173,9 +175,9 @@ More screenshots, in both themes, in [`.github/assets/screenshots/`](.github/ass
 One container, one volume. The image ships the VictoriaMetrics binary and the
 server runs it as a child process; set `DUMBMONIT_VM_URL` to use an instance
 you already have instead. Configuration and state live in an embedded SQLite
-database: there is no database container. The image will be published as
-`ghcr.io/noekan/dumbmonit` once there is a first release; until then
-`docker compose up -d --build` builds it locally.
+database: there is no database container. The published image is
+`ghcr.io/noekan/dumbmonit` (`latest` = last tagged build, `edge` = last
+commit on `main`, or a version such as `0.1.0-alpha.1`).
 
 ## Configuration
 
@@ -259,7 +261,7 @@ This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
 
 ## Status
 
-**Work in progress — no release yet.** DumbMonit is developed in the open and
+**Work in progress — alpha.** DumbMonit is developed in the open and
 used daily on the author's own homelab, but it is not ready for anyone who needs
 it to be boring: the HTTP API is not frozen, the database schema still moves,
 and some parts have only been exercised against the Docker lab in this

@@ -6,10 +6,11 @@ binary ships in the image. Configuration and state live in an embedded SQLite
 database. One volume, `/data`, holds the database, the instance secret and the
 time series.
 
-!!! note "No public image yet"
-    Until the first release the image is not published: `docker compose up -d
-    --build` builds it locally from the checkout (about ten minutes the first
-    time; only Docker is needed). The same command updates it after a `git pull`.
+!!! note "Alpha image"
+    `ghcr.io/noekan/dumbmonit:latest` is the last tagged alpha build (amd64 and
+    arm64); `:edge` follows the last commit on `main`. To run from source,
+    `docker compose up -d --build` builds the same image locally (about ten
+    minutes the first time; only Docker is needed).
 
 ## Prerequisites
 
@@ -75,10 +76,10 @@ volumes:
     name: dumbmonit-data
 ```
 
-Then start it (`--build` is required while there is no public image):
+Then start it:
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 !!! tip "Building the image yourself"

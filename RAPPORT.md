@@ -1,5 +1,7 @@
 # DumbMonit — rapport du 16 septembre 2026
 
+**Mise à jour 16/09 soir** : les points 1, 2, 3, 4, 5, 6 ci-dessous et la faille OIDC sont **corrigés** (commit `47fb461`, vérifiés en live : 0 alerte fantôme, commandes expirées, agent ancien signalé, mobile OK). Tag `v0.1.0-alpha.1` posé → image `ghcr.io/noekan/dumbmonit:latest` (à rendre publique sur GitHub → Packages → dumbmonit → Change visibility).
+
 Tout ce qui était demandé est construit, testé et poussé (`main`, image mono-conteneur sur http://localhost:8080, login `admin` / `dumbmonit-dev-2026`).
 
 ## Ce qui marche (vérifié sur le lab Docker + nuci3 + Windows)
