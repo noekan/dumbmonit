@@ -41,7 +41,7 @@ save it again.
 
 A window can also be limited by exact label matches (`matchers` in the API):
 all of them must match the alert's labels, for example `tag_role = lab` and
-`__name__ = ezymonit_up`. A window with no device and no matcher silences the
+`__name__ = dumbmonit_up`. A window with no device and no matcher silences the
 whole instance. Overlapping windows are fine; the first one that covers the
 moment explains the silence.
 

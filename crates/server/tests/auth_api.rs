@@ -110,7 +110,7 @@ async fn a_forged_cookie_is_worthless() {
     // Même identifiant de session, jeton inventé : la comparaison de l'empreinte
     // doit échouer.
     let id = real.split_once('=').unwrap().1.split_once('.').unwrap().0.to_string();
-    let forged = format!("ezymonit_session={id}.{}", "0".repeat(64));
+    let forged = format!("dumbmonit_session={id}.{}", "0".repeat(64));
     assert_eq!(app.get("/api/targets", Some(&forged)).await.status, StatusCode::UNAUTHORIZED);
     assert_eq!(app.get("/api/targets", Some(&real)).await.status, StatusCode::OK);
 }
@@ -466,7 +466,7 @@ async fn nobody_deletes_their_own_account() {
 
 #[tokio::test]
 async fn a_legacy_instance_password_becomes_the_admin_account() {
-    use ezymonit_server::auth::password;
+    use dumbmonit_server::auth::password;
     use sha2::{Digest, Sha256};
 
     let dir = tempfile::tempdir().expect("répertoire temporaire");
@@ -475,7 +475,7 @@ async fn a_legacy_instance_password_becomes_the_admin_account() {
     // Une base telle que la version précédente la laissait : un mot de passe
     // d'instance et une session ouverte.
     {
-        let old = ezymonit_server::db::open_up_to(&config.database_path(), 6)
+        let old = dumbmonit_server::db::open_up_to(&config.database_path(), 6)
             .await
             .expect("base ancienne");
         let hash = password::hash(PASSWORD.to_string()).await.unwrap();
@@ -495,7 +495,7 @@ async fn a_legacy_instance_password_becomes_the_admin_account() {
         old.close().await;
     }
 
-    let pool = ezymonit_server::db::open(&config.database_path()).await.expect("migration");
+    let pool = dumbmonit_server::db::open(&config.database_path()).await.expect("migration");
     let app = common::build(dir, config, pool).await;
 
     // L'instance est toujours configurée, et l'ancien mot de passe ouvre le
@@ -510,7 +510,7 @@ async fn a_legacy_instance_password_becomes_the_admin_account() {
     assert_eq!(users.body[0]["role"], json!("admin"));
 
     // La session ouverte avant la migration appartient désormais à ce compte.
-    let legacy = "ezymonit_session=legacy.secret-de-session";
+    let legacy = "dumbmonit_session=legacy.secret-de-session";
     let status = app.get("/api/auth/status", Some(legacy)).await;
     assert_eq!(status.body["authenticated"], json!(true), "{}", status.body);
     assert_eq!(status.body["user"]["username"], json!("admin"));

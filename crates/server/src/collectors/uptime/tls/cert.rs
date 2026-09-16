@@ -129,6 +129,8 @@ mod tests {
         let info = parse_der(&der(EXEMPLE_PEM)).unwrap();
         assert_eq!(info.not_before_s, DEBUT_2024);
         assert_eq!(info.not_after_s, DEBUT_2034);
+        // Le certificat de test a été émis avant le renommage du produit : son
+        // sujet est figé dans le PEM ci-dessus.
         assert_eq!(info.subject, "exemple.ezymonit.test");
         assert_eq!(info.issuer, "exemple.ezymonit.test", "certificat auto-signé");
     }

@@ -15,7 +15,7 @@ pub mod uptime;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use ezymonit_proto::{Collector, MetricKind, ProbeError, Sample, Target};
+use dumbmonit_proto::{Collector, MetricKind, ProbeError, Sample, Target};
 
 pub use agent::AgentCollector;
 pub use dummy::DummyCollector;

@@ -15,7 +15,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use ezymonit_proto::{
+use dumbmonit_proto::{
     AgentCommand, CMD_CONTAINER_RESTART, CMD_CONTAINER_UPDATE, CommandReport, CommandStatus,
 };
 use serde_json::{Map, Value, json};
@@ -31,7 +31,9 @@ pub const RESULT_MAX_BYTES: usize = 4096;
 
 /// Conteneurs que le serveur ne peut pas toucher : ceux de la supervision
 /// elle-même. Un « redémarre-toi » venu de l'interface finirait en boucle.
-const RESERVED_PREFIXES: [&str; 2] = ["ezymonit", "dumbmonit"];
+// `ezymonit` reste réservé : des conteneurs créés avant le renommage portent
+// encore ce nom.
+const RESERVED_PREFIXES: [&str; 2] = ["dumbmonit", "ezymonit"];
 
 /// Suffixe du nom donné à l'ancien conteneur pendant la mise à jour.
 const PREVIOUS_SUFFIX: &str = ".previous";
@@ -794,6 +796,7 @@ mod tests {
 
     #[test]
     fn the_monitoring_stack_cannot_be_managed_remotely() {
+        assert!(validate_name("dumbmonit-dumbmonit-1").is_err());
         assert!(validate_name("ezymonit-ezymonit-1").is_err());
         assert!(validate_name("DumbMonit").is_err());
         assert!(validate_name("vaultwarden").is_ok());
@@ -872,14 +875,14 @@ mod tests {
             "HostConfig": {
                 "Binds": ["/srv/web:/usr/share/nginx/html:ro"],
                 "RestartPolicy": {"Name": "unless-stopped", "MaximumRetryCount": 0},
-                "NetworkMode": "ezymonit_default"
+                "NetworkMode": "dumbmonit_default"
             },
             "Mounts": [
                 {"Type": "bind", "Source": "/srv/web", "Destination": "/usr/share/nginx/html", "RW": false},
                 {"Type": "volume", "Name": "0f1e2d3c", "Destination": "/var/cache/nginx", "RW": true}
             ],
             "NetworkSettings": {"Networks": {
-                "ezymonit_default": {
+                "dumbmonit_default": {
                     "Aliases": ["lab-victim", "lab-victim", "45dd9effdb61"],
                     "IPAMConfig": null, "Links": null, "DriverOpts": null,
                     "IPAddress": "172.20.0.12", "EndpointID": "37c4", "NetworkID": "04eb"
@@ -917,12 +920,12 @@ mod tests {
         let (network, endpoint) = endpoints.iter().next().unwrap();
         let (extra_network, extra_endpoint) = &spec.extra_networks[0];
         let names = [network.as_str(), extra_network.as_str()];
-        assert!(names.contains(&"ezymonit_default") && names.contains(&"backend"));
+        assert!(names.contains(&"dumbmonit_default") && names.contains(&"backend"));
         for endpoint in [endpoint, extra_endpoint] {
             assert!(endpoint.get("IPAddress").is_none());
             assert!(endpoint.get("EndpointID").is_none());
         }
-        let default = if network == "ezymonit_default" { endpoint } else { extra_endpoint };
+        let default = if network == "dumbmonit_default" { endpoint } else { extra_endpoint };
         assert_eq!(default["Aliases"], json!(["lab-victim"]));
         assert!(default.get("IPAMConfig").is_none(), "a null IPAMConfig is dropped");
         let backend = if network == "backend" { endpoint } else { extra_endpoint };
@@ -986,12 +989,12 @@ mod tests {
     }
 
     fn client() -> PushClient {
-        PushClient::new("http://127.0.0.1:1", "ezym_test", Duration::from_secs(1)).expect("client")
+        PushClient::new("http://127.0.0.1:1", "dmon_test", Duration::from_secs(1)).expect("client")
     }
 
     #[tokio::test]
     async fn a_disabled_runner_never_polls() {
-        let socket = Path::new("/tmp/ezymonit-no-such-socket.sock");
+        let socket = Path::new("/tmp/dumbmonit-no-such-socket.sock");
         let mut runner = CommandRunner::new(false, client(), "key".into(), socket);
         runner.poll().await;
         assert!(!runner.is_busy());
@@ -1000,7 +1003,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_unreachable_server_is_not_an_error() {
-        let socket = Path::new("/tmp/ezymonit-no-such-socket.sock");
+        let socket = Path::new("/tmp/dumbmonit-no-such-socket.sock");
         let mut runner = CommandRunner::new(true, client(), "key".into(), socket);
         runner.poll().await;
         assert!(!runner.is_busy());
@@ -1013,7 +1016,7 @@ mod tests {
             return;
         }
         let mut log = Log::default();
-        let error = restart(&docker, "ezymonit-test-no-such-container", &mut log)
+        let error = restart(&docker, "dumbmonit-test-no-such-container", &mut log)
             .await
             .unwrap_err()
             .to_string();

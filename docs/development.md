@@ -1,8 +1,9 @@
 # Development
 
 DumbMonit is one Rust binary (`crates/server`, which embeds the SvelteKit
-build) plus VictoriaMetrics for time series and an embedded SQLite database for
-configuration and state. Rust code and comments are in French; the web UI is
+build) plus VictoriaMetrics for time series, started by the server from the
+binary shipped in the image, and an embedded SQLite database for configuration
+and state. One container. Rust code and comments are in French; the web UI is
 in English.
 
 ## Project layout
@@ -14,11 +15,11 @@ crates/server    the binary
   auth/          single instance password, HttpOnly session cookie, rate limit
   collectors/    snmp (profiles/*.yaml loaded at startup), proxmox, pbs, synology, agent, uptime
   scheduler.rs   runs every enabled target on its interval through the collector registry
-  tsdb/          VictoriaMetrics writer (batched flush) + query proxy
+  tsdb/          VictoriaMetrics writer (batched flush) + query proxy; embedded.rs supervises the child VictoriaMetrics
   db/            SQLite + numbered migrations in db/migrations/
   alerting/      rules, state machine (Phase/EffectivePhase), suppression by parent, silences, seasonal baseline
   notify/        22 notification channels, described to the UI by notify/catalog.rs
-  crypto.rs      AES-256-GCM for credentials/tokens, key derived from /data/secret.key or EZYMONIT_SECRET
+  crypto.rs      AES-256-GCM for credentials/tokens, key derived from /data/secret.key or DUMBMONIT_SECRET
 crates/agent     Linux/Windows agent; install/ holds install.sh/.ps1 served by the server
 web/             SvelteKit (Svelte 5 runes, Tailwind 4, uPlot), adapter-static SPA fallback, ssr=false
 profiles/        SNMP collection profiles, auto-applied by sysObjectID
@@ -32,16 +33,16 @@ Compilation happens in Docker; nothing Rust needs to be installed on the host.
 ```bash
 # Full stack (builds the image: about 10 min cold) — UI on http://localhost:8080
 docker compose up -d --build
-# + lab SNMP agent (address `snmp-lab`, community `public`) and VictoriaMetrics on :8428
+# + lab SNMP agent (address `snmp-lab`, community `public`); the embedded VictoriaMetrics is published on :8428
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 # Rust, inside the builder stage (musl/alpine)
-docker build -t ezymonit-devenv --target builder .
-docker run --rm -v "$PWD:/build" -w /build ezymonit-devenv cargo test
-docker run --rm -v "$PWD:/build" -w /build ezymonit-devenv cargo test -p ezymonit-server --test alerts_api   # one integration test file
-docker run --rm -v "$PWD:/build" -w /build ezymonit-devenv cargo test -p ezymonit-server test_name          # one test by name
-docker run --rm -v "$PWD:/build" -w /build ezymonit-devenv cargo clippy --all-targets --all-features -- -D warnings
-docker run --rm -v "$PWD:/build" -w /build ezymonit-devenv cargo fmt --all --check
+docker build -t dumbmonit-devenv --target builder .
+docker run --rm -v "$PWD:/build" -w /build dumbmonit-devenv cargo test
+docker run --rm -v "$PWD:/build" -w /build dumbmonit-devenv cargo test -p dumbmonit-server --test alerts_api   # one integration test file
+docker run --rm -v "$PWD:/build" -w /build dumbmonit-devenv cargo test -p dumbmonit-server test_name          # one test by name
+docker run --rm -v "$PWD:/build" -w /build dumbmonit-devenv cargo clippy --all-targets --all-features -- -D warnings
+docker run --rm -v "$PWD:/build" -w /build dumbmonit-devenv cargo fmt --all --check
 ```
 
 With Rust installed locally, `cargo test` and `cargo clippy -- -D warnings`
@@ -107,7 +108,7 @@ without network.
    list (key, label, help, placeholder, default, input, choices). The UI builds
    its form from this; a test there checks every registered kind has a notice
    and that the option keys match what the collector reads.
-5. Name metrics `<what>_<unit>` without the `ezymonit_` prefix (the writer
+5. Name metrics `<what>_<unit>` without the `dumbmonit_` prefix (the writer
    adds it) and add any new metric a built-in rule targets to the list in
    `alerting/rules.rs` tests.
 6. Add a page under `docs/devices/`.
@@ -137,7 +138,7 @@ timestamp_ms)` with `.with_label(k, v)`; identity labels (`target`, `host`,
 
 `.claude/skills/headless-browser/SKILL.md` describes how to render every page
 in a headless Chromium running in Docker (`zenika/alpine-chrome:with-puppeteer`,
-no local browser needed): log in with `curl` to get the `ezymonit_session`
+no local browser needed): log in with `curl` to get the `dumbmonit_session`
 cookie, then run `web/tools/screenshot.js` against the preview server or
 directly against `:8080`. It writes `web/shots/<page>-<theme>-<viewport>.png`
 for both themes and both viewports, which is how the UI is checked after a
@@ -174,7 +175,7 @@ network:
 |---|---|---|
 | `snmp-ups`, `snmp-printer`, `snmp-switch` | snmpsim replaying hand-written `.snmprec` files: an APC UPS (UPS-MIB), an HP LaserJet (PRINTER-MIB), an 8-port Netgear switch (IF-MIB, one port down with errors). Counters increase in real time. Community = file name (`ups`, `printer`, `switch`); `public` works too, so the discovery scan finds them. | kind `snmp`, address `snmp-ups` / `snmp-printer` / `snmp-switch`, community as above |
 | `fake-pve`, `fake-pbs`, `fake-synology` | Python (stdlib) HTTP servers answering exactly the endpoints the `proxmox`, `pbs` and `synology` collectors call, with realistic JSON, API-token / ticket / session authentication, plain HTTP. | `proxmox` → `http://fake-pve:8006`, token `monitoring@pve!dumbmonit=8f3a1c9e-1ab0-4000-8000-d0bb0000c0de`; `pbs` → `http://fake-pbs:8007`, token `monitoring@pbs!dumbmonit=5c1d2e3f-1ab0-4000-8000-d0bb0000c0de`; `synology` → `fake-synology`, tags `scheme=http` `port=5000`, user `monitoring` / `lab-password` |
-| `dex` + `glauth` | OpenID Connect provider with two LDAP users: `admin@lab.local` (group `dumbmonit-admins` → admin) and `viewer@lab.local` (viewer), password `password`. Client `dumbmonit` / `dumbmonit-lab-secret`. | The overlay sets `EZYMONIT_OIDC_*` on the server; see the issuer note below |
+| `dex` + `glauth` | OpenID Connect provider with two LDAP users: `admin@lab.local` (group `dumbmonit-admins` → admin) and `viewer@lab.local` (viewer), password `password`. Client `dumbmonit` / `dumbmonit-lab-secret`. | The overlay sets `DUMBMONIT_OIDC_*` on the server; see the issuer note below |
 | `mailpit`, `ntfy` | SMTP sink with a web UI on <http://localhost:8025>; ntfy on <http://localhost:8090> | channels `smtp` (host `mailpit`, port 1025, security `none`) and `ntfy` (server `http://ntfy:80`, topic `dumbmonit-lab`) |
 | `lab-victim` | `nginx:1.25-alpine` with the label `dumbmonit.autorestart=true`, for the agent's Docker restart / update actions (the update pulls `nginx:1.27-alpine`) | `http` → `http://lab-victim/` |
 
@@ -188,13 +189,13 @@ recording: change the device's community to `ups-onbattery`.
 by the browser, so it must resolve for both. The default `http://dex:5556/dex`
 works once the host's `/etc/hosts` contains `127.0.0.1 dex` (port 5556 is
 published). On a LAN, `LAB_DEX_ISSUER=http://<host-ip>:5556/dex` for both
-`dex` and `ezymonit` avoids the hosts entry. Dex requests the `groups` scope
-through `EZYMONIT_OIDC_SCOPES`; without it the role mapping has nothing to read.
+`dex` and `dumbmonit` avoids the hosts entry. Dex requests the `groups` scope
+through `DUMBMONIT_OIDC_SCOPES`; without it the role mapping has nothing to read.
 
 Checking the lab from the command line, after a minute:
 
 ```bash
 curl -s -b cookie localhost:8080/api/targets | jq '.[] | select(.name | startswith("Lab ")) | {name, profile_id, last_error}'
-curl -s -b cookie --get --data-urlencode 'query=ezymonit_up{host=~"Lab .*"}' localhost:8080/api/metrics/query
-docker run --rm --network ezymonit_default alpine sh -c 'apk add -q net-snmp-tools && snmpwalk -v2c -c ups snmp-ups 1.3.6.1.2.1.33'
+curl -s -b cookie --get --data-urlencode 'query=dumbmonit_up{host=~"Lab .*"}' localhost:8080/api/metrics/query
+docker run --rm --network dumbmonit_default alpine sh -c 'apk add -q net-snmp-tools && snmpwalk -v2c -c ups snmp-ups 1.3.6.1.2.1.33'
 ```

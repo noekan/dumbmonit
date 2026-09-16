@@ -274,7 +274,7 @@ impl Rule {
 
 /// Vue minimale d'une cible, suffisante pour l'alerting.
 ///
-/// Le moteur ne dépend volontairement pas de `ezymonit_proto::Target` : il n'a
+/// Le moteur ne dépend volontairement pas de `dumbmonit_proto::Target` : il n'a
 /// besoin que de la filiation et des étiquettes, et les charger lui-même évite de
 /// déchiffrer des identifiants d'équipement qu'il n'utilisera jamais.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -412,18 +412,18 @@ mod tests {
     #[test]
     fn la_cle_de_serie_reprend_le_format_prometheus() {
         let labels: BTreeMap<String, String> =
-            [("__name__", "ezymonit_cpu_usage_percent"), ("host", "nas"), ("core", "0")]
+            [("__name__", "dumbmonit_cpu_usage_percent"), ("host", "nas"), ("core", "0")]
                 .iter()
                 .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
                 .collect();
-        assert_eq!(series_key(&labels), "ezymonit_cpu_usage_percent{core=\"0\",host=\"nas\"}");
+        assert_eq!(series_key(&labels), "dumbmonit_cpu_usage_percent{core=\"0\",host=\"nas\"}");
     }
 
     #[test]
     fn une_serie_sans_etiquette_garde_son_nom_seul() {
         let labels: BTreeMap<String, String> =
-            [("__name__".to_string(), "ezymonit_up".to_string())].into_iter().collect();
-        assert_eq!(series_key(&labels), "ezymonit_up");
+            [("__name__".to_string(), "dumbmonit_up".to_string())].into_iter().collect();
+        assert_eq!(series_key(&labels), "dumbmonit_up");
     }
 
     #[test]

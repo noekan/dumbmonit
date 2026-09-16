@@ -33,7 +33,7 @@ exists, or a channel with the same name, is skipped. Needs `curl` and `python3`.
 
 The SNMP simulators reply to the `public` community as well, so the network
 discovery scan (`Devices → Scan`, or `GET /api/discovery?cidr=172.20.0.0/24`) finds
-them — check the subnet with `docker network inspect ezymonit_default`.
+them — check the subnet with `docker network inspect dumbmonit_default`.
 
 ## Devices created by `seed.sh`
 
@@ -134,7 +134,7 @@ the admin mapping is the point of the test:
 | `admin@lab.local` | `password` | `dumbmonit-admins`, `people` | admin |
 | `viewer@lab.local` | `password` | `people` | viewer |
 
-The overlay already sets `EZYMONIT_OIDC_*` on the server (issuer, client,
+The overlay already sets `DUMBMONIT_OIDC_*` on the server (issuer, client,
 provider name "Lab Dex", scopes `openid profile email groups`, admin group
 `dumbmonit-admins`) — the *Log in with Lab Dex* button appears once the server
 container is (re)created with the overlay.
@@ -147,7 +147,7 @@ tokens from it, while the browser is sent to its login page. Two working setups:
    `127.0.0.1 dex`. The browser then resolves `dex` to the published port 5556,
    the server resolves it through Docker's DNS. Zero configuration otherwise.
 2. On a LAN, set the issuer to the host's address for both containers:
-   `LAB_DEX_ISSUER=http://192.168.10.254:5556/dex docker compose … up -d dex ezymonit`.
+   `LAB_DEX_ISSUER=http://192.168.10.254:5556/dex docker compose … up -d dex dumbmonit`.
    The server reaches the host's IP from inside Docker, the browser too, and no
    hosts file entry is needed (change the IP to yours).
 

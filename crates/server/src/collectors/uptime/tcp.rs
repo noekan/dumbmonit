@@ -20,7 +20,7 @@
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use ezymonit_proto::{Collector, ProbeError, Sample, Target};
+use dumbmonit_proto::{Collector, ProbeError, Sample, Target};
 use tokio::net::TcpStream;
 use tracing::debug;
 

@@ -10,7 +10,7 @@ The collection profile is detected automatically from the device's
 `sysObjectID` (and, for UPS, its `sysDescr`). Five profiles ship with the
 product; a device can match several, and the profiles include each other.
 
-| Profile | Applies to | Metrics (prefix `ezymonit_`) |
+| Profile | Applies to | Metrics (prefix `dumbmonit_`) |
 |---|---|---|
 | System (SNMPv2-MIB) | Every device | `system_uptime_seconds`, `system_info` (name, description, location, contact as labels) |
 | Network interfaces (IF-MIB) | Every device, as a fallback | `if_octets_in/out`, `if_packets_in/out`, `if_errors_in/out`, `if_discards_in/out`, `if_admin_status`, `if_oper_status`, `if_speed_bps`, per interface |

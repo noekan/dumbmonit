@@ -14,13 +14,13 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use chrono::Utc;
-use ezymonit_server::alerting::cycle::HistoryEntry;
-use ezymonit_server::alerting::group::AlertOutcome;
-use ezymonit_server::alerting::machine::{AlertState, Phase, Transition};
-use ezymonit_server::alerting::model::Severity;
-use ezymonit_server::config::Config;
-use ezymonit_server::state::{AppState, Inner};
-use ezymonit_server::{api, collectors, db, tsdb};
+use dumbmonit_server::alerting::cycle::HistoryEntry;
+use dumbmonit_server::alerting::group::AlertOutcome;
+use dumbmonit_server::alerting::machine::{AlertState, Phase, Transition};
+use dumbmonit_server::alerting::model::Severity;
+use dumbmonit_server::config::Config;
+use dumbmonit_server::state::{AppState, Inner};
+use dumbmonit_server::{api, collectors, db, tsdb};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
@@ -47,7 +47,7 @@ async fn setup() -> TestApp {
 
     let mut config = Config::from_env().expect("default configuration");
     config.data_dir = dir.path().to_path_buf();
-    config.victoria_url = UNREACHABLE_VICTORIA.to_string();
+    config.victoria_url = Some(UNREACHABLE_VICTORIA.to_string());
 
     let pool = db::open(&config.database_path()).await.expect("database opened");
     let cipher = db::init_cipher(&pool, SECRET).await.expect("cipher initialised");
@@ -112,7 +112,7 @@ impl TestApp {
     async fn create_rule(&self, name: &str, extra: Value) -> Value {
         let mut payload = json!({
             "name": name,
-            "query": "ezymonit_cpu_usage_percent",
+            "query": "dumbmonit_cpu_usage_percent",
             "operator": ">",
             "threshold": 90.0,
             "for_secs": 300,
@@ -181,7 +181,7 @@ async fn a_rule_can_be_created_read_updated_and_deleted() {
             Some(json!({
                 "uid": "cpu_saturated",
                 "name": "CPU very saturated",
-                "query": "ezymonit_cpu_usage_percent",
+                "query": "dumbmonit_cpu_usage_percent",
                 "operator": ">=",
                 "threshold": 95.0,
                 "for_secs": 600,
@@ -333,7 +333,7 @@ async fn the_active_alerts_route_exposes_the_effective_phase() {
         rule_name: "CPU".to_string(),
         target_id: Some(7),
         target_name: "nas".to_string(),
-        series_key: "ezymonit_cpu_usage_percent{host=\"nas\"}".to_string(),
+        series_key: "dumbmonit_cpu_usage_percent{host=\"nas\"}".to_string(),
         labels: BTreeMap::from([("host".to_string(), "nas".to_string())]),
         state: AlertState {
             phase: Phase::Firing,

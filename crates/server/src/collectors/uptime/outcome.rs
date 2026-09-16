@@ -14,7 +14,7 @@
 //!    le service ne rend pas son office. Renvoyer `Ok` sans plus le rendrait
 //!    invisible.
 //! 2. **Un taux de disponibilité se calcule sur des points, pas sur des trous.**
-//!    `avg_over_time(ezymonit_probe_success[30d])` ignore purement et simplement
+//!    `avg_over_time(dumbmonit_probe_success[30d])` ignore purement et simplement
 //!    les intervalles sans échantillon. Si une panne se traduisait par l'absence
 //!    d'écriture, une coupure de trois jours ne ferait pas bouger le pourcentage
 //!    d'un iota — exactement le chiffre que l'utilisateur vient chercher.
@@ -33,7 +33,7 @@
 //! Conséquence assumée : sur ces cibles, `up = 1` signifie « le moniteur a tourné »
 //! et non « le service va bien ». C'est cohérent — le collecteur a bien fait son
 //! travail — et cela donne deux signaux distincts au lieu d'un seul confus :
-//! `probe_success = 0` dit que le service est tombé, l'interruption de `ezymonit_up`
+//! `probe_success = 0` dit que le service est tombé, l'interruption de `dumbmonit_up`
 //! dit que c'est la surveillance elle-même qui est tombée. L'interface et les
 //! règles d'alerte doivent donc s'appuyer sur `probe_success` pour ces types de
 //! cibles, jamais sur `up`.
@@ -44,12 +44,12 @@
 
 use std::time::Instant;
 
-use ezymonit_proto::{MetricKind, Sample};
+use dumbmonit_proto::{MetricKind, Sample};
 
 /// Préfixe commun à toutes les métriques de disponibilité.
 ///
 /// Il est volontairement identique d'une sonde à l'autre : une règle unique
-/// (`ezymonit_probe_success == 0`) couvre alors HTTP, TCP, DNS, ICMP et TLS, et
+/// (`dumbmonit_probe_success == 0`) couvre alors HTTP, TCP, DNS, ICMP et TLS, et
 /// l'étiquette `probe` permet de restreindre quand c'est utile.
 pub const PREFIX: &str = "probe_";
 

@@ -47,7 +47,7 @@
 //! | `insecure_tls` | `false` | Accepte un certificat non vérifiable. |
 //! | `check_certificate` | `true` | Relève le certificat (HTTPS seulement). |
 //! | `max_body_bytes` | `524288` | Corps rapatrié au plus, pour les vérifications. |
-//! | `user_agent` | `EzyMonit/…` | En-tête `User-Agent`. |
+//! | `user_agent` | `DumbMonit/…` | En-tête `User-Agent`. |
 //! | `timeout_seconds` | `5` | Budget total de la sonde (1 à 60). |
 //!
 //! L'authentification vient de l'identifiant de la cible, jamais d'une étiquette :
@@ -63,7 +63,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use ezymonit_proto::{Collector, Credential, ProbeError, Sample, Target};
+use dumbmonit_proto::{Collector, Credential, ProbeError, Sample, Target};
 use reqwest::header::USER_AGENT;
 use reqwest::redirect::Policy;
 use reqwest::{Client, Response};

@@ -27,7 +27,7 @@ mod token;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use ezymonit_proto::{Collector, MetricKind, ProbeError, Sample, Target};
+use dumbmonit_proto::{Collector, MetricKind, ProbeError, Sample, Target};
 use sqlx::SqlitePool;
 
 pub use policy::spawn_policy_scheduler;
@@ -126,7 +126,7 @@ impl Collector for AgentCollector {
 
 #[cfg(test)]
 mod tests {
-    use ezymonit_proto::Credential;
+    use dumbmonit_proto::Credential;
 
     use super::*;
 
@@ -153,7 +153,7 @@ mod tests {
             .expect("chiffrement");
 
         let (token_record, _) = store::create_token(&pool, "parc").await.expect("jeton");
-        let identity = ezymonit_proto::AgentIdentity {
+        let identity = dumbmonit_proto::AgentIdentity {
             hostname: "nas".into(),
             os: "linux".into(),
             os_version: None,

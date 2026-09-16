@@ -9,7 +9,7 @@ use crate::auth::session::SessionToken;
 
 /// Nom du cookie. Préfixé par le produit pour ne pas entrer en collision avec un
 /// autre service hébergé sur le même domaine.
-pub const NAME: &str = "ezymonit_session";
+pub const NAME: &str = "dumbmonit_session";
 
 /// Trente jours, en accord avec la durée de vie de la session en base. Le
 /// navigateur oublie le cookie au moment même où le serveur oublie la session.
@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn the_cookie_is_read_among_others() {
-        let headers = headers_with_cookie("theme=dark; ezymonit_session=abc.def; lang=fr");
+        let headers = headers_with_cookie("theme=dark; dumbmonit_session=abc.def; lang=fr");
         let token = extract(&headers).expect("jeton présent");
         assert_eq!(token.cookie_value(), "abc.def");
     }
@@ -80,12 +80,12 @@ mod tests {
     fn an_absent_or_unusable_cookie_yields_nothing() {
         assert!(extract(&HeaderMap::new()).is_none());
         assert!(extract(&headers_with_cookie("theme=dark")).is_none());
-        assert!(extract(&headers_with_cookie("ezymonit_session=sans-point")).is_none());
+        assert!(extract(&headers_with_cookie("dumbmonit_session=sans-point")).is_none());
     }
 
     #[test]
     fn the_attributes_match_the_intent() {
-        let headers = headers_with_cookie("ezymonit_session=abc.def");
+        let headers = headers_with_cookie("dumbmonit_session=abc.def");
         let token = extract(&headers).unwrap();
 
         let posed = set(&token, false).to_str().unwrap().to_string();

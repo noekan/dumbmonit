@@ -23,7 +23,7 @@
 //! « aucune sauvegarde réussie depuis trop longtemps ».
 
 use chrono::NaiveDateTime;
-use ezymonit_proto::{MetricKind, Sample};
+use dumbmonit_proto::{MetricKind, Sample};
 
 use super::model::{BackupStatus, BackupTask};
 
@@ -79,7 +79,7 @@ pub fn parse_dsm_datetime(raw: &str) -> Option<NaiveDateTime> {
 /// Analyse l'heure courante du NAS, telle que `SYNO.Core.System.info` la renvoie.
 ///
 /// C'est la référence sans laquelle aucune ancienneté n'est calculable : l'horloge
-/// du serveur EzyMonit est en temps universel, celle du NAS en heure locale, et
+/// du serveur DumbMonit est en temps universel, celle du NAS en heure locale, et
 /// rien dans la réponse ne donne l'écart entre les deux.
 pub fn parse_nas_clock(raw: &str) -> Option<NaiveDateTime> {
     let raw = raw.trim();

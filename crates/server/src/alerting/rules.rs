@@ -19,18 +19,18 @@ use crate::alerting::model::{
 /// règle livrée fonctionne quel que soit le type d'équipement ajouté, sans que
 /// l'utilisateur ait à écrire quoi que ce soit.
 const CPU_PERCENT: &str = "avg by (target, host) (\
-     ezymonit_cpu_load_percent \
-     or ezymonit_proxmox_node_cpu_percent \
-     or ezymonit_cpu_usage_percent)";
+     dumbmonit_cpu_load_percent \
+     or dumbmonit_proxmox_node_cpu_percent \
+     or dumbmonit_cpu_usage_percent)";
 
 /// Taux de remplissage des systèmes de fichiers.
 ///
 /// SNMP expose des octets utilisés et totaux (HOST-RESOURCES-MIB), pas un
 /// pourcentage : il est calculé ici. Proxmox fournit déjà le taux.
 const FS_USED_PERCENT: &str = "(\
-     100 * ezymonit_storage_bytes_used / ezymonit_storage_bytes_total \
-     or ezymonit_proxmox_storage_used_percent \
-     or ezymonit_proxmox_node_rootfs_percent)";
+     100 * dumbmonit_storage_bytes_used / dumbmonit_storage_bytes_total \
+     or dumbmonit_proxmox_storage_used_percent \
+     or dumbmonit_proxmox_node_rootfs_percent)";
 
 /// Rappel par défaut : six heures. Assez pour ne pas oublier une panne en cours,
 /// assez peu pour ne pas devenir du bruit pendant une semaine de vacances.
@@ -86,7 +86,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 RULE_HOST_DOWN,
                 "Device unreachable",
                 RuleKind::Threshold,
-                "time() - tlast_over_time(ezymonit_up[7d])",
+                "time() - tlast_over_time(dumbmonit_up[7d])",
             )
         },
         // Processeur élevé. L'agrégation ramène les cœurs à une seule série par
@@ -132,7 +132,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 // upsOutputSource : 5 = batterie (RFC 1628). La comparaison rend une
                 // série valant 1 seulement quand la condition est vraie, ce qui donne
                 // bien « supérieur à 0 » comme test de déclenchement.
-                "ezymonit_ups_output_source == 5",
+                "dumbmonit_ups_output_source == 5",
             )
         },
         // Prédictif : tout le calcul est fait par VictoriaMetrics. Le `and deriv(...)`
@@ -178,7 +178,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "UPS battery low",
                 RuleKind::Threshold,
                 // upsBatteryStatus : 3 = basse, 4 = épuisée (RFC 1628).
-                "ezymonit_ups_battery_status",
+                "dumbmonit_ups_battery_status",
             )
         },
         // Sauvegarde Proxmox trop ancienne. C'est le genre de panne silencieuse qui
@@ -195,7 +195,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "backup_too_old",
                 "Backup too old",
                 RuleKind::Threshold,
-                "ezymonit_proxmox_backup_last_age_seconds",
+                "dumbmonit_proxmox_backup_last_age_seconds",
             )
         },
         // Proxmox Backup Server. Les seuils sont ceux d'un homelab qui sauvegarde
@@ -213,7 +213,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pbs_datastore_almost_full",
                 "PBS datastore almost full",
                 RuleKind::Threshold,
-                "ezymonit_pbs_datastore_used_percent",
+                "dumbmonit_pbs_datastore_used_percent",
             )
         },
         // L'estimation est calculée par PBS lui-même sur un mois de mesures : elle
@@ -231,7 +231,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pbs_datastore_will_be_full",
                 "PBS datastore filling up",
                 RuleKind::Threshold,
-                "ezymonit_pbs_datastore_estimated_full_seconds",
+                "dumbmonit_pbs_datastore_estimated_full_seconds",
             )
         },
         // Même logique que `backup_too_old` côté PVE, par groupe de sauvegarde.
@@ -247,7 +247,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pbs_backup_too_old",
                 "PBS backup too old",
                 RuleKind::Threshold,
-                "ezymonit_pbs_backup_last_age_seconds",
+                "dumbmonit_pbs_backup_last_age_seconds",
             )
         },
         // Critique : une sauvegarde dont la vérification échoue est une sauvegarde
@@ -267,7 +267,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pbs_backup_verification_failed",
                 "PBS backup verification failed",
                 RuleKind::Threshold,
-                "ezymonit_pbs_backup_last_verified",
+                "dumbmonit_pbs_backup_last_verified",
             )
         },
         Rule {
@@ -281,7 +281,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pbs_task_failed",
                 "PBS task failed",
                 RuleKind::Threshold,
-                "ezymonit_pbs_tasks_failed",
+                "dumbmonit_pbs_tasks_failed",
             )
         },
         // Sans GC, les blocs des instantanés supprimés ne sont jamais libérés et
@@ -300,7 +300,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pbs_gc_too_old",
                 "PBS garbage collection too old",
                 RuleKind::Threshold,
-                "ezymonit_pbs_gc_last_success_age_seconds",
+                "dumbmonit_pbs_gc_last_success_age_seconds",
             )
         },
         // Moniteurs de disponibilité. Contrairement au matériel, un service en
@@ -319,7 +319,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "service_down",
                 "Service down",
                 RuleKind::Threshold,
-                "ezymonit_probe_success == bool 0",
+                "dumbmonit_probe_success == bool 0",
             )
         },
         // Instabilité : un service qui alterne sans cesse n'est jamais « en panne »
@@ -336,7 +336,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "service_flapping",
                 "Service flapping",
                 RuleKind::Threshold,
-                "changes(ezymonit_probe_success[30m])",
+                "changes(dumbmonit_probe_success[30m])",
             )
         },
         // Lenteur : le défaut de délai des sondes est de 5 s, au-delà elles échouent
@@ -352,7 +352,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "service_slow",
                 "Slow service",
                 RuleKind::Threshold,
-                "ezymonit_probe_duration_seconds",
+                "dumbmonit_probe_duration_seconds",
             )
         },
         // Certificats. Les deux règles sont disjointes (`>= 0` / `< 0`) pour qu'un
@@ -369,7 +369,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "tls_cert_expiring",
                 "Certificate expiring soon",
                 RuleKind::Threshold,
-                "ezymonit_probe_ssl_cert_expiry_days >= 0",
+                "dumbmonit_probe_ssl_cert_expiry_days >= 0",
             )
         },
         Rule {
@@ -384,7 +384,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "tls_cert_expired",
                 "Certificate expired",
                 RuleKind::Threshold,
-                "ezymonit_probe_ssl_cert_expiry_days < 0",
+                "dumbmonit_probe_ssl_cert_expiry_days < 0",
             )
         },
         // Conteneurs Docker, vus par l'agent. Chaque série porte le nom du
@@ -403,7 +403,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 // `== bool` rend 1 quand le conteneur est arrêté, 0 sinon ; sans
                 // `bool`, MetricsQL renverrait la valeur de gauche — 0 — qu'un
                 // seuil « > 0 » ne verrait jamais. Voir `service_down`.
-                "ezymonit_container_up == bool 0",
+                "dumbmonit_container_up == bool 0",
             )
         },
         Rule {
@@ -419,7 +419,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "Container unhealthy",
                 RuleKind::Threshold,
                 // 2 = unhealthy (0 none, 1 healthy, 3 starting).
-                "ezymonit_container_health == 2",
+                "dumbmonit_container_health == 2",
             )
         },
         // Un conteneur qui redémarre en boucle est rarement « arrêté » assez
@@ -436,7 +436,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "container_restarting",
                 "Container restarting",
                 RuleKind::Threshold,
-                "increase(ezymonit_container_restart_count[15m])",
+                "increase(dumbmonit_container_restart_count[15m])",
             )
         },
         // Information, pas panne : une image plus récente existe dans le dépôt.
@@ -453,7 +453,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "container_update_available",
                 "Container update available",
                 RuleKind::Threshold,
-                "ezymonit_container_update_available == 1",
+                "dumbmonit_container_update_available == 1",
             )
         },
         // Sauvegardes Plakar, par kloset et par source. Mêmes seuils que PBS :
@@ -471,7 +471,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "plakar_backup_too_old",
                 "Plakar backup too old",
                 RuleKind::Threshold,
-                "ezymonit_backup_last_success_seconds",
+                "dumbmonit_backup_last_success_seconds",
             )
         },
         // La série vaut 1 (dernier instantané sans erreur) ou 0 (erreurs, ou
@@ -488,7 +488,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "plakar_backup_failed",
                 "Plakar backup failed",
                 RuleKind::Threshold,
-                "ezymonit_backup_last_status",
+                "dumbmonit_backup_last_status",
             )
         },
         // Active Backup for Business (`collectors/synology/abb.rs`). `last_status`
@@ -508,7 +508,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "synology_abb_task_failed",
                 "Active Backup task failed",
                 RuleKind::Threshold,
-                "ezymonit_abb_task_last_status == bool 0",
+                "dumbmonit_abb_task_last_status == bool 0",
             )
         },
         // Mêmes seuils que les autres sauvegardes : deux jours, c'est une nuit ratée
@@ -528,7 +528,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "synology_abb_backup_too_old",
                 "Active Backup too old",
                 RuleKind::Threshold,
-                "ezymonit_abb_task_last_success_seconds",
+                "dumbmonit_abb_task_last_success_seconds",
             )
         },
         // Information : une tâche sans planning ne sauvegardera plus rien tant que
@@ -547,7 +547,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "synology_abb_task_disabled",
                 "Active Backup task disabled",
                 RuleKind::Threshold,
-                "ezymonit_abb_task_enabled == bool 0",
+                "dumbmonit_abb_task_enabled == bool 0",
             )
         },
         // Proxmox VE, au-delà des sauvegardes. Sévérités : « warning » de la
@@ -570,8 +570,8 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pve_guest_stopped",
                 "VM or container stopped",
                 RuleKind::Threshold,
-                "(1 - ezymonit_proxmox_guest_running) \
-                 and (max_over_time(ezymonit_proxmox_guest_running[2h]) == 1)",
+                "(1 - dumbmonit_proxmox_guest_running) \
+                 and (max_over_time(dumbmonit_proxmox_guest_running[2h]) == 1)",
             )
         },
         // Haute disponibilité : une ressource en `error` ou `fence` ne redémarrera
@@ -587,7 +587,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pve_ha_resource_error",
                 "HA resource in error",
                 RuleKind::Threshold,
-                "ezymonit_proxmox_ha_resource_error",
+                "dumbmonit_proxmox_ha_resource_error",
             )
         },
         // Quorum perdu : plus aucune machine ne peut démarrer sur le cluster, et la
@@ -604,7 +604,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pve_cluster_no_quorum",
                 "Cluster lost quorum",
                 RuleKind::Threshold,
-                "1 - ezymonit_proxmox_cluster_quorate",
+                "1 - dumbmonit_proxmox_cluster_quorate",
             )
         },
         // Nœud hors ligne vu du cluster. Distinct de « équipement injoignable » :
@@ -620,7 +620,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pve_node_offline",
                 "Proxmox node offline",
                 RuleKind::Threshold,
-                "1 - ezymonit_proxmox_node_up",
+                "1 - dumbmonit_proxmox_node_up",
             )
         },
         // Stockage à 85 % : un cran avant « Disk almost full » (90 %), qui reste
@@ -638,7 +638,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pve_storage_almost_full",
                 "Proxmox storage almost full",
                 RuleKind::Threshold,
-                "ezymonit_proxmox_storage_used_percent",
+                "dumbmonit_proxmox_storage_used_percent",
             )
         },
         // Dernier travail de sauvegarde du nœud en échec (tâches `vzdump`).
@@ -653,7 +653,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pve_backup_job_failed",
                 "Backup job failed",
                 RuleKind::Threshold,
-                "1 - ezymonit_proxmox_backup_job_last_ok",
+                "1 - dumbmonit_proxmox_backup_job_last_ok",
             )
         },
         // Instantané oublié : il grossit avec le temps et ralentit la machine, et
@@ -671,7 +671,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pve_snapshot_old",
                 "Old snapshot",
                 RuleKind::Threshold,
-                "ezymonit_proxmox_guest_snapshot_oldest_age_seconds",
+                "dumbmonit_proxmox_guest_snapshot_oldest_age_seconds",
             )
         },
         // Réplication en échec : la copie de secours de la machine n'est plus à
@@ -687,7 +687,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pve_replication_failed",
                 "Replication failed",
                 RuleKind::Threshold,
-                "ezymonit_proxmox_replication_job_error",
+                "dumbmonit_proxmox_replication_job_error",
             )
         },
         // Ceph : 0 OK, 1 WARN, 2 ERR. Les deux règles sont disjointes (`>= 2` et
@@ -703,7 +703,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pve_ceph_health_error",
                 "Ceph health error",
                 RuleKind::Threshold,
-                "ezymonit_proxmox_ceph_health",
+                "dumbmonit_proxmox_ceph_health",
             )
         },
         Rule {
@@ -717,7 +717,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pve_ceph_health_warning",
                 "Ceph health warning",
                 RuleKind::Threshold,
-                "ezymonit_proxmox_ceph_health == 1",
+                "dumbmonit_proxmox_ceph_health == 1",
             )
         },
         // Mises à jour en attente : information, une fois par semaine suffit.
@@ -732,7 +732,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pve_updates_pending",
                 "Proxmox updates pending",
                 RuleKind::Threshold,
-                "ezymonit_proxmox_node_updates_pending",
+                "dumbmonit_proxmox_node_updates_pending",
             )
         },
         // Certificat de l'interface d'un nœud : PVE renouvelle les siens lui-même,
@@ -749,7 +749,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pve_certificate_expiring",
                 "Node certificate expiring",
                 RuleKind::Threshold,
-                "ezymonit_proxmox_node_certificate_expiry_days",
+                "dumbmonit_proxmox_node_certificate_expiry_days",
             )
         },
         // Proxmox Backup Server : synchronisation vers un site distant en échec.
@@ -766,7 +766,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pbs_sync_failed",
                 "PBS sync job failed",
                 RuleKind::Threshold,
-                "ezymonit_pbs_sync_job_last_ok",
+                "dumbmonit_pbs_sync_job_last_ok",
             )
         },
         Rule {
@@ -781,7 +781,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "pbs_updates_pending",
                 "PBS updates pending",
                 RuleKind::Threshold,
-                "ezymonit_pbs_node_updates_pending",
+                "dumbmonit_pbs_node_updates_pending",
             )
         },
     ]
@@ -860,61 +860,61 @@ mod tests {
     #[test]
     fn les_regles_livrees_ne_visent_que_des_metriques_produites() {
         // Noms produits par les profils SNMP (`profiles/*.yaml`), les collecteurs
-        // Proxmox VE et PBS et le registre, préfixe `ezymonit_` inclus.
+        // Proxmox VE et PBS et le registre, préfixe `dumbmonit_` inclus.
         const PRODUITES: &[&str] = &[
-            "ezymonit_up",
-            "ezymonit_cpu_load_percent",
-            "ezymonit_cpu_usage_percent",
-            "ezymonit_storage_bytes_used",
-            "ezymonit_storage_bytes_total",
-            "ezymonit_ups_output_source",
-            "ezymonit_ups_battery_status",
-            "ezymonit_proxmox_node_cpu_percent",
-            "ezymonit_proxmox_node_rootfs_percent",
-            "ezymonit_proxmox_storage_used_percent",
-            "ezymonit_proxmox_backup_last_age_seconds",
+            "dumbmonit_up",
+            "dumbmonit_cpu_load_percent",
+            "dumbmonit_cpu_usage_percent",
+            "dumbmonit_storage_bytes_used",
+            "dumbmonit_storage_bytes_total",
+            "dumbmonit_ups_output_source",
+            "dumbmonit_ups_battery_status",
+            "dumbmonit_proxmox_node_cpu_percent",
+            "dumbmonit_proxmox_node_rootfs_percent",
+            "dumbmonit_proxmox_storage_used_percent",
+            "dumbmonit_proxmox_backup_last_age_seconds",
             // Proxmox Backup Server (`collectors/pbs/metrics.rs`, `backup.rs`).
-            "ezymonit_pbs_datastore_used_percent",
-            "ezymonit_pbs_datastore_estimated_full_seconds",
-            "ezymonit_pbs_backup_last_age_seconds",
-            "ezymonit_pbs_backup_last_verified",
-            "ezymonit_pbs_tasks_failed",
-            "ezymonit_pbs_gc_last_success_age_seconds",
+            "dumbmonit_pbs_datastore_used_percent",
+            "dumbmonit_pbs_datastore_estimated_full_seconds",
+            "dumbmonit_pbs_backup_last_age_seconds",
+            "dumbmonit_pbs_backup_last_verified",
+            "dumbmonit_pbs_tasks_failed",
+            "dumbmonit_pbs_gc_last_success_age_seconds",
             // Moniteurs de disponibilité (`collectors/uptime/outcome.rs`, `tls/mod.rs`).
-            "ezymonit_probe_success",
-            "ezymonit_probe_duration_seconds",
-            "ezymonit_probe_ssl_cert_expiry_days",
+            "dumbmonit_probe_success",
+            "dumbmonit_probe_duration_seconds",
+            "dumbmonit_probe_ssl_cert_expiry_days",
             // Agent : conteneurs Docker et sauvegardes Plakar (`crates/agent`).
-            "ezymonit_container_up",
-            "ezymonit_container_health",
-            "ezymonit_container_restart_count",
-            "ezymonit_container_update_available",
-            "ezymonit_backup_last_success_seconds",
-            "ezymonit_backup_last_status",
+            "dumbmonit_container_up",
+            "dumbmonit_container_health",
+            "dumbmonit_container_restart_count",
+            "dumbmonit_container_update_available",
+            "dumbmonit_backup_last_success_seconds",
+            "dumbmonit_backup_last_status",
             // Synology Active Backup for Business (`collectors/synology/abb.rs`).
-            "ezymonit_abb_task_last_status",
-            "ezymonit_abb_task_last_success_seconds",
-            "ezymonit_abb_task_enabled",
+            "dumbmonit_abb_task_last_status",
+            "dumbmonit_abb_task_last_success_seconds",
+            "dumbmonit_abb_task_enabled",
             // Proxmox VE, parité avec Pulse (`collectors/proxmox/{metrics,ha,
             // snapshots,replication,ceph}.rs`).
-            "ezymonit_proxmox_guest_running",
-            "ezymonit_proxmox_ha_resource_error",
-            "ezymonit_proxmox_cluster_quorate",
-            "ezymonit_proxmox_node_up",
-            "ezymonit_proxmox_backup_job_last_ok",
-            "ezymonit_proxmox_guest_snapshot_oldest_age_seconds",
-            "ezymonit_proxmox_replication_job_error",
-            "ezymonit_proxmox_ceph_health",
-            "ezymonit_proxmox_node_updates_pending",
-            "ezymonit_proxmox_node_certificate_expiry_days",
+            "dumbmonit_proxmox_guest_running",
+            "dumbmonit_proxmox_ha_resource_error",
+            "dumbmonit_proxmox_cluster_quorate",
+            "dumbmonit_proxmox_node_up",
+            "dumbmonit_proxmox_backup_job_last_ok",
+            "dumbmonit_proxmox_guest_snapshot_oldest_age_seconds",
+            "dumbmonit_proxmox_replication_job_error",
+            "dumbmonit_proxmox_ceph_health",
+            "dumbmonit_proxmox_node_updates_pending",
+            "dumbmonit_proxmox_node_certificate_expiry_days",
             // PBS, travaux de synchronisation et mises à jour (`collectors/pbs/jobs.rs`).
-            "ezymonit_pbs_sync_job_last_ok",
-            "ezymonit_pbs_node_updates_pending",
+            "dumbmonit_pbs_sync_job_last_ok",
+            "dumbmonit_pbs_node_updates_pending",
         ];
 
         for rule in builtin_rules() {
             for mot in rule.query.split(|c: char| !c.is_alphanumeric() && c != '_') {
-                if mot.starts_with("ezymonit_") {
+                if mot.starts_with("dumbmonit_") {
                     assert!(
                         PRODUITES.contains(&mot),
                         "rule \"{}\" targets \"{mot}\", which no collector produces",
@@ -954,11 +954,11 @@ mod tests {
 
     #[test]
     fn la_requete_predictive_reste_du_metricsql() {
-        let query = predict_full_query("ezymonit_fs_used_percent", 6, 4);
+        let query = predict_full_query("dumbmonit_fs_used_percent", 6, 4);
         assert_eq!(
             query,
-            "predict_linear(ezymonit_fs_used_percent[6h], 345600) \
-             and deriv(ezymonit_fs_used_percent[6h]) > 0"
+            "predict_linear(dumbmonit_fs_used_percent[6h], 345600) \
+             and deriv(dumbmonit_fs_used_percent[6h]) > 0"
         );
     }
 

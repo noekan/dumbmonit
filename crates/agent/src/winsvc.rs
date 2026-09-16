@@ -22,7 +22,7 @@ use windows_service::{define_windows_service, service_dispatcher};
 
 /// Nom sous lequel le service est enregistré. Doit correspondre à celui employé
 /// par `install.ps1`, sinon le système refuse de rattacher le processus.
-pub const SERVICE_NAME: &str = "EzyMonitAgent";
+pub const SERVICE_NAME: &str = "DumbMonitAgent";
 
 /// Chemin de configuration transmis du processus principal au fil du service.
 ///
@@ -52,6 +52,7 @@ fn run_service() -> Result<()> {
         CONFIG_PATH.get().cloned().unwrap_or_else(crate::config::Config::default_path);
     let config = crate::config::Config::load(&config_path)?;
     crate::init_tracing(config.log_level);
+    config.warn_deprecated_env();
 
     let (trigger, shutdown) = crate::shutdown::channel();
 

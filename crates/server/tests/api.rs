@@ -9,9 +9,9 @@ use std::sync::Arc;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use ezymonit_server::config::Config;
-use ezymonit_server::state::{AppState, Inner};
-use ezymonit_server::{api, collectors, db, tsdb};
+use dumbmonit_server::config::Config;
+use dumbmonit_server::state::{AppState, Inner};
+use dumbmonit_server::{api, collectors, db, tsdb};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -29,7 +29,7 @@ async fn setup() -> TestApp {
 
     let mut config = Config::from_env().expect("configuration par défaut");
     config.data_dir = dir.path().to_path_buf();
-    config.victoria_url = UNREACHABLE_VICTORIA.to_string();
+    config.victoria_url = Some(UNREACHABLE_VICTORIA.to_string());
 
     let pool = db::open(&config.database_path()).await.expect("ouverture de la base");
     let cipher = db::init_cipher(&pool, "secret-de-test-suffisamment-long")

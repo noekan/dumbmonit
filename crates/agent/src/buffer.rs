@@ -11,7 +11,7 @@
 
 use std::collections::VecDeque;
 
-use ezymonit_proto::Sample;
+use dumbmonit_proto::Sample;
 
 pub struct PendingBuffer {
     samples: VecDeque<Sample>,
@@ -76,7 +76,7 @@ impl PendingBuffer {
 
 #[cfg(test)]
 mod tests {
-    use ezymonit_proto::MetricKind;
+    use dumbmonit_proto::MetricKind;
 
     use super::*;
 

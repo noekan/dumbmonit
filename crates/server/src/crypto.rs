@@ -11,6 +11,9 @@ use anyhow::{Context, Result, bail};
 
 const NONCE_LEN: usize = 12;
 /// Texte connu chiffré au premier démarrage, relu ensuite pour valider le secret.
+// Valeur historique conservée telle quelle : elle est chiffrée et stockée dans
+// chaque base existante, la changer ferait échouer la vérification du secret
+// sur toute instance installée avant le renommage en DumbMonit.
 const CANARY: &[u8] = b"ezymonit-canary-v1";
 
 pub struct Cipher {
@@ -21,7 +24,7 @@ impl Cipher {
     /// Dérive la clé de chiffrement depuis le secret d'instance et un sel persistant.
     pub fn derive(secret: &str, salt: &[u8]) -> Result<Self> {
         if secret.len() < 16 {
-            bail!("EZYMONIT_SECRET must be at least 16 characters long");
+            bail!("DUMBMONIT_SECRET must be at least 16 characters long");
         }
         if salt.len() < 8 {
             bail!("key derivation salt too short ({} bytes, minimum 8)", salt.len());
@@ -75,7 +78,7 @@ impl Cipher {
     /// interrogation d'équipement.
     pub fn verify_canary(&self, stored: &[u8]) -> Result<()> {
         let decrypted = self.decrypt(stored).context(
-            "EZYMONIT_SECRET does not match the one used to encrypt this database. \
+            "DUMBMONIT_SECRET does not match the one used to encrypt this database. \
              Restore the original secret, or delete the database to start over \
              (device credentials will have to be entered again).",
         )?;

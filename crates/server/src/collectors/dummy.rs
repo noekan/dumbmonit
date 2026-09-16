@@ -5,7 +5,7 @@
 //! des données de démonstration dans les tests d'interface.
 
 use async_trait::async_trait;
-use ezymonit_proto::{Collector, MetricKind, ProbeError, Sample, Target};
+use dumbmonit_proto::{Collector, MetricKind, ProbeError, Sample, Target};
 
 pub struct DummyCollector;
 

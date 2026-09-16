@@ -2,7 +2,7 @@
 	/**
 	 * Settings → Single sign-on: an OpenID Connect provider (Authentik, Keycloak,
 	 * Authelia, Pocket ID…). Settings saved here win entirely over the
-	 * `EZYMONIT_OIDC_*` environment variables; those apply only while nothing is
+	 * `DUMBMONIT_OIDC_*` environment variables; those apply only while nothing is
 	 * saved. The client secret is stored encrypted and never comes back.
 	 */
 	import { Link2, Radar } from 'lucide-svelte';
@@ -181,9 +181,9 @@
 				{#if fromEnv}
 					These values come from environment variables. Saving here replaces them for good: what is saved wins, and the variables only apply while nothing is saved.
 				{:else if config.source === 'settings'}
-					Saved settings apply. Environment variables (<code class="font-mono text-[0.8125rem]">EZYMONIT_OIDC_*</code>) only apply while nothing is saved here.
+					Saved settings apply. Environment variables (<code class="font-mono text-[0.8125rem]">DUMBMONIT_OIDC_*</code>) only apply while nothing is saved here.
 				{:else}
-					Nothing configured yet. Fill this in, or set the <code class="font-mono text-[0.8125rem]">EZYMONIT_OIDC_*</code> environment variables — what is saved here wins.
+					Nothing configured yet. Fill this in, or set the <code class="font-mono text-[0.8125rem]">DUMBMONIT_OIDC_*</code> environment variables — what is saved here wins.
 				{/if}
 			</p>
 

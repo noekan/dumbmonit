@@ -6,7 +6,7 @@ One device can cover a whole cluster.
 
 ## What it watches
 
-All metrics are prefixed `ezymonit_proxmox_`.
+All metrics are prefixed `dumbmonit_proxmox_`.
 
 | Family | Metrics | Labels |
 |---|---|---|

@@ -225,12 +225,12 @@ mod tests {
     #[test]
     fn un_silence_par_etiquettes_exige_toutes_les_correspondances() {
         let mut silence = once(1, "2026-03-01T00:00:00Z", "2026-03-02T00:00:00Z");
-        silence.matchers = labels(&[("tag_role", "lab"), ("__name__", "ezymonit_up")]);
+        silence.matchers = labels(&[("tag_role", "lab"), ("__name__", "dumbmonit_up")]);
         let now = at("2026-03-01T12:00:00Z");
         assert!(silence.matches(
             now,
             None,
-            &labels(&[("tag_role", "lab"), ("__name__", "ezymonit_up"), ("host", "x")])
+            &labels(&[("tag_role", "lab"), ("__name__", "dumbmonit_up"), ("host", "x")])
         ));
         assert!(!silence.matches(now, None, &labels(&[("tag_role", "lab")])));
     }

@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use ezymonit_proto::{ProbeError, Target};
+use dumbmonit_proto::{ProbeError, Target};
 
 /// Port d'écoute de l'interface d'administration de Proxmox VE.
 const DEFAULT_PORT: u16 = 8006;
@@ -220,7 +220,7 @@ fn base_url(address: &str, port: u16) -> Result<String, ProbeError> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use ezymonit_proto::Credential;
+    use dumbmonit_proto::Credential;
 
     use super::*;
 

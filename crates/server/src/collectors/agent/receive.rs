@@ -4,7 +4,7 @@
 //! automatique, mise en forme des échantillons — pour que le gestionnaire HTTP ne
 //! soit qu'une façade et reste vérifiable d'un coup d'œil.
 
-use ezymonit_proto::{
+use dumbmonit_proto::{
     MAX_BATCH_SAMPLES, MetricKind, PUSH_PROTOCOL_VERSION, PushAck, PushBatch, Sample, Target,
 };
 use sqlx::SqlitePool;
@@ -155,7 +155,7 @@ fn prepare(target: &Target, samples: Vec<Sample>, received_at_ms: i64) -> (Vec<S
 mod tests {
     use std::collections::BTreeMap;
 
-    use ezymonit_proto::{AgentIdentity, Credential};
+    use dumbmonit_proto::{AgentIdentity, Credential};
 
     use super::*;
 

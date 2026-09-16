@@ -5,7 +5,7 @@ scheduled jobs (sync, verify, prune) and pending updates.
 
 ## What it watches
 
-All metrics are prefixed `ezymonit_pbs_`.
+All metrics are prefixed `dumbmonit_pbs_`.
 
 | Family | Metrics | Labels |
 |---|---|---|

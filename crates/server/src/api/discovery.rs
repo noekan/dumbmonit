@@ -6,7 +6,7 @@
 
 use axum::Json;
 use axum::extract::Query;
-use ezymonit_proto::Credential;
+use dumbmonit_proto::Credential;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{ApiError, ApiResult};

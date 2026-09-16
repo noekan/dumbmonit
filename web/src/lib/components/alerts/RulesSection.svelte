@@ -207,13 +207,13 @@
 					label="Query"
 					for="rule-query"
 					required
-					help="MetricsQL, e.g. ezymonit_cpu_usage_percent"
+					help="MetricsQL, e.g. dumbmonit_cpu_usage_percent"
 				>
 					<input
 						id="rule-query"
 						class="input font-mono text-[0.8125rem]"
 						bind:value={query}
-						placeholder="ezymonit_cpu_usage_percent"
+						placeholder="dumbmonit_cpu_usage_percent"
 						autocomplete="off"
 						spellcheck="false"
 					/>

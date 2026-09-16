@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use ezymonit_proto::ProbeError;
+use dumbmonit_proto::ProbeError;
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 

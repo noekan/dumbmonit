@@ -8,7 +8,7 @@
 
 use std::ops::RangeInclusive;
 
-use ezymonit_proto::ProbeError;
+use dumbmonit_proto::ProbeError;
 use serde_json::Value;
 
 /// Plages de codes de statut considérés comme normaux.

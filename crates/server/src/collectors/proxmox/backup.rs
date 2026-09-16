@@ -21,7 +21,7 @@
 
 use std::collections::BTreeMap;
 
-use ezymonit_proto::Sample;
+use dumbmonit_proto::Sample;
 
 use super::metrics::{GuestKind, gauge};
 use super::model::{BackupJob, BackupVolume, NotBackedUp, TaskEntry};

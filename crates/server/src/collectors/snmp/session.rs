@@ -7,7 +7,7 @@
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
-use ezymonit_proto::{Credential, ProbeError};
+use dumbmonit_proto::{Credential, ProbeError};
 use snmp2::AsyncSession;
 use tracing::{debug, warn};
 
@@ -426,11 +426,11 @@ pub fn normalize_address(address: &str) -> Result<String, ProbeError> {
 /// Construit le contexte de sécurité USM à partir d'un identifiant v3.
 fn build_security(
     username: &str,
-    auth: Option<&ezymonit_proto::SnmpV3Auth>,
-    privacy: Option<&ezymonit_proto::SnmpV3Privacy>,
+    auth: Option<&dumbmonit_proto::SnmpV3Auth>,
+    privacy: Option<&dumbmonit_proto::SnmpV3Privacy>,
     context: Option<&str>,
 ) -> Result<snmp2::v3::Security, ProbeError> {
-    use ezymonit_proto::{SnmpV3AuthProtocol, SnmpV3PrivacyProtocol};
+    use dumbmonit_proto::{SnmpV3AuthProtocol, SnmpV3PrivacyProtocol};
     use snmp2::v3::{Auth, AuthProtocol, Cipher, Security};
 
     if username.trim().is_empty() {
@@ -482,7 +482,7 @@ fn build_security(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ezymonit_proto::{SnmpV3Auth, SnmpV3AuthProtocol, SnmpV3Privacy, SnmpV3PrivacyProtocol};
+    use dumbmonit_proto::{SnmpV3Auth, SnmpV3AuthProtocol, SnmpV3Privacy, SnmpV3PrivacyProtocol};
 
     fn oid(raw: &str) -> ObjectId {
         raw.parse().unwrap()

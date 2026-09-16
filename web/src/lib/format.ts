@@ -78,7 +78,7 @@ export type TargetState = 'online' | 'offline' | 'pending' | 'disabled' | 'down'
  *
  * This is the only knowledge of `kind` values coded into the interface: it
  * decides which page is shown (availability, response time) and where the
- * state comes from (`ezymonit_probe_success` rather than the last probe).
+ * state comes from (`dumbmonit_probe_success` rather than the last probe).
  */
 export const UPTIME_KINDS = ['http', 'tcp', 'dns', 'ping', 'tls'] as const;
 
@@ -98,8 +98,8 @@ export interface ProbeStatus {
  * State to display for a target, probes included.
  *
  * For a service, `last_error` says nothing about its health — it is only set
- * for a configuration error — and `ezymonit_up` only means the probe ran. The
- * truth lives in `ezymonit_probe_success`, supplied here by the caller who
+ * for a configuration error — and `dumbmonit_up` only means the probe ran. The
+ * truth lives in `dumbmonit_probe_success`, supplied here by the caller who
  * read it in one batched query. Devices keep the classic deduction.
  */
 export function displayState(target: Target, probe: ProbeStatus | undefined): TargetState {
@@ -184,12 +184,12 @@ export const STATE_TONE: Record<TargetState, 'signal' | 'warning' | 'advisory' |
 /**
  * Makes a VictoriaMetrics series name readable.
  *
- * `ezymonit_cpu_usage_percent{host="sw1"}` becomes "Cpu usage percent".
+ * `dumbmonit_cpu_usage_percent{host="sw1"}` becomes "Cpu usage percent".
  */
 export function prettyMetricName(series: string): string {
 	const name = series
 		.split('{')[0]
-		.replace(/^ezymonit_/, '')
+		.replace(/^dumbmonit_/, '')
 		.replace(/_/g, ' ');
 	return name.charAt(0).toUpperCase() + name.slice(1);
 }

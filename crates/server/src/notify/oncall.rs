@@ -19,12 +19,12 @@ use crate::notify::secret::SecretString;
 
 /// Clé de rapprochement d'un incident.
 ///
-/// Le préfixe évite qu'EzyMonit ne referme l'incident d'un autre outil branché sur
+/// Le préfixe évite qu'DumbMonit ne referme l'incident d'un autre outil branché sur
 /// le même service d'astreinte ; la clé d'équipement, plutôt que l'empreinte d'une
 /// règle, garantit qu'une résolution retrouve bien le déclenchement même quand la
 /// composition du groupe a changé entre les deux.
 fn dedup_key(message: &Message) -> String {
-    format!("ezymonit-{}", message.group_key())
+    format!("dumbmonit-{}", message.group_key())
 }
 
 // --------------------------------------------------------------------------
@@ -53,7 +53,7 @@ impl PagerDuty {
         Ok(Self {
             url: format!("https://{host}/v2/enqueue"),
             routing_key: channel.secret("token")?,
-            source: channel.setting_opt("source").unwrap_or_else(|| "ezymonit".to_string()),
+            source: channel.setting_opt("source").unwrap_or_else(|| "dumbmonit".to_string()),
             http,
         })
     }
@@ -291,10 +291,10 @@ mod tests {
             json!({
                 "routing_key": "cle-integration",
                 "event_action": "trigger",
-                "dedup_key": "ezymonit-target-42",
+                "dedup_key": "dumbmonit-target-42",
                 "payload": {
                     "summary": "nas — Disk full",
-                    "source": "ezymonit",
+                    "source": "dumbmonit",
                     "severity": "warning",
                     "timestamp": "2025-09-01T14:12:05+00:00",
                     "component": "nas",
@@ -313,7 +313,7 @@ mod tests {
         let charge = pagerduty(json!({})).payload(&sample_message(true));
         assert_eq!(charge["event_action"], "resolve");
         assert_eq!(
-            charge["dedup_key"], "ezymonit-target-42",
+            charge["dedup_key"], "dumbmonit-target-42",
             "the key must match the one used at trigger time"
         );
         assert!(charge.get("payload").is_none(), "pointless on a resolution");
@@ -375,7 +375,7 @@ mod tests {
             opsgenie(json!({})).payload(&sample_message(false)),
             json!({
                 "message": "nas — Disk full",
-                "alias": "ezymonit-target-42",
+                "alias": "dumbmonit-target-42",
                 "description": "⚠️ Disk full — 95 % (threshold > 90 %)",
                 "priority": "P3",
                 "source": "DumbMonit",
@@ -394,7 +394,7 @@ mod tests {
         let notifier = opsgenie(json!({}));
         assert_eq!(
             notifier.close_url(&sample_message(true)),
-            "https://api.opsgenie.com/v2/alerts/ezymonit-target-42/close?identifierType=alias"
+            "https://api.opsgenie.com/v2/alerts/dumbmonit-target-42/close?identifierType=alias"
         );
     }
 
@@ -441,7 +441,7 @@ mod tests {
         // Préfixée pour ne pas refermer l'incident d'un autre outil, stable pour que
         // la résolution retrouve le déclenchement.
         let cle = dedup_key(&sample_message(false));
-        assert!(cle.starts_with("ezymonit-"));
+        assert!(cle.starts_with("dumbmonit-"));
         assert_eq!(cle, dedup_key(&sample_message(true)));
     }
 

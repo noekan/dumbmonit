@@ -74,7 +74,7 @@ Whatever the type, the form has:
 - The device shows up on the **Devices** page as a rack faceplate: status LED,
   name, kind, address, last seen, and a sparkline.
 - Measurements are written to VictoriaMetrics every 5 seconds
-  (`EZYMONIT_FLUSH_INTERVAL_SECS`), so the first graph appears after the first
+  (`DUMBMONIT_FLUSH_INTERVAL_SECS`), so the first graph appears after the first
   probe plus a few seconds. **Probe now** on the device page forces a probe and
   reports how many samples and series it produced: it is the main diagnostic tool.
 - The [built-in alert rules](../alerting/rules.md) apply immediately: device

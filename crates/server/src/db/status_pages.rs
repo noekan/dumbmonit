@@ -5,7 +5,7 @@
 //! de ce qui est montré au public.
 
 use anyhow::{Context, Result};
-use ezymonit_proto::TargetId;
+use dumbmonit_proto::TargetId;
 use serde::Serialize;
 use sqlx::{FromRow, SqlitePool};
 

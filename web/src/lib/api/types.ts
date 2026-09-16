@@ -14,6 +14,8 @@ export type TargetId = number;
 export interface ComponentHealth {
 	ok: boolean;
 	error?: string;
+	/** VictoriaMetrics only: true when the server runs it itself, false with DUMBMONIT_VM_URL. */
+	embedded?: boolean;
 }
 
 export interface Health {
@@ -687,7 +689,7 @@ export interface NotificationPolicy {
 	flap_events: number;
 	flap_window_secs: number;
 	flap_hold_secs: number;
-	/** Public URL used for device links in messages; empty falls back to EZYMONIT_PUBLIC_URL. */
+	/** Public URL used for device links in messages; empty falls back to DUMBMONIT_PUBLIC_URL. */
 	public_url: string;
 }
 

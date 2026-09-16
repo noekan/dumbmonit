@@ -10,10 +10,10 @@
 
 use std::time::Duration;
 
-use ezymonit_proto::{ProbeError, Target};
+use dumbmonit_proto::{ProbeError, Target};
 
 /// Délai par défaut d'une sonde, volontairement plus court que le délai global du
-/// planificateur (`EZYMONIT_PROBE_TIMEOUT_SECS`, dix secondes par défaut).
+/// planificateur (`DUMBMONIT_PROBE_TIMEOUT_SECS`, dix secondes par défaut).
 ///
 /// Ce n'est pas un détail de confort : c'est ce qui garantit que la sonde a le
 /// temps d'écrire `probe_success = 0` avant que le registre ne l'interrompe. Une
@@ -138,7 +138,7 @@ pub(crate) mod test_support {
     use std::collections::BTreeMap;
     use std::time::Duration;
 
-    use ezymonit_proto::{Credential, Target};
+    use dumbmonit_proto::{Credential, Target};
 
     /// Cible de test : seules l'adresse et les étiquettes varient d'un cas à l'autre.
     pub fn cible(kind: &str, address: &str, tags: &[(&str, &str)]) -> Target {

@@ -5,7 +5,7 @@
 //! une par ressource, porte l'état qui intéresse vraiment : une machine sous HA
 //! passée en `error` ou en `fence` ne redémarrera pas toute seule.
 
-use ezymonit_proto::Sample;
+use dumbmonit_proto::Sample;
 
 use super::metrics::{GuestKind, gauge};
 use super::model::HaStatusEntry;

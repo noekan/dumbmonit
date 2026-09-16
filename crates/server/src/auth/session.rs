@@ -6,7 +6,7 @@
 //! pas faire sans réintroduire… une table de sessions.
 //!
 //! La partie secrète n'est jamais stockée : la base ne contient que son empreinte
-//! SHA-256. Une copie de `ezymonit.db` ne donne donc aucune session utilisable.
+//! SHA-256. Une copie de `dumbmonit.db` ne donne donc aucune session utilisable.
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, SecondsFormat, Utc};

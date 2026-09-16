@@ -12,9 +12,9 @@ cd web && npm run build && (nohup npm run preview -- --port 4173 --host 0.0.0.0 
 ## 2. Get a session cookie
 ```bash
 J=/tmp/cj; curl -s -c $J -X POST -H 'content-type: application/json' -d '{"password":"<password>"}' localhost:8080/api/auth/login
-COOKIE=$(grep ezymonit_session $J | awk '{print $7}')
+COOKIE=$(grep dumbmonit_session $J | awk '{print $7}')
 ```
-If the password is unknown: `EZYMONIT_RESET_PASSWORD=1 docker compose up -d ezymonit`, then `docker compose up -d ezymonit` again, then `POST /api/auth/setup` with a new password. The login route rate-limits after a few failures (429 with a delay) — never guess passwords.
+If the password is unknown: `DUMBMONIT_RESET_PASSWORD=1 docker compose up -d dumbmonit`, then `docker compose up -d dumbmonit` again, then `POST /api/auth/setup` with a new password. The login route rate-limits after a few failures (429 with a delay) — never guess passwords.
 
 ## 3. Screenshot all pages
 ```bash

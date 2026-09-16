@@ -485,7 +485,7 @@ mod tests {
         assert_eq!(extract_bearer(&headers), Some("dmt_abc"));
 
         // Un jeton d'agent ou un mot de passe Basic ne sont pas des jetons d'API.
-        headers.insert(header::AUTHORIZATION, "Bearer ezym_abc".parse().unwrap());
+        headers.insert(header::AUTHORIZATION, "Bearer dmon_abc".parse().unwrap());
         assert_eq!(extract_bearer(&headers), None);
         headers.insert(header::AUTHORIZATION, "Basic dXNlcjpwYXNz".parse().unwrap());
         assert_eq!(extract_bearer(&headers), None);

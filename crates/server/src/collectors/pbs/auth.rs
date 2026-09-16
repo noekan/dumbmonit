@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use ezymonit_proto::ProbeError;
+use dumbmonit_proto::ProbeError;
 use tokio::sync::Mutex;
 
 /// Durée de vie d'un ticket annoncée par PBS.
@@ -110,21 +110,21 @@ pub fn token_header_value(token: &str) -> Result<String, ProbeError> {
 mod tests {
     use super::*;
 
-    const JETON: &str = "monitoring@pbs!ezymonit=8f3a1c9e-0000-4444-8888-aaaabbbbcccc";
+    const JETON: &str = "monitoring@pbs!dumbmonit=8f3a1c9e-0000-4444-8888-aaaabbbbcccc";
 
     #[test]
     fn len_tete_remplace_le_separateur_par_deux_points() {
         let header = token_header_value(JETON).unwrap();
         assert_eq!(
             header,
-            "PBSAPIToken=monitoring@pbs!ezymonit:8f3a1c9e-0000-4444-8888-aaaabbbbcccc"
+            "PBSAPIToken=monitoring@pbs!dumbmonit:8f3a1c9e-0000-4444-8888-aaaabbbbcccc"
         );
     }
 
     #[test]
     fn un_jeton_deja_au_format_de_len_tete_est_accepte() {
-        let header = token_header_value("monitoring@pbs!ezymonit:secret").unwrap();
-        assert_eq!(header, "PBSAPIToken=monitoring@pbs!ezymonit:secret");
+        let header = token_header_value("monitoring@pbs!dumbmonit:secret").unwrap();
+        assert_eq!(header, "PBSAPIToken=monitoring@pbs!dumbmonit:secret");
     }
 
     #[test]
@@ -136,11 +136,11 @@ mod tests {
     #[test]
     fn un_jeton_incomplet_est_une_erreur_de_configuration() {
         for invalide in [
-            "monitoring@pbs!ezymonit",          // secret manquant
+            "monitoring@pbs!dumbmonit",         // secret manquant
             "monitoring@pbs=secret",            // nom du jeton manquant
-            "monitoring!ezymonit=secret",       // realm manquant
-            "@pbs!ezymonit=secret",             // utilisateur vide
-            "monitoring@pbs!ezymonit=",         // secret vide
+            "monitoring!dumbmonit=secret",      // realm manquant
+            "@pbs!dumbmonit=secret",            // utilisateur vide
+            "monitoring@pbs!dumbmonit=",        // secret vide
             "monitoring@pbs!ezy\nmonit=secret", // caractère de contrôle
         ] {
             let error = token_header_value(invalide).unwrap_err();
@@ -153,9 +153,9 @@ mod tests {
 
     #[test]
     fn le_message_derreur_ne_contient_jamais_le_secret() {
-        let error = token_header_value("monitoring@pbs!ezymonit").unwrap_err();
+        let error = token_header_value("monitoring@pbs!dumbmonit").unwrap_err();
         let rendu = format!("{error} {error:?}");
-        assert!(!rendu.contains("ezymonit"), "{rendu}");
+        assert!(!rendu.contains("dumbmonit"), "{rendu}");
     }
 
     #[test]

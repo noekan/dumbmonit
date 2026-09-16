@@ -5,7 +5,7 @@
 //! Les instantanés et les tâches, qui demandent un regroupement, sont traités
 //! dans `backup.rs`.
 
-use ezymonit_proto::{MetricKind, Sample};
+use dumbmonit_proto::{MetricKind, Sample};
 
 use super::model::{DatastoreUsage, GcStatus, NodeStatus, Num, Version};
 
@@ -43,7 +43,7 @@ pub fn node_samples(status: &NodeStatus, ts_ms: i64) -> Vec<Sample> {
     let mut samples = Vec::new();
 
     // La charge CPU est un ratio 0..1 ; on l'expose en pourcentage pour rester
-    // homogène avec le reste d'EzyMonit.
+    // homogène avec le reste d'DumbMonit.
     if let Some(cpu) = status.cpu {
         samples.push(gauge("node_cpu_percent", cpu.0 * 100.0, ts_ms));
     }

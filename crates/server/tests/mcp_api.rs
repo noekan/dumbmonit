@@ -12,9 +12,9 @@ use std::sync::Arc;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
-use ezymonit_server::config::Config;
-use ezymonit_server::state::{AppState, Inner};
-use ezymonit_server::{api, collectors, db, tsdb};
+use dumbmonit_server::config::Config;
+use dumbmonit_server::state::{AppState, Inner};
+use dumbmonit_server::{api, collectors, db, tsdb};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -38,7 +38,7 @@ async fn setup() -> TestApp {
 
     let mut config = Config::from_env().expect("configuration par défaut");
     config.data_dir = dir.path().to_path_buf();
-    config.victoria_url = UNREACHABLE_VICTORIA.to_string();
+    config.victoria_url = Some(UNREACHABLE_VICTORIA.to_string());
 
     let pool = db::open(&config.database_path()).await.expect("ouverture de la base");
     let cipher = db::init_cipher(&pool, "secret-de-test-suffisamment-long")
@@ -206,7 +206,7 @@ async fn the_mcp_endpoint_requires_a_valid_token() {
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
 
     // Un jeton d'agent n'est pas un jeton d'API.
-    let reply = app.request("POST", "/api/mcp", Some(ping.clone()), Some("ezym_abc")).await;
+    let reply = app.request("POST", "/api/mcp", Some(ping.clone()), Some("dmon_abc")).await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
 
     let (secret, id) = app.create_token("assistant", "read").await;
@@ -479,7 +479,7 @@ async fn write_tools_need_the_write_scope() {
         .request(
             "POST",
             "/api/alerts/rules",
-            Some(json!({ "name": "CPU high", "query": "ezymonit_cpu_usage_percent", "threshold": 90 })),
+            Some(json!({ "name": "CPU high", "query": "dumbmonit_cpu_usage_percent", "threshold": 90 })),
             None,
         )
         .await;
@@ -512,7 +512,7 @@ async fn read_tools_degrade_gracefully_without_victoriametrics() {
 
     // La base de séries est injoignable : l'outil le dit, sans planter.
     let result = app
-        .call_tool(&secret, "query_metrics", json!({ "query": "ezymonit_up", "range_hours": 2 }))
+        .call_tool(&secret, "query_metrics", json!({ "query": "dumbmonit_up", "range_hours": 2 }))
         .await;
     assert_eq!(result["isError"], true, "{}", text_of(&result));
     let result = app.call_tool(&secret, "query_metrics", json!({})).await;

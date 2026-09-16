@@ -3,7 +3,7 @@
 //! C'est la soupape du module. Quel que soit le nombre de services pris en charge,
 //! il en manquera toujours un — l'API interne d'une entreprise, un automate maison,
 //! un service sorti le mois dernier. Plutôt que d'attendre une nouvelle version
-//! d'EzyMonit, l'utilisateur décrit ici la requête entière : méthode, URL,
+//! d'DumbMonit, l'utilisateur décrit ici la requête entière : méthode, URL,
 //! en-têtes, type de contenu et corps, ce dernier écrit comme un gabarit dont les
 //! variables sont remplacées à l'envoi.
 //!
@@ -76,7 +76,7 @@ pub struct Webhook {
     body: Option<Template>,
     token: Option<SecretString>,
     basic_auth: Option<(String, SecretString)>,
-    /// URL publique d'EzyMonit, pour la variable `link`.
+    /// URL publique d'DumbMonit, pour la variable `link`.
     base_url: Option<String>,
 }
 
@@ -183,7 +183,7 @@ impl Webhook {
     fn default_payload(&self, message: &Message) -> serde_json::Value {
         let variables = self.variables(message);
         json!({
-            "source": "ezymonit",
+            "source": "dumbmonit",
             "target": message.target_name,
             "rule": message.rule_name,
             "severity": message.severity.as_str(),
@@ -303,7 +303,7 @@ mod tests {
         assert_eq!(
             corps_par_defaut(&notifier),
             json!({
-                "source": "ezymonit",
+                "source": "dumbmonit",
                 "target": "nas",
                 "rule": "Disk full",
                 "severity": "warning",
@@ -474,17 +474,17 @@ mod tests {
         );
     }
 
-    // --- Lien vers EzyMonit ---
+    // --- Lien vers DumbMonit ---
 
     #[test]
     fn le_lien_pointe_vers_l_equipement_quand_une_url_publique_est_connue() {
         let notifier = webhook(
-            json!({"url": "https://exemple.org/h", "base_url": "https://ezymonit.maison/"}),
+            json!({"url": "https://exemple.org/h", "base_url": "https://dumbmonit.maison/"}),
             json!({}),
         );
         assert_eq!(
             notifier.variables(&sample_message(false))["link"],
-            "https://ezymonit.maison/targets/42"
+            "https://dumbmonit.maison/targets/42"
         );
     }
 

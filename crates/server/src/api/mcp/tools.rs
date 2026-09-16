@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, HashMap};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use chrono::{DateTime, SecondsFormat, TimeDelta, Utc};
-use ezymonit_proto::{Target, TargetId};
+use dumbmonit_proto::{Target, TargetId};
 use serde_json::{Value, json};
 
 use crate::alerting::model::Severity;
@@ -39,7 +39,7 @@ the write scope; a read token can never change anything. Devices can be named by
 by name. Times are UTC, RFC 3339.";
 
 /// Types de cibles qui surveillent un *service* : leur état vient du résultat de
-/// la sonde (`ezymonit_probe_success`), pas de la dernière interrogation.
+/// la sonde (`dumbmonit_probe_success`), pas de la dernière interrogation.
 const UPTIME_KINDS: [&str; 5] = ["http", "tcp", "dns", "ping", "tls"];
 
 /// Fenêtre de fraîcheur d'un résultat de sonde, alignée sur l'interface.
@@ -171,9 +171,9 @@ fn specs() -> Vec<ToolSpec> {
             name: "query_metrics",
             scope: Scope::Read,
             description: "Runs a MetricsQL/PromQL range query against the time series \
-                          (VictoriaMetrics). Metrics are prefixed ezymonit_ and carry a \
+                          (VictoriaMetrics). Metrics are prefixed dumbmonit_ and carry a \
                           target label with the device id, e.g. \
-                          ezymonit_cpu_usage_percent{target=\"3\"}. Returns at most 60 points \
+                          dumbmonit_cpu_usage_percent{target=\"3\"}. Returns at most 60 points \
                           per series. Prefer get_device for the usual CPU/memory/disk summary.",
             input_schema: json!({
                 "type": "object",
@@ -548,7 +548,7 @@ async fn probe_results(state: &AppState) -> HashMap<TargetId, (bool, Option<Stri
     let mut out = HashMap::new();
     let Ok(series) = state
         .victoria
-        .query(&format!("last_over_time(ezymonit_probe_success[{PROBE_WINDOW}])"))
+        .query(&format!("last_over_time(dumbmonit_probe_success[{PROBE_WINDOW}])"))
         .await
     else {
         return out;
@@ -564,7 +564,7 @@ async fn probe_results(state: &AppState) -> HashMap<TargetId, (bool, Option<Stri
     if out.values().any(|(up, _)| !*up)
         && let Ok(series) = state
             .victoria
-            .query(&format!("tlast_over_time(ezymonit_probe_failure_info[{PROBE_WINDOW}])"))
+            .query(&format!("tlast_over_time(dumbmonit_probe_failure_info[{PROBE_WINDOW}])"))
             .await
     {
         for serie in series {
@@ -920,36 +920,36 @@ async fn metrics_summary(state: &AppState, device: &Device) -> Vec<(String, f64,
     let sel = format!("target=\"{}\"", device.id());
     let expressions: Vec<(&str, String)> = if UPTIME_KINDS.contains(&device.target.kind.as_str()) {
         vec![
-            ("availability_percent", format!("ezymonit_probe_success{{{sel}}} * 100")),
-            ("latency_seconds", format!("ezymonit_probe_duration_seconds{{{sel}}}")),
+            ("availability_percent", format!("dumbmonit_probe_success{{{sel}}} * 100")),
+            ("latency_seconds", format!("dumbmonit_probe_duration_seconds{{{sel}}}")),
         ]
     } else {
         vec![
             (
                 "cpu_percent",
                 format!(
-                    "max by (target) (ezymonit_cpu_load_percent{{{sel}}} or \
-                     ezymonit_cpu_usage_percent{{{sel}}} or \
-                     ezymonit_proxmox_node_cpu_percent{{{sel}}})"
+                    "max by (target) (dumbmonit_cpu_load_percent{{{sel}}} or \
+                     dumbmonit_cpu_usage_percent{{{sel}}} or \
+                     dumbmonit_proxmox_node_cpu_percent{{{sel}}})"
                 ),
             ),
             (
                 "memory_percent",
                 format!(
-                    "max by (target) (ezymonit_memory_used_percent{{{sel}}} or \
-                     ezymonit_synology_memory_usage_percent{{{sel}}} or \
-                     ezymonit_pbs_node_memory_used_percent{{{sel}}} or \
-                     100 * ezymonit_memory_bytes_used{{{sel}}} / ezymonit_memory_bytes_total{{{sel}}} or \
-                     100 * ezymonit_proxmox_node_memory_used_bytes{{{sel}}} / ezymonit_proxmox_node_memory_total_bytes{{{sel}}})"
+                    "max by (target) (dumbmonit_memory_used_percent{{{sel}}} or \
+                     dumbmonit_synology_memory_usage_percent{{{sel}}} or \
+                     dumbmonit_pbs_node_memory_used_percent{{{sel}}} or \
+                     100 * dumbmonit_memory_bytes_used{{{sel}}} / dumbmonit_memory_bytes_total{{{sel}}} or \
+                     100 * dumbmonit_proxmox_node_memory_used_bytes{{{sel}}} / dumbmonit_proxmox_node_memory_total_bytes{{{sel}}})"
                 ),
             ),
             (
                 "disk_fullest_percent",
                 format!(
-                    "max by (target) (100 * ezymonit_storage_bytes_used{{{sel}}} / ezymonit_storage_bytes_total{{{sel}}} or \
-                     ezymonit_proxmox_storage_used_percent{{{sel}}} or \
-                     ezymonit_proxmox_node_rootfs_percent{{{sel}}} or \
-                     ezymonit_pbs_datastore_used_percent{{{sel}}})"
+                    "max by (target) (100 * dumbmonit_storage_bytes_used{{{sel}}} / dumbmonit_storage_bytes_total{{{sel}}} or \
+                     dumbmonit_proxmox_storage_used_percent{{{sel}}} or \
+                     dumbmonit_proxmox_node_rootfs_percent{{{sel}}} or \
+                     dumbmonit_pbs_datastore_used_percent{{{sel}}})"
                 ),
             ),
         ]
@@ -1505,7 +1505,7 @@ mod tests {
             interval: Duration::from_secs(interval_secs),
             enabled,
             tags: BTreeMap::new(),
-            credential: ezymonit_proto::Credential::None,
+            credential: dumbmonit_proto::Credential::None,
         }
     }
 

@@ -8,7 +8,7 @@
 //! L'étiquette de destination s'appelle `to_node` : `target` est réservé par le
 //! registre pour l'identifiant de la cible DumbMonit.
 
-use ezymonit_proto::Sample;
+use dumbmonit_proto::Sample;
 
 use super::metrics::gauge;
 use super::model::{Num, ReplicationJob};

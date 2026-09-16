@@ -2,7 +2,7 @@
 
 Intégration de Proxmox VE : nœuds, machines virtuelles, conteneurs, stockages,
 sauvegardes, haute disponibilité, instantanés, réplication, Ceph, mises à jour
-et certificats. Le module ne dépend que de `ezymonit-proto`, `reqwest`, `serde`,
+et certificats. Le module ne dépend que de `dumbmonit-proto`, `reqwest`, `serde`,
 `chrono`, `tokio` et `futures`, tous déjà présents, et du client HTTP partagé
 `crate::collectors::http`.
 

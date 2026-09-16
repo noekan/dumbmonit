@@ -11,7 +11,7 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use ezymonit_proto::ProbeError;
+use dumbmonit_proto::ProbeError;
 
 /// Délai d'établissement de la connexion TCP + TLS.
 ///

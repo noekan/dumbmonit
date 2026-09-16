@@ -253,7 +253,7 @@ mod tests {
         // Un certificat volontairement illisible : webpki le refuse, et le
         // vérificateur doit malgré tout laisser la négociation se poursuivre.
         let bogus = CertificateDer::from(vec![0u8; 8]);
-        let name = ServerName::try_from("exemple.ezymonit.test").unwrap();
+        let name = ServerName::try_from("exemple.dumbmonit.test").unwrap();
         let result = verifier.verify_server_cert(
             &bogus,
             &[],

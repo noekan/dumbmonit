@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ezymonit_proto::TargetId;
+use dumbmonit_proto::TargetId;
 use tokio::sync::Semaphore;
 use tokio::time::{Instant, MissedTickBehavior, interval};
 use tracing::{debug, info, warn};
@@ -90,7 +90,7 @@ async fn run(state: AppState) -> anyhow::Result<()> {
     }
 }
 
-async fn probe_once(state: AppState, target: ezymonit_proto::Target) {
+async fn probe_once(state: AppState, target: dumbmonit_proto::Target) {
     let result = state.collectors.probe(&target, state.config.probe_timeout).await;
 
     let error_message = match result {

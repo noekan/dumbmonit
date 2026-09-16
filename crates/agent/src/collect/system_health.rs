@@ -24,7 +24,7 @@
 
 use std::collections::BTreeSet;
 
-use ezymonit_proto::{MetricKind, Sample};
+use dumbmonit_proto::{MetricKind, Sample};
 
 /// Plafond de séries `agent_systemd_unit_failed` : au-delà, une machine en
 /// perdition ferait exploser le nombre de séries sans rien apprendre de plus que

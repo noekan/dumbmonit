@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, TimeDelta, Utc};
-use ezymonit_proto::{CMD_CONTAINER_RESTART, CMD_CONTAINER_UPDATE, TargetId};
+use dumbmonit_proto::{CMD_CONTAINER_RESTART, CMD_CONTAINER_UPDATE, TargetId};
 use tokio::time::{MissedTickBehavior, interval};
 use tracing::{debug, info, warn};
 
@@ -172,7 +172,7 @@ async fn observe(
     state: &AppState,
 ) -> anyhow::Result<BTreeMap<(TargetId, String), ContainerObservation>> {
     let series =
-        state.victoria.query(r#"{__name__=~"ezymonit_container_(up|update_available)"}"#).await?;
+        state.victoria.query(r#"{__name__=~"dumbmonit_container_(up|update_available)"}"#).await?;
     let mut observations = BTreeMap::new();
     for serie in series {
         let (Some(target), Some(container), Some(name)) = (
@@ -187,8 +187,8 @@ async fn observe(
             ContainerObservation { name: container.clone(), up: true, update_available: false }
         });
         match name.as_str() {
-            "ezymonit_container_up" => entry.up = value != 0.0,
-            "ezymonit_container_update_available" => entry.update_available = value == 1.0,
+            "dumbmonit_container_up" => entry.up = value != 0.0,
+            "dumbmonit_container_update_available" => entry.update_available = value == 1.0,
             _ => {}
         }
     }

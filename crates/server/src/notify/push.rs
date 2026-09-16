@@ -21,7 +21,7 @@ use crate::notify::secret::SecretString;
 // --------------------------------------------------------------------------
 
 /// Pushover. Le jeton d'application et la clé utilisateur sont deux secrets
-/// distincts : le premier identifie EzyMonit, la seconde le destinataire.
+/// distincts : le premier identifie DumbMonit, la seconde le destinataire.
 pub struct Pushover {
     http: reqwest::Client,
     token: SecretString,
@@ -57,7 +57,7 @@ impl Pushover {
         })
     }
 
-    /// Priorité Pushover (-2..2) déduite de la sévérité EzyMonit.
+    /// Priorité Pushover (-2..2) déduite de la sévérité DumbMonit.
     ///
     /// Une information part en `-1` (aucune notification sonore) : c'est le seul
     /// moyen que le canal reste utilisable une fois branché sur toutes les règles.

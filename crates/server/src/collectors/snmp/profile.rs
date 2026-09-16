@@ -27,7 +27,7 @@ pub enum MetricKindSpec {
     Gauge,
 }
 
-impl From<MetricKindSpec> for ezymonit_proto::MetricKind {
+impl From<MetricKindSpec> for dumbmonit_proto::MetricKind {
     fn from(kind: MetricKindSpec) -> Self {
         match kind {
             MetricKindSpec::Counter => Self::Counter,

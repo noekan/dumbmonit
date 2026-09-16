@@ -30,7 +30,11 @@ pub const MAX_BATCH_SAMPLES: usize = 10_000;
 
 /// Préfixe des jetons d'enregistrement, à des fins de lisibilité dans l'interface
 /// et de détection accidentelle dans un dépôt de code.
-pub const TOKEN_PREFIX: &str = "ezym_";
+///
+/// Purement cosmétique : le serveur retrouve un jeton par son empreinte, jamais
+/// par son préfixe. Les jetons `ezym_` émis avant le renommage du produit restent
+/// donc valables tels quels.
+pub const TOKEN_PREFIX: &str = "dmon_";
 
 /// Ce que la machine surveillée déclare d'elle-même.
 ///

@@ -4,7 +4,7 @@ use std::time::Duration;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use ezymonit_proto::{Credential, Target, TargetId};
+use dumbmonit_proto::{Credential, Target, TargetId};
 use serde::{Deserialize, Serialize};
 
 use crate::api::{ApiError, ApiResult};

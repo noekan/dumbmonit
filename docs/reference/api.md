@@ -7,7 +7,7 @@ mirrored in `web/src/lib/api/types.ts`.
 ## Authentication
 
 The instance has one password and uses an HttpOnly session cookie named
-`ezymonit_session` (SameSite Lax; `Secure` when `EZYMONIT_COOKIE_SECURE=1`).
+`dumbmonit_session` (SameSite Lax; `Secure` when `DUMBMONIT_COOKIE_SECURE=1`).
 Sessions last 30 days.
 
 ```bash
@@ -22,7 +22,7 @@ curl -b cookies.txt http://localhost:8080/api/targets
 
 !!! note "No API token yet"
     The only way to call the protected routes is the session cookie obtained
-    with the password. Agent enrollment tokens (`ezym_…`) are accepted on
+    with the password. Agent enrollment tokens (`dmon_…`) are accepted on
     `POST /api/ingest` only.
 
 Login is rate-limited: after five failed attempts, each further attempt is
@@ -50,11 +50,12 @@ conflict, `429` when rate-limited and `500` otherwise.
 | `GET` | `/api/health` | public | Server version and the state of its dependencies. Always `200`: a failing component is in the body. |
 
 ```json
-{"status":"ok","version":"0.1.0","database":{"ok":true},"victoria":{"ok":true}}
+{"status":"ok","version":"0.1.0","database":{"ok":true},"victoria":{"ok":true,"embedded":true}}
 ```
 
 `status` is `degraded` when a component fails; that component then carries an
-`error` string.
+`error` string. `victoria.embedded` is `true` when the server runs its own
+VictoriaMetrics, `false` when `DUMBMONIT_VM_URL` points at an external one.
 
 ## Device types
 
@@ -71,7 +72,7 @@ conflict, `429` when rate-limited and `500` otherwise.
 | `GET` | `/api/targets/{id}` | One device. |
 | `PUT` | `/api/targets/{id}` | Replace it. Omitting `credential` keeps the stored one. |
 | `DELETE` | `/api/targets/{id}` | `204`. |
-| `POST` | `/api/targets/{id}/probe` | Probe now: `{"sample_count": 42, "series": ["ezymonit_if_octets_in", …]}`. |
+| `POST` | `/api/targets/{id}/probe` | Probe now: `{"sample_count": 42, "series": ["dumbmonit_if_octets_in", …]}`. |
 | `POST` | `/api/targets/{id}/discover` | Re-run profile detection: `{"profile_id": "host-resources"}` or `null`. |
 
 A device as returned:
@@ -145,7 +146,7 @@ Both routes proxy VictoriaMetrics and return series in the Prometheus shape:
 
 ```bash
 curl -b cookies.txt -G http://localhost:8080/api/metrics/query \
-  --data-urlencode 'query=avg by (target, host) (ezymonit_cpu_usage_percent)'
+  --data-urlencode 'query=avg by (target, host) (dumbmonit_cpu_usage_percent)'
 ```
 
 ```json
@@ -208,7 +209,7 @@ A rule:
   "id": 2, "uid": "cpu_high", "name": "High CPU",
   "description": "CPU load sustained above 90%.",
   "kind": "threshold",
-  "query": "avg by (target, host) (ezymonit_cpu_load_percent or ezymonit_proxmox_node_cpu_percent or ezymonit_cpu_usage_percent)",
+  "query": "avg by (target, host) (dumbmonit_cpu_load_percent or dumbmonit_proxmox_node_cpu_percent or dumbmonit_cpu_usage_percent)",
   "operator": ">", "threshold": 90, "for_secs": 600,
   "severity": "warning",
   "selector": {"kind": "all"},
@@ -280,15 +281,15 @@ The exact keys per kind come from `/api/notify/kinds` and are documented in
 | `GET` | `/api/agent/tokens` | session | Every token: `id`, `name`, `prefix`, `created_at`, `last_used_at`, `revoked_at`. |
 | `POST` | `/api/agent/tokens` | session | `{"name": "Home fleet", "base_url": "http://server:8080"}`. `201` with the token fields plus `secret` (shown once), `install_linux` and `install_windows`. `base_url` is the URL agents will use; it defaults to the listen address. |
 | `DELETE` | `/api/agent/tokens/{id}` | session | Revoke. `204`. |
-| `POST` | `/api/ingest` | `Authorization: Bearer ezym_…` | Receives a batch of samples from an agent (bodies up to 16 MB). Not meant to be called by hand. |
+| `POST` | `/api/ingest` | `Authorization: Bearer dmon_…` | Receives a batch of samples from an agent (bodies up to 16 MB). Not meant to be called by hand. |
 
 ```json
 {
-  "id": 1, "name": "Home fleet", "prefix": "ezym_ab12",
+  "id": 1, "name": "Home fleet", "prefix": "dmon_ab12",
   "created_at": "2026-09-15 13:00:00", "last_used_at": null, "revoked_at": null,
-  "secret": "ezym_…",
-  "install_linux": "curl -sSL http://server:8080/install.sh | sh -s -- --token=ezym_… --url=http://server:8080",
-  "install_windows": "& ([scriptblock]::Create((irm http://server:8080/install.ps1))) -Token ezym_… -Url http://server:8080"
+  "secret": "dmon_…",
+  "install_linux": "curl -sSL http://server:8080/install.sh | sh -s -- --token=dmon_… --url=http://server:8080",
+  "install_windows": "& ([scriptblock]::Create((irm http://server:8080/install.ps1))) -Token dmon_… -Url http://server:8080"
 }
 ```
 
@@ -298,6 +299,6 @@ The exact keys per kind come from `/api/notify/kinds` and are documented in
 |---|---|---|
 | `GET` | `/install.sh` | The Linux installer. Public. |
 | `GET` | `/install.ps1` | The Windows installer. Public. |
-| `GET` | `/download/{name}` | `ezymonit-agent-linux-x86_64`, `ezymonit-agent-linux-aarch64`, `ezymonit-agent-windows-x86_64.exe`, served from `EZYMONIT_AGENT_DIR`. `404` if the file is absent. |
+| `GET` | `/download/{name}` | `dumbmonit-agent-linux-x86_64`, `dumbmonit-agent-linux-aarch64`, `dumbmonit-agent-windows-x86_64.exe`, served from `DUMBMONIT_AGENT_DIR`. `404` if the file is absent. |
 
 Every other path is served by the web UI, which asks for the password itself.

@@ -350,7 +350,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
                     "email",
                     "Bot address",
                     "The email address assigned to the bot when it was created.",
-                    "ezymonit-bot@your-org.zulipchat.com",
+                    "dumbmonit-bot@your-org.zulipchat.com",
                 )
                 .required(),
                 text(
@@ -386,7 +386,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
                     "Topic",
                     "On ntfy.sh, anyone who knows this name can read the topic: pick a long, \
                      random one.",
-                    "ezymonit-k7x2p9qv",
+                    "dumbmonit-k7x2p9qv",
                 )
                 .required(),
                 url("server_url", "Server address", "Your own instance, if you host one.", "")
@@ -600,7 +600,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
                     &["starttls", "tls", "none"],
                 ),
                 number("port", "Port", "Empty, derived from encryption: 587, 465 or 25.", "587"),
-                text("from", "Sender", "Sending address.", "ezymonit@example.org").required(),
+                text("from", "Sender", "Sending address.", "dumbmonit@example.org").required(),
                 textarea("to", "Recipients", "One address per line.", "admin@example.org")
                     .required()
                     .list(),
@@ -714,7 +714,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
                     &["us", "eu"],
                 ),
                 text("source", "Source", "Source name shown in the incident.", "")
-                    .with_default("ezymonit"),
+                    .with_default("dumbmonit"),
             ],
             vec![
                 password(
@@ -773,14 +773,14 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
                     "headers",
                     "Extra headers",
                     "JSON object, one value per header.",
-                    "{\"X-Application\": \"ezymonit\"}",
+                    "{\"X-Application\": \"dumbmonit\"}",
                 )
                 .object(),
                 url(
                     "base_url",
                     "Public address of DumbMonit",
                     "So that {{link}} gives a clickable link to the device.",
-                    "https://ezymonit.home",
+                    "https://dumbmonit.home",
                 ),
                 text(
                     "username",

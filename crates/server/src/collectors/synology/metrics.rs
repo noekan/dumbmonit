@@ -5,7 +5,7 @@
 //! C'est ici que se décide le choix `Gauge` / `Counter`, et lui seul détermine si
 //! un graphe affichera une valeur ou un débit.
 
-use ezymonit_proto::{MetricKind, Sample};
+use dumbmonit_proto::{MetricKind, Sample};
 
 use super::model::{
     CpuUsage, Disk, MemoryUsage, Num, StorageEnv, StorageInfo, SystemInfo, Utilization, Volume,
@@ -13,7 +13,7 @@ use super::model::{
 
 /// Préfixe commun à toutes les métriques de l'intégration.
 ///
-/// Il n'est pas redondant avec le préfixe `ezymonit_` ajouté à l'écriture : ce
+/// Il n'est pas redondant avec le préfixe `dumbmonit_` ajouté à l'écriture : ce
 /// dernier isole l'outil, celui-ci isole l'intégration. Sans lui, `disk_temperature`
 /// entrerait en collision avec la même notion venue de SNMP — et un NAS Synology est
 /// justement l'équipement qu'on surveille volontiers par les deux voies à la fois.
@@ -21,7 +21,7 @@ const P: &str = "synology_";
 
 /// Un kibioctet. DSM exprime en kibioctets tout ce que renvoie l'API
 /// d'utilisation ; on convertit en octets pour rester homogène avec le reste
-/// d'EzyMonit, où toutes les tailles sont en octets.
+/// d'DumbMonit, où toutes les tailles sont en octets.
 const KIB: f64 = 1024.0;
 
 /// Un mébioctet, unité de `ram_size`.
@@ -257,7 +257,7 @@ fn memory_samples(memory: &MemoryUsage, ts_ms: i64) -> Vec<Sample> {
     }
 
     // `real_usage` est le pourcentage tel que DSM l'affiche, mémoire cache exclue :
-    // on le reprend plutôt que de recalculer, pour que la valeur d'EzyMonit
+    // on le reprend plutôt que de recalculer, pour que la valeur d'DumbMonit
     // corresponde à celle lue dans l'interface du NAS.
     if let Some(usage) = memory.real_usage {
         samples.push(gauge("memory_usage_percent", usage.0, ts_ms));
@@ -374,7 +374,7 @@ pub fn disk_samples(disks: &[Disk], ts_ms: i64) -> Vec<Sample> {
 
 /// Bloc `env` de `load_info` : verdict du NAS sur lui-même et seuils qu'il applique.
 ///
-/// Ces seuils valent mieux qu'une valeur codée en dur dans EzyMonit : ce sont ceux
+/// Ces seuils valent mieux qu'une valeur codée en dur dans DumbMonit : ce sont ceux
 /// que l'utilisateur a réglés dans DSM, donc ceux qui correspondent à ce que le NAS
 /// lui affiche déjà. Les publier permet à une règle d'alerte de s'y référer plutôt
 /// que d'imposer un 80 % arbitraire.

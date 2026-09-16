@@ -54,7 +54,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use ezymonit_proto::{Collector, Credential, MetricKind, ProbeError, Sample, Target, TargetId};
+use dumbmonit_proto::{Collector, Credential, MetricKind, ProbeError, Sample, Target, TargetId};
 use reqwest::StatusCode;
 use tracing::{debug, warn};
 
@@ -663,7 +663,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::time::Duration;
 
-    use ezymonit_proto::Credential;
+    use dumbmonit_proto::Credential;
 
     use super::*;
 
@@ -691,7 +691,7 @@ mod tests {
     fn le_jeton_dapi_produit_une_session_sans_ticket() {
         let collector = ProxmoxCollector::new();
         let credential =
-            Credential::ApiToken { token: "monitoring@pve!ezymonit=8f3a1c9e-dead-beef".into() };
+            Credential::ApiToken { token: "monitoring@pve!dumbmonit=8f3a1c9e-dead-beef".into() };
         let mode = collector.auth_mode(&cible(credential)).unwrap();
         assert!(matches!(mode, AuthMode::Token(_)));
     }

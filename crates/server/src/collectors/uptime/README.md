@@ -1,9 +1,9 @@
 # Moniteurs de disponibilité
 
-L'équivalent d'Uptime Kuma dans EzyMonit : surveiller des **services** (une page
+L'équivalent d'Uptime Kuma dans DumbMonit : surveiller des **services** (une page
 web, un port, un nom DNS, un hôte, un certificat) et non seulement des
 **équipements**. Cinq collecteurs autonomes, qui ne dépendent que de
-`ezymonit-proto`, `reqwest`, `tokio`, `serde`, `chrono`, `hickory-resolver`,
+`dumbmonit-proto`, `reqwest`, `tokio`, `serde`, `chrono`, `hickory-resolver`,
 `surge-ping`, `x509-parser`, `rustls` / `tokio-rustls` / `webpki-roots`.
 
 ## Câblage
@@ -57,16 +57,16 @@ D'où la règle appliquée par les cinq sondes :
 Conséquence assumée : sur ces cibles, `up = 1` signifie « le moniteur a tourné », et
 non « le service va bien ». Les deux signaux sont alors distincts au lieu d'être
 confondus : `probe_success = 0` dit que le **service** est tombé, l'interruption de
-`ezymonit_up` dit que la **surveillance** est tombée. L'interface doit donc afficher
+`dumbmonit_up` dit que la **surveillance** est tombée. L'interface doit donc afficher
 l'état de ces cibles d'après `probe_success`.
 
 C'est aussi pourquoi chaque sonde a son propre délai (`timeout_seconds`, cinq
-secondes par défaut), plus court que `EZYMONIT_PROBE_TIMEOUT_SECS` : interrompue par
+secondes par défaut), plus court que `DUMBMONIT_PROBE_TIMEOUT_SECS` : interrompue par
 le registre, elle n'écrirait pas son zéro.
 
 ```
 # Taux de disponibilité sur trente jours, par cible :
-avg_over_time(ezymonit_probe_success[30d])
+avg_over_time(dumbmonit_probe_success[30d])
 ```
 
 ## Les cinq sondes
@@ -102,7 +102,7 @@ chaque série.
 | `insecure_tls` | `false` | Accepte un certificat non vérifiable. |
 | `check_certificate` | `true` | Relève le certificat (HTTPS seulement). |
 | `max_body_bytes` | `524288` | Corps rapatrié au plus. |
-| `user_agent` | `EzyMonit/…` | En-tête `User-Agent`. |
+| `user_agent` | `DumbMonit/…` | En-tête `User-Agent`. |
 | `timeout_seconds` | `5` | Budget total de la sonde (1 à 60). |
 
 ### `tcp`
@@ -138,7 +138,7 @@ chaque série.
 
 ```yaml
 services:
-  ezymonit:
+  dumbmonit:
     cap_add:
       - NET_RAW
 ```
@@ -167,7 +167,7 @@ n'y transite ; le verdict de la vérification ressort dans `probe_ssl_cert_valid
 
 ## Métriques
 
-Toutes des jauges, toutes préfixées `ezymonit_` à l'écriture, toutes étiquetées
+Toutes des jauges, toutes préfixées `dumbmonit_` à l'écriture, toutes étiquetées
 `probe="http|tcp|dns|ping|tls"` en plus de `target`, `host` et des `tag_*` posés par
 le registre.
 
@@ -204,11 +204,11 @@ Valeurs de `reason` : `dns`, `connect`, `timeout`, `tls`, `cert_expired`, `statu
 ## Règles d'alerte à livrer
 
 ```
-Service indisponible          ezymonit_probe_success == 0            for 2m   critique
-Certificat bientôt expiré     ezymonit_probe_ssl_cert_expiry_days    < 14     avertissement
-Certificat expiré             ezymonit_probe_ssl_cert_expiry_days    < 0      critique
-Perte de paquets              ezymonit_probe_icmp_packet_loss_ratio  > 0.2    for 10m  avertissement
-Réponse lente                 ezymonit_probe_duration_seconds        > 2      for 15m  info
+Service indisponible          dumbmonit_probe_success == 0            for 2m   critique
+Certificat bientôt expiré     dumbmonit_probe_ssl_cert_expiry_days    < 14     avertissement
+Certificat expiré             dumbmonit_probe_ssl_cert_expiry_days    < 0      critique
+Perte de paquets              dumbmonit_probe_icmp_packet_loss_ratio  > 0.2    for 10m  avertissement
+Réponse lente                 dumbmonit_probe_duration_seconds        > 2      for 15m  info
 ```
 
 ## Organisation

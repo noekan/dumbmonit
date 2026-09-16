@@ -14,7 +14,7 @@
 
 ## Checklist
 
-- [ ] `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` pass (in the `ezymonit-devenv` container is fine)
+- [ ] `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test` pass (in the `dumbmonit-devenv` container is fine)
 - [ ] `npm run check` passes in `web/` (if the UI changed)
 - [ ] `web/src/lib/api/types.ts` still mirrors the Rust API structs (if the API changed)
 - [ ] New device kind or channel is described for the UI (`api/collectors.rs` / `notify/catalog.rs`) and documented in `docs/`

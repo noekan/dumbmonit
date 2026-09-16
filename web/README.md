@@ -1,4 +1,4 @@
-# Interface web d'EzyMonit
+# Interface web d'DumbMonit
 
 Application monopage SvelteKit, compilée en site statique et embarquée dans le
 binaire Rust du serveur. Il n'y a pas de serveur Node en production.

@@ -1,6 +1,6 @@
 //! Ce que l'agent déclare de sa machine au serveur.
 
-use ezymonit_proto::AgentIdentity;
+use dumbmonit_proto::AgentIdentity;
 use sysinfo::System;
 
 use crate::config::Config;
@@ -58,7 +58,7 @@ mod tests {
     fn config_with_hostname(hostname: Option<&str>) -> Config {
         Config {
             server_url: "http://serveur:8080".into(),
-            token: "ezym_abc".into(),
+            token: "dmon_abc".into(),
             interval: std::time::Duration::from_secs(30),
             hostname: hostname.map(str::to_string),
             services: Vec::new(),
@@ -73,6 +73,7 @@ mod tests {
             plakar: crate::collect::plakar::PlakarConfig::default(),
             max_buffered_samples: 100,
             log_level: tracing::Level::INFO,
+            deprecated_env: Vec::new(),
         }
     }
 

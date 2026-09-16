@@ -17,7 +17,7 @@ export interface DeviceSerie extends Serie {
 
 /** One chart: every series of one metric family. */
 export interface DeviceMetricGroup {
-	/** Raw family name, for example `ezymonit_cpu_usage_percent`. */
+	/** Raw family name, for example `dumbmonit_cpu_usage_percent`. */
 	name: string;
 	title: string;
 	unit: string;
@@ -25,8 +25,8 @@ export interface DeviceMetricGroup {
 }
 
 /** Families that only ever grow: charted as a per-second rate. */
-const COUNTER = /_(octets|packets|errors)_(in|out)$|^ezymonit_disk_(read|written)_bytes$|_total$/;
-const COUNTER_SELECTOR = 'ezymonit_(.+_(octets|packets|errors)_(in|out)|disk_(read|written)_bytes|.+_total)';
+const COUNTER = /_(octets|packets|errors)_(in|out)$|^dumbmonit_disk_(read|written)_bytes$|_total$/;
+const COUNTER_SELECTOR = 'dumbmonit_(.+_(octets|packets|errors)_(in|out)|disk_(read|written)_bytes|.+_total)';
 
 /** About 300 points per chart, as in `$lib/metrics`. */
 function stepFor(seconds: number): number {
@@ -50,10 +50,10 @@ function unitFor(name: string): string {
 	return '';
 }
 
-/** "Cpu usage percent" from `ezymonit_cpu_usage_percent`; "Interface octets in" from `ezymonit_if_octets_in`. */
+/** "Cpu usage percent" from `dumbmonit_cpu_usage_percent`; "Interface octets in" from `dumbmonit_if_octets_in`. */
 export function titleFor(name: string): string {
 	const words = name
-		.replace(/^ezymonit_/, '')
+		.replace(/^dumbmonit_/, '')
 		.replace(/^if_/, 'interface_')
 		.replace(/_/g, ' ');
 	return words.charAt(0).toUpperCase() + words.slice(1);
@@ -122,7 +122,7 @@ export async function loadDeviceMetrics(
 	const [gauges, counters] = await Promise.all([
 		queryRange(
 			{
-				query: `{__name__=~"ezymonit_.+", __name__!~"${COUNTER_SELECTOR}", target="${targetId}"}`,
+				query: `{__name__=~"dumbmonit_.+", __name__!~"${COUNTER_SELECTOR}", target="${targetId}"}`,
 				start,
 				end,
 				step
@@ -212,15 +212,15 @@ function withSeries(
 function essentialsOf(groups: DeviceMetricGroup[]): DeviceMetricGroup[] {
 	const charts: DeviceMetricGroup[] = [];
 
-	const cpu = pick(groups, 'ezymonit_cpu_usage_percent');
+	const cpu = pick(groups, 'dumbmonit_cpu_usage_percent');
 	if (cpu) charts.push(withSeries(cpu, cpu.series, { title: 'CPU usage' }));
 
 	const loads = (['1', '5', '15'] as const)
-		.map((m) => ({ m, group: pick(groups, `ezymonit_load_average_${m}`) }))
+		.map((m) => ({ m, group: pick(groups, `dumbmonit_load_average_${m}`) }))
 		.filter((x): x is { m: '1' | '5' | '15'; group: DeviceMetricGroup } => x.group !== undefined);
 	if (loads.length > 0) {
 		charts.push({
-			name: 'ezymonit_load_average',
+			name: 'dumbmonit_load_average',
 			title: 'Load average',
 			unit: '',
 			series: loads.flatMap(({ m, group }) =>
@@ -229,14 +229,14 @@ function essentialsOf(groups: DeviceMetricGroup[]): DeviceMetricGroup[] {
 		});
 	}
 
-	const memory = pick(groups, 'ezymonit_memory_used_percent');
+	const memory = pick(groups, 'dumbmonit_memory_used_percent');
 	if (memory) charts.push(withSeries(memory, memory.series, { title: 'Memory used' }));
 
-	const fs = pick(groups, 'ezymonit_filesystem_used_percent');
+	const fs = pick(groups, 'dumbmonit_filesystem_used_percent');
 	if (fs) charts.push(withSeries(fs, fs.series, { title: 'Filesystems used' }));
 
-	const octetsIn = pick(groups, 'ezymonit_if_octets_in');
-	const octetsOut = pick(groups, 'ezymonit_if_octets_out');
+	const octetsIn = pick(groups, 'dumbmonit_if_octets_in');
+	const octetsOut = pick(groups, 'dumbmonit_if_octets_out');
 	if (octetsIn || octetsOut) {
 		const physical = (s: DeviceSerie) => !isVirtualInterface(s.labels.ifname ?? s.label);
 		const all = [...(octetsIn?.series ?? []), ...(octetsOut?.series ?? [])];
@@ -245,7 +245,7 @@ function essentialsOf(groups: DeviceMetricGroup[]): DeviceMetricGroup[] {
 			...s,
 			label: `${s.label} ${s.labels.__name__?.endsWith('_out') ? 'out' : 'in'}`
 		}));
-		charts.push({ name: 'ezymonit_if_octets', title: 'Network throughput', unit: 'B/s', series });
+		charts.push({ name: 'dumbmonit_if_octets', title: 'Network throughput', unit: 'B/s', series });
 	}
 
 	return charts;
@@ -322,12 +322,12 @@ export function sectionize(groups: DeviceMetricGroup[]): MetricSections {
 	const used = new Set([
 		...containerGroups.map((g) => g.name),
 		...interfaceGroups.map((g) => g.name),
-		'ezymonit_cpu_usage_percent',
-		'ezymonit_memory_used_percent',
-		'ezymonit_filesystem_used_percent',
-		'ezymonit_load_average_1',
-		'ezymonit_load_average_5',
-		'ezymonit_load_average_15'
+		'dumbmonit_cpu_usage_percent',
+		'dumbmonit_memory_used_percent',
+		'dumbmonit_filesystem_used_percent',
+		'dumbmonit_load_average_1',
+		'dumbmonit_load_average_5',
+		'dumbmonit_load_average_15'
 	]);
 	// `*_info` families carry their meaning in labels, not in the value 1.
 	const other = groups

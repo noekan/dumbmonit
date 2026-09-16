@@ -53,28 +53,26 @@ impl AlertingConfig {
     pub fn from_env() -> Self {
         let default = Self::default();
         Self {
-            interval: env_secs("EZYMONIT_ALERT_INTERVAL_SECS", default.interval)
+            interval: env_secs("DUMBMONIT_ALERT_INTERVAL_SECS", default.interval)
                 // Descendre sous dix secondes ne rendrait rien plus réactif : la
                 // période d'interrogation minimale d'une cible est déjà de dix secondes.
                 .max(Duration::from_secs(10)),
             // La variable est exprimée en jours, comme son nom l'indique.
-            history_retention: env_days("EZYMONIT_ALERT_HISTORY_DAYS", default.history_retention),
+            history_retention: env_days("DUMBMONIT_ALERT_HISTORY_DAYS", default.history_retention),
             baseline_retention: default.baseline_retention,
         }
     }
 }
 
 fn env_days(key: &str, default: Duration) -> Duration {
-    std::env::var(key)
-        .ok()
+    crate::config::env_var(key)
         .and_then(|raw| raw.parse::<u64>().ok())
         .filter(|days| *days > 0)
         .map_or(default, |days| Duration::from_secs(days * 86_400))
 }
 
 fn env_secs(key: &str, default: Duration) -> Duration {
-    std::env::var(key)
-        .ok()
+    crate::config::env_var(key)
         .and_then(|raw| raw.parse::<u64>().ok())
         .filter(|secs| *secs > 0)
         .map_or(default, Duration::from_secs)
@@ -275,7 +273,7 @@ pub async fn evaluate_once(
     let plan = notify_policy::plan(&outcome.groups, &recipients, &global, &ledger, now);
     policy_store::apply_plan(pool, &plan).await?;
 
-    let env_url = std::env::var("EZYMONIT_PUBLIC_URL").ok();
+    let env_url = crate::config::env_var("DUMBMONIT_PUBLIC_URL");
     let public_url = global.public_url(env_url.as_deref());
     let window = TimeDelta::seconds(i64::from(global.batch_window_secs));
     send_outgoing(
@@ -387,7 +385,7 @@ mod tests {
                 return Ok(Vec::new());
             };
             let labels: BTreeMap<String, String> =
-                [("__name__", "ezymonit_test"), ("target", "1"), ("host", "nas")]
+                [("__name__", "dumbmonit_test"), ("target", "1"), ("host", "nas")]
                     .iter()
                     .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
                     .collect();
@@ -411,7 +409,7 @@ mod tests {
     fn temp_db() -> PathBuf {
         let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir()
-            .join(format!("ezymonit-alerting-{}-{unique}/ezymonit.db", std::process::id()))
+            .join(format!("dumbmonit-alerting-{}-{unique}/dumbmonit.db", std::process::id()))
     }
 
     /// Monte une base réelle : migrations appliquées, une cible, les règles livrées.
@@ -596,7 +594,7 @@ mod tests {
         let store = db::alerts::load_baselines(&pool, baseline::bucket_of(at(0)))
             .await
             .expect("re-read baselines");
-        let key = "ezymonit_test{host=\"nas\",target=\"1\"}";
+        let key = "dumbmonit_test{host=\"nas\",target=\"1\"}";
         let bucket = store.bucket(key, baseline::bucket_of(at(0))).expect("bucket persisted");
         assert_eq!(bucket.samples, 1);
         assert_eq!(bucket.ewma, 50.0);
@@ -610,17 +608,17 @@ mod tests {
         // SAFETY : les tests d'un même binaire partagent l'environnement du processus ;
         // ce test ne lit qu'une variable qu'aucun autre n'utilise.
         unsafe {
-            std::env::set_var("EZYMONIT_ALERT_INTERVAL_SECS", "1");
+            std::env::set_var("DUMBMONIT_ALERT_INTERVAL_SECS", "1");
         }
         assert_eq!(AlertingConfig::from_env().interval, Duration::from_secs(10));
 
         unsafe {
-            std::env::set_var("EZYMONIT_ALERT_INTERVAL_SECS", "120");
+            std::env::set_var("DUMBMONIT_ALERT_INTERVAL_SECS", "120");
         }
         assert_eq!(AlertingConfig::from_env().interval, Duration::from_secs(120));
 
         unsafe {
-            std::env::remove_var("EZYMONIT_ALERT_INTERVAL_SECS");
+            std::env::remove_var("DUMBMONIT_ALERT_INTERVAL_SECS");
         }
         assert_eq!(AlertingConfig::from_env().interval, Duration::from_secs(30));
     }
@@ -628,12 +626,12 @@ mod tests {
     #[test]
     fn une_valeur_d_environnement_absurde_retombe_sur_le_defaut() {
         unsafe {
-            std::env::set_var("EZYMONIT_ALERT_HISTORY_DAYS", "zero");
+            std::env::set_var("DUMBMONIT_ALERT_HISTORY_DAYS", "zero");
         }
         let config = AlertingConfig::from_env();
         assert_eq!(config.history_retention, AlertingConfig::default().history_retention);
         unsafe {
-            std::env::remove_var("EZYMONIT_ALERT_HISTORY_DAYS");
+            std::env::remove_var("DUMBMONIT_ALERT_HISTORY_DAYS");
         }
     }
 }

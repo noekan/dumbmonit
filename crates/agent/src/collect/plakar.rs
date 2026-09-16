@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use ezymonit_proto::{MetricKind, Sample};
+use dumbmonit_proto::{MetricKind, Sample};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
@@ -770,7 +770,7 @@ mod tests {
     /// Une arborescence jetable : deux foyers avec des dépôts, un avec `~/.plakar`.
     fn lab_tree() -> PathBuf {
         let root = std::env::temp_dir().join(format!(
-            "ezymonit-plakar-{}-{}",
+            "dumbmonit-plakar-{}-{}",
             std::process::id(),
             rand_suffix()
         ));

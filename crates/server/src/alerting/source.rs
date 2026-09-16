@@ -52,7 +52,7 @@ mod tests {
 
     fn series(value: &str) -> InstantSeries {
         InstantSeries {
-            metric: [("__name__".to_string(), "ezymonit_up".to_string())].into_iter().collect(),
+            metric: [("__name__".to_string(), "dumbmonit_up".to_string())].into_iter().collect(),
             value: (1_700_000_000.0, value.to_string()),
         }
     }
@@ -62,7 +62,7 @@ mod tests {
         let point = convert(series("42.5")).expect("readable value");
         assert_eq!(point.value, 42.5);
         assert_eq!(point.ts_ms, 1_700_000_000_000);
-        assert_eq!(point.labels.get("__name__").map(String::as_str), Some("ezymonit_up"));
+        assert_eq!(point.labels.get("__name__").map(String::as_str), Some("dumbmonit_up"));
     }
 
     #[test]

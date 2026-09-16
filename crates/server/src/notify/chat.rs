@@ -170,7 +170,7 @@ impl Matrix {
     /// Identifiant de transaction : horloge pour l'ordre, compteur pour l'unicité.
     fn transaction_id() -> String {
         let count = MATRIX_TXN.fetch_add(1, Ordering::Relaxed);
-        format!("ezymonit-{}-{count}", chrono::Utc::now().timestamp_millis())
+        format!("dumbmonit-{}-{count}", chrono::Utc::now().timestamp_millis())
     }
 
     fn payload(message: &Message) -> Value {
@@ -404,7 +404,7 @@ impl GoogleChat {
     fn payload(message: &Message) -> Value {
         json!({
             "cardsV2": [{
-                "cardId": "ezymonit",
+                "cardId": "dumbmonit",
                 "card": {
                     "header": {
                         "title": format!("{} {}", message.emoji(), message.title),

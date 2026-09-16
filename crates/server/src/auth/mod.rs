@@ -48,11 +48,11 @@ use crate::auth::rate_limit::RateLimiter;
 
 /// Variable d'environnement pilotant l'attribut `Secure` du cookie de session.
 ///
-/// Elle est désactivée par défaut, et ce n'est pas un oubli : EzyMonit tourne très
+/// Elle est désactivée par défaut, et ce n'est pas un oubli : DumbMonit tourne très
 /// majoritairement en HTTP sur un réseau local, où un cookie `Secure` ne serait
 /// jamais renvoyé par le navigateur — la connexion deviendrait impossible. Derrière
 /// un reverse proxy TLS, on la met à `1`.
-const COOKIE_SECURE_ENV: &str = "EZYMONIT_COOKIE_SECURE";
+const COOKIE_SECURE_ENV: &str = "DUMBMONIT_COOKIE_SECURE";
 
 /// État d'authentification partagé par les gestionnaires et par le middleware.
 ///
@@ -168,7 +168,7 @@ impl AuthState {
 
 fn env_flag(key: &str) -> bool {
     matches!(
-        std::env::var(key).unwrap_or_default().trim().to_ascii_lowercase().as_str(),
+        crate::config::env_var(key).unwrap_or_default().trim().to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on" | "oui"
     )
 }

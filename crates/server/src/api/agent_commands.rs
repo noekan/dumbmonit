@@ -14,7 +14,7 @@ use axum::extract::{Extension, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use ezymonit_proto::{
+use dumbmonit_proto::{
     AgentCommand, CMD_CONTAINER_RESTART, CMD_CONTAINER_UPDATE, CommandReport, TargetId,
 };
 use serde::{Deserialize, Serialize};
@@ -31,7 +31,7 @@ const RECENT_COMMANDS: i64 = 20;
 
 /// Les conteneurs du moniteur lui-même : il ne se redémarre ni ne se met à jour
 /// par son propre canal — il ne serait plus là pour en rendre compte.
-const RESERVED_PREFIXES: &[&str] = &["ezymonit", "dumbmonit"];
+const RESERVED_PREFIXES: &[&str] = &["dumbmonit", "dumbmonit"];
 
 // ------------------------------------------------------------- agent side
 
@@ -221,12 +221,12 @@ pub fn group_readings<'a>(
             reading.image = image.clone();
         }
         match name.as_str() {
-            "ezymonit_container_up" => reading.up = Some(value),
-            "ezymonit_container_health" => reading.health = Some(value),
-            "ezymonit_container_restart_count" => reading.restart_count = Some(value),
-            "ezymonit_container_started_seconds" => reading.started_seconds = Some(value),
-            "ezymonit_container_image_age_seconds" => reading.image_age_seconds = Some(value),
-            "ezymonit_container_update_available" => reading.update_available = Some(value),
+            "dumbmonit_container_up" => reading.up = Some(value),
+            "dumbmonit_container_health" => reading.health = Some(value),
+            "dumbmonit_container_restart_count" => reading.restart_count = Some(value),
+            "dumbmonit_container_started_seconds" => reading.started_seconds = Some(value),
+            "dumbmonit_container_image_age_seconds" => reading.image_age_seconds = Some(value),
+            "dumbmonit_container_update_available" => reading.update_available = Some(value),
             _ => {}
         }
     }
@@ -272,7 +272,7 @@ fn to_view(
 }
 
 /// Charge une cible de type `agent`, ou 404.
-async fn agent_target(state: &AppState, id: TargetId) -> ApiResult<ezymonit_proto::Target> {
+async fn agent_target(state: &AppState, id: TargetId) -> ApiResult<dumbmonit_proto::Target> {
     let target = db::targets::get(&state.pool, &state.cipher, id)
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("Device {id} not found.")))?;
@@ -308,7 +308,7 @@ async fn list_containers(
 ) -> ApiResult<Json<Vec<ContainerView>>> {
     agent_target(&state, id).await?;
     let query = format!(
-        r#"{{__name__=~"ezymonit_container_(up|health|restart_count|started_seconds|image_age_seconds|update_available)", target="{id}"}}"#
+        r#"{{__name__=~"dumbmonit_container_(up|health|restart_count|started_seconds|image_age_seconds|update_available)", target="{id}"}}"#
     );
     let series = state.victoria.query(&query).await?;
     let readings = group_readings(
@@ -412,14 +412,15 @@ mod tests {
     #[test]
     fn readings_are_joined_by_container_name() {
         let web_up = labels(&[
-            ("__name__", "ezymonit_container_up"),
+            ("__name__", "dumbmonit_container_up"),
             ("container", "web"),
             ("image", "nginx:1.25"),
         ]);
-        let web_health = labels(&[("__name__", "ezymonit_container_health"), ("container", "web")]);
+        let web_health =
+            labels(&[("__name__", "dumbmonit_container_health"), ("container", "web")]);
         let web_update =
-            labels(&[("__name__", "ezymonit_container_update_available"), ("container", "web")]);
-        let ghost = labels(&[("__name__", "ezymonit_container_health"), ("container", "ghost")]);
+            labels(&[("__name__", "dumbmonit_container_update_available"), ("container", "web")]);
+        let ghost = labels(&[("__name__", "dumbmonit_container_health"), ("container", "ghost")]);
         let series = [(&web_up, 1.0), (&web_health, 2.0), (&web_update, -1.0), (&ghost, 1.0)];
 
         let readings = group_readings(series.into_iter());
@@ -462,7 +463,7 @@ mod tests {
         assert!(validate_name("../web").is_err());
         assert!(validate_name(&"a".repeat(129)).is_err());
         // Le moniteur ne se touche pas lui-même.
-        assert!(validate_name("ezymonit-ezymonit-1").is_err());
+        assert!(validate_name("dumbmonit-dumbmonit-1").is_err());
         assert!(validate_name("DumbMonit").is_err());
     }
 }

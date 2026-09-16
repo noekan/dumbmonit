@@ -8,7 +8,7 @@
 //! Sans Ceph installé, PVE répond une erreur — 500 « not initialized » ou 404 :
 //! l'orchestration la traite comme « pas de Ceph », sans compter d'erreur.
 
-use ezymonit_proto::Sample;
+use dumbmonit_proto::Sample;
 
 use super::metrics::gauge;
 use super::model::{CephStatus, Num};

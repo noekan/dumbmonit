@@ -9,16 +9,16 @@
 # failure scenarios: docker/lab/README.md and docs/development.md ("Test lab").
 
 services:
-  ezymonit:
+  dumbmonit:
     environment:
       # OpenID Connect against the lab Dex. Groups need the `groups` scope.
-      EZYMONIT_OIDC_ISSUER: ${LAB_DEX_ISSUER:-http://dex:5556/dex}
-      EZYMONIT_OIDC_CLIENT_ID: dumbmonit
-      EZYMONIT_OIDC_CLIENT_SECRET: dumbmonit-lab-secret
-      EZYMONIT_OIDC_PROVIDER_NAME: Lab Dex
-      EZYMONIT_OIDC_SCOPES: openid profile email groups
-      EZYMONIT_OIDC_ADMIN_GROUPS: dumbmonit-admins
-      EZYMONIT_OIDC_GROUPS_CLAIM: groups
+      DUMBMONIT_OIDC_ISSUER: ${LAB_DEX_ISSUER:-http://dex:5556/dex}
+      DUMBMONIT_OIDC_CLIENT_ID: dumbmonit
+      DUMBMONIT_OIDC_CLIENT_SECRET: dumbmonit-lab-secret
+      DUMBMONIT_OIDC_PROVIDER_NAME: Lab Dex
+      DUMBMONIT_OIDC_SCOPES: openid profile email groups
+      DUMBMONIT_OIDC_ADMIN_GROUPS: dumbmonit-admins
+      DUMBMONIT_OIDC_GROUPS_CLAIM: groups
 
   # ── SNMP agents (snmpsim replays .snmprec files; community = file name) ──────
   # tandrup/snmpsim is the last published image of snmpsim 0.4 (Python 3.4);

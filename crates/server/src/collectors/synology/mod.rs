@@ -68,7 +68,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use ezymonit_proto::{Collector, Credential, MetricKind, ProbeError, Sample, Target, TargetId};
+use dumbmonit_proto::{Collector, Credential, MetricKind, ProbeError, Sample, Target, TargetId};
 use tracing::{debug, warn};
 
 use auth::{Credentials, SessionSlot};
@@ -402,7 +402,7 @@ async fn collect_backups(
 mod tests {
     use std::collections::BTreeMap;
 
-    use ezymonit_proto::Credential;
+    use dumbmonit_proto::Credential;
 
     use super::*;
 

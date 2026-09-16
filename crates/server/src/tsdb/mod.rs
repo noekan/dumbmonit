@@ -5,17 +5,19 @@
 //! pas de dépendance à snappy ni à un schéma généré, et un flux lisible à l'œil
 //! quand il faut diagnostiquer.
 
+pub mod embedded;
 mod writer;
 
+pub use embedded::{EmbeddedConfig, EmbeddedVm};
 pub use writer::{DEFAULT_FLUSH_SIZE, SampleSink, spawn_writer, spawn_writer_with};
 
 use anyhow::{Context, Result, bail};
-use ezymonit_proto::Sample;
+use dumbmonit_proto::Sample;
 use serde::Deserialize;
 
 /// Préfixe appliqué à toutes nos métriques, pour cohabiter sans collision avec une
 /// instance VictoriaMetrics que l'utilisateur partagerait avec d'autres outils.
-pub const METRIC_PREFIX: &str = "ezymonit_";
+pub const METRIC_PREFIX: &str = "dumbmonit_";
 
 #[derive(Clone)]
 pub struct Victoria {
@@ -30,6 +32,11 @@ impl Victoria {
             .build()
             .context("construction du client HTTP VictoriaMetrics")?;
         Ok(Self { http, base_url: base_url.into().trim_end_matches('/').to_string() })
+    }
+
+    /// URL de base, telle que normalisée à la construction.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
     }
 
     /// Vérifie que VictoriaMetrics répond. Appelée au démarrage et par `/api/health`.
@@ -207,7 +214,7 @@ fn escape_label_value(value: &str, out: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    use ezymonit_proto::MetricKind;
+    use dumbmonit_proto::MetricKind;
 
     use super::*;
 
@@ -218,7 +225,7 @@ mod tests {
             .with_label("ifname", "eth0");
         assert_eq!(
             encode_prometheus(&[sample]),
-            "ezymonit_if_octets_in{host=\"sw1\",ifname=\"eth0\"} 1234 1700000000000\n"
+            "dumbmonit_if_octets_in{host=\"sw1\",ifname=\"eth0\"} 1234 1700000000000\n"
         );
     }
 
@@ -228,7 +235,7 @@ mod tests {
         let sample = Sample::new("if_up", 1.0, MetricKind::Gauge, 0)
             .with_label("ifalias", r#"Lien "backup" \ site B"#);
         let encoded = encode_prometheus(&[sample]);
-        assert_eq!(encoded, "ezymonit_if_up{ifalias=\"Lien \\\"backup\\\" \\\\ site B\"} 1 0\n");
+        assert_eq!(encoded, "dumbmonit_if_up{ifalias=\"Lien \\\"backup\\\" \\\\ site B\"} 1 0\n");
     }
 
     #[test]
@@ -238,7 +245,7 @@ mod tests {
             Sample::new("also_bad", f64::INFINITY, MetricKind::Gauge, 0),
             Sample::new("good", 1.0, MetricKind::Gauge, 0),
         ];
-        assert_eq!(encode_prometheus(&samples), "ezymonit_good 1 0\n");
+        assert_eq!(encode_prometheus(&samples), "dumbmonit_good 1 0\n");
     }
 
     #[test]

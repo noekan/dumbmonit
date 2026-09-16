@@ -9,7 +9,7 @@
 //!
 //! Tout est pur ici : les réponses sont converties, jamais demandées.
 
-use ezymonit_proto::Sample;
+use dumbmonit_proto::Sample;
 
 use super::metrics::gauge;
 use super::model::{AptUpdate, JobEntry};

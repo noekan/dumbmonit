@@ -1,7 +1,7 @@
 /**
  * Loading and shaping of metrics for charts.
  *
- * Every stored metric is prefixed `ezymonit_` and carries the `target` label
+ * Every stored metric is prefixed `dumbmonit_` and carries the `target` label
  * (the target identifier), set by the server pipeline. Everything about a
  * device can therefore be fetched with a single query.
  */
@@ -21,7 +21,7 @@ export type RangeId = (typeof RANGES)[number]['id'];
 
 /** A group of series sharing the same metric name: one chart on screen. */
 export interface MetricGroup {
-	/** Raw name, for example `ezymonit_cpu_usage_percent`. */
+	/** Raw name, for example `dumbmonit_cpu_usage_percent`. */
 	name: string;
 	/** Displayed title, without the prefix or the underscores. */
 	title: string;
@@ -49,9 +49,9 @@ function unitFor(name: string): string {
 	return '';
 }
 
-/** Readable title: `ezymonit_cpu_usage_percent` becomes "Cpu usage percent". */
+/** Readable title: `dumbmonit_cpu_usage_percent` becomes "Cpu usage percent". */
 function titleFor(name: string): string {
-	const words = name.replace(/^ezymonit_/, '').replace(/_/g, ' ');
+	const words = name.replace(/^dumbmonit_/, '').replace(/_/g, ' ');
 	return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
@@ -117,7 +117,7 @@ export async function loadTargetMetrics(
 	const start = end - rangeSeconds * 1000;
 	const series = await queryRange(
 		{
-			query: `{__name__=~"ezymonit_.+", target="${targetId}"}`,
+			query: `{__name__=~"dumbmonit_.+", target="${targetId}"}`,
 			start,
 			end,
 			step: stepFor(rangeSeconds)
@@ -160,7 +160,7 @@ export async function loadSparklines(
 	const start = end - rangeSeconds * 1000;
 	const series = await queryRange(
 		{
-			query: '{__name__=~"ezymonit_.+"}',
+			query: '{__name__=~"dumbmonit_.+"}',
 			start,
 			end,
 			// A sparkline only needs about sixty points.
@@ -238,8 +238,8 @@ function lastReasons(series: MetricSeries[]): Map<TargetId, string> {
  */
 export async function loadProbeStatuses(signal?: AbortSignal): Promise<Map<TargetId, ProbeStatus>> {
 	const [states, failures] = await Promise.all([
-		queryInstant(`last_over_time(ezymonit_probe_success[${STATE_WINDOW}])`, signal),
-		queryInstant(`tlast_over_time(ezymonit_probe_failure_info[${STATE_WINDOW}])`, signal)
+		queryInstant(`last_over_time(dumbmonit_probe_success[${STATE_WINDOW}])`, signal),
+		queryInstant(`tlast_over_time(dumbmonit_probe_failure_info[${STATE_WINDOW}])`, signal)
 	]);
 	const reasons = lastReasons(failures);
 
@@ -284,7 +284,7 @@ export const HISTORY_SLOTS = 60;
  * must appear in one go.
  *
  * Certificate metrics are looked up under both possible names
- * (`ezymonit_probe_ssl_cert_expiry_days`, as emitted by the probes, and the
+ * (`dumbmonit_probe_ssl_cert_expiry_days`, as emitted by the probes, and the
  * form without `probe_`) so as not to depend on a server-side rename.
  */
 export async function loadUptimeSummary(
@@ -293,21 +293,21 @@ export async function loadUptimeSummary(
 ): Promise<UptimeSummary> {
 	const target = `target="${targetId}"`;
 	const availability = (window: string) =>
-		queryInstant(`avg_over_time(ezymonit_probe_success{${target}}[${window}]) * 100`, signal);
+		queryInstant(`avg_over_time(dumbmonit_probe_success{${target}}[${window}]) * 100`, signal);
 
 	const [state, failures, day, week, month, response, certificate, version] = await Promise.all([
-		queryInstant(`last_over_time(ezymonit_probe_success{${target}}[${STATE_WINDOW}])`, signal),
-		queryInstant(`tlast_over_time(ezymonit_probe_failure_info{${target}}[${STATE_WINDOW}])`, signal),
+		queryInstant(`last_over_time(dumbmonit_probe_success{${target}}[${STATE_WINDOW}])`, signal),
+		queryInstant(`tlast_over_time(dumbmonit_probe_failure_info{${target}}[${STATE_WINDOW}])`, signal),
 		availability('24h'),
 		availability('7d'),
 		availability('30d'),
-		queryInstant(`avg_over_time(ezymonit_probe_duration_seconds{${target}}[1h])`, signal),
+		queryInstant(`avg_over_time(dumbmonit_probe_duration_seconds{${target}}[1h])`, signal),
 		queryInstant(
-			`last_over_time({__name__=~"ezymonit_(probe_)?ssl_cert_expiry_days", ${target}}[1h])`,
+			`last_over_time({__name__=~"dumbmonit_(probe_)?ssl_cert_expiry_days", ${target}}[1h])`,
 			signal
 		),
 		queryInstant(
-			`last_over_time({__name__=~"ezymonit_(probe_)?tls_version_info", ${target}}[1h])`,
+			`last_over_time({__name__=~"dumbmonit_(probe_)?tls_version_info", ${target}}[1h])`,
 			signal
 		)
 	]);
@@ -350,7 +350,7 @@ export async function loadUptimeHistory(
 	const start = end - step * HISTORY_SLOTS * 1000;
 	const series = await queryRange(
 		{
-			query: `min_over_time(ezymonit_probe_success{target="${targetId}"}[${step}s])`,
+			query: `min_over_time(dumbmonit_probe_success{target="${targetId}"}[${step}s])`,
 			start,
 			end,
 			step
@@ -393,7 +393,7 @@ export async function loadResponseTimes(
 	const start = end - rangeSeconds * 1000;
 	const series = await queryRange(
 		{
-			query: `ezymonit_probe_duration_seconds{target="${targetId}"}`,
+			query: `dumbmonit_probe_duration_seconds{target="${targetId}"}`,
 			start,
 			end,
 			step: stepFor(rangeSeconds)

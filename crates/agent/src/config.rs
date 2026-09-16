@@ -116,7 +116,7 @@ struct SystemHealthFile {
 /// Configuration effective, une fois le fichier et l'environnement fusionnés.
 #[derive(Clone)]
 pub struct Config {
-    /// Racine du serveur EzyMonit, sans le chemin de la route.
+    /// Racine du serveur DumbMonit, sans le chemin de la route.
     pub server_url: String,
     /// Jeton d'enregistrement. Ne doit jamais apparaître dans les journaux.
     pub token: String,
@@ -143,6 +143,10 @@ pub struct Config {
     pub plakar: PlakarConfig,
     pub max_buffered_samples: usize,
     pub log_level: tracing::Level,
+    /// Variables `EZYMONIT_*` encore utilisées, sous la forme (ancien nom, nouveau
+    /// nom) : le journal n'existe pas encore quand la configuration est lue, les
+    /// avertissements sont rejoués par [`Config::warn_deprecated_env`].
+    pub deprecated_env: Vec<(String, String)>,
 }
 
 /// Le jeton n'est jamais affiché, pas même tronqué.
@@ -174,16 +178,27 @@ impl fmt::Debug for Config {
 
 impl Config {
     /// Emplacement du fichier de configuration lorsque rien n'est précisé.
+    ///
+    /// Une installation antérieure au renommage du produit (`/etc/ezymonit`,
+    /// `C:\ProgramData\EzyMonit`) est encore reconnue tant que le nouvel
+    /// emplacement n'existe pas : le script d'installation la déplace à la
+    /// première mise à jour.
     pub fn default_path() -> PathBuf {
+        let (current, legacy) = Self::default_paths();
+        if !current.exists() && legacy.exists() { legacy } else { current }
+    }
+
+    fn default_paths() -> (PathBuf, PathBuf) {
         #[cfg(windows)]
         {
             let root =
                 std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".to_string());
-            PathBuf::from(root).join("EzyMonit").join("agent.yaml")
+            let root = PathBuf::from(root);
+            (root.join("DumbMonit").join("agent.yaml"), root.join("EzyMonit").join("agent.yaml"))
         }
         #[cfg(not(windows))]
         {
-            PathBuf::from("/etc/ezymonit/agent.yaml")
+            (PathBuf::from("/etc/dumbmonit/agent.yaml"), PathBuf::from("/etc/ezymonit/agent.yaml"))
         }
     }
 
@@ -207,42 +222,42 @@ impl Config {
 
     fn merge(file: FileConfig, env: EnvSource) -> Result<Self> {
         let server_url = env
-            .get("EZYMONIT_AGENT_URL")
+            .get("DUMBMONIT_AGENT_URL")
             .or(file.server_url)
             .map(|url| url.trim().trim_end_matches('/').to_string())
             .unwrap_or_default();
         if server_url.is_empty() {
-            bail!("the server URL is required (key 'server_url' or variable EZYMONIT_AGENT_URL)");
+            bail!("the server URL is required (key 'server_url' or variable DUMBMONIT_AGENT_URL)");
         }
         if !server_url.starts_with("http://") && !server_url.starts_with("https://") {
             bail!("the server URL must start with http:// or https:// (got '{server_url}')");
         }
 
-        let token = env.get("EZYMONIT_AGENT_TOKEN").or(file.token).unwrap_or_default();
+        let token = env.get("DUMBMONIT_AGENT_TOKEN").or(file.token).unwrap_or_default();
         let token = token.trim().to_string();
         if token.is_empty() {
             bail!(
-                "the enrollment token is required (key 'token' or variable EZYMONIT_AGENT_TOKEN)"
+                "the enrollment token is required (key 'token' or variable DUMBMONIT_AGENT_TOKEN)"
             );
         }
 
-        let interval_secs = match env.get("EZYMONIT_AGENT_INTERVAL_SECS") {
+        let interval_secs = match env.get("DUMBMONIT_AGENT_INTERVAL_SECS") {
             Some(raw) => raw
                 .trim()
                 .parse::<u64>()
-                .with_context(|| format!("EZYMONIT_AGENT_INTERVAL_SECS: invalid value '{raw}'"))?,
+                .with_context(|| format!("DUMBMONIT_AGENT_INTERVAL_SECS: invalid value '{raw}'"))?,
             None => file.interval_secs.unwrap_or(DEFAULT_INTERVAL_SECS),
         };
         if interval_secs < MIN_INTERVAL_SECS {
             bail!("the sampling period must be at least {MIN_INTERVAL_SECS} seconds");
         }
 
-        let services = match env.get("EZYMONIT_AGENT_SERVICES") {
+        let services = match env.get("DUMBMONIT_AGENT_SERVICES") {
             Some(raw) => split_list(&raw),
             None => file.services.unwrap_or_default(),
         };
 
-        let tags = match env.get("EZYMONIT_AGENT_TAGS") {
+        let tags = match env.get("DUMBMONIT_AGENT_TAGS") {
             Some(raw) => parse_tags(&raw)?,
             None => file.tags.unwrap_or_default(),
         };
@@ -253,15 +268,15 @@ impl Config {
                 None => Ok(from_file.unwrap_or(default)),
             }
         };
-        let docker = flag("EZYMONIT_AGENT_DOCKER", file.docker, true)?;
+        let docker = flag("DUMBMONIT_AGENT_DOCKER", file.docker, true)?;
         let docker_update_check =
-            flag("EZYMONIT_AGENT_DOCKER_UPDATE_CHECK", file.docker_update_check, true)?;
-        let commands = flag("EZYMONIT_AGENT_COMMANDS", file.commands, true)?;
-        let cpu_per_core = flag("EZYMONIT_AGENT_CPU_PER_CORE", file.cpu_per_core, false)?;
+            flag("DUMBMONIT_AGENT_DOCKER_UPDATE_CHECK", file.docker_update_check, true)?;
+        let commands = flag("DUMBMONIT_AGENT_COMMANDS", file.commands, true)?;
+        let cpu_per_core = flag("DUMBMONIT_AGENT_CPU_PER_CORE", file.cpu_per_core, false)?;
 
-        let docker_max_containers = match env.get("EZYMONIT_AGENT_DOCKER_MAX_CONTAINERS") {
+        let docker_max_containers = match env.get("DUMBMONIT_AGENT_DOCKER_MAX_CONTAINERS") {
             Some(raw) => raw.trim().parse::<usize>().with_context(|| {
-                format!("EZYMONIT_AGENT_DOCKER_MAX_CONTAINERS: invalid value '{raw}'")
+                format!("DUMBMONIT_AGENT_DOCKER_MAX_CONTAINERS: invalid value '{raw}'")
             })?,
             None => file.docker_max_containers.unwrap_or(DEFAULT_MAX_CONTAINERS),
         };
@@ -282,19 +297,19 @@ impl Config {
             };
         let probe = ProbeConfig {
             interfaces_ignore: patterns(
-                "EZYMONIT_AGENT_INTERFACES_IGNORE",
+                "DUMBMONIT_AGENT_INTERFACES_IGNORE",
                 "interfaces_ignore",
                 file.interfaces_ignore,
                 &[DEFAULT_INTERFACES_IGNORE],
             )?,
             interfaces_only: patterns(
-                "EZYMONIT_AGENT_INTERFACES_ONLY",
+                "DUMBMONIT_AGENT_INTERFACES_ONLY",
                 "interfaces_only",
                 file.interfaces_only,
                 &[],
             )?,
             mounts_ignore: patterns(
-                "EZYMONIT_AGENT_MOUNTS_IGNORE",
+                "DUMBMONIT_AGENT_MOUNTS_IGNORE",
                 "mounts_ignore",
                 file.mounts_ignore,
                 &[DEFAULT_MOUNTS_IGNORE],
@@ -302,9 +317,9 @@ impl Config {
             cpu_per_core,
         };
 
-        let plakar_interval_secs = match env.get("EZYMONIT_AGENT_PLAKAR_INTERVAL_SECS") {
+        let plakar_interval_secs = match env.get("DUMBMONIT_AGENT_PLAKAR_INTERVAL_SECS") {
             Some(raw) => raw.trim().parse::<u64>().with_context(|| {
-                format!("EZYMONIT_AGENT_PLAKAR_INTERVAL_SECS: invalid value '{raw}'")
+                format!("DUMBMONIT_AGENT_PLAKAR_INTERVAL_SECS: invalid value '{raw}'")
             })?,
             None => file.plakar_interval_secs.unwrap_or(plakar::DEFAULT_INTERVAL_SECS),
         };
@@ -316,12 +331,12 @@ impl Config {
         }
         let plakar = PlakarConfig {
             bin: env
-                .get("EZYMONIT_AGENT_PLAKAR_BIN")
+                .get("DUMBMONIT_AGENT_PLAKAR_BIN")
                 .or(file.plakar_bin)
                 .map(|bin| bin.trim().to_string())
                 .filter(|bin| !bin.is_empty())
                 .unwrap_or_else(|| "plakar".to_string()),
-            klosets: match env.get("EZYMONIT_AGENT_PLAKAR_KLOSETS") {
+            klosets: match env.get("DUMBMONIT_AGENT_PLAKAR_KLOSETS") {
                 Some(raw) => split_list(&raw),
                 None => file
                     .plakar_klosets
@@ -332,16 +347,16 @@ impl Config {
                     .collect(),
             },
             home: env
-                .get("EZYMONIT_AGENT_PLAKAR_HOME")
+                .get("DUMBMONIT_AGENT_PLAKAR_HOME")
                 .or(file.plakar_home)
                 .map(|home| home.trim().to_string())
                 .filter(|home| !home.is_empty()),
             interval: Duration::from_secs(plakar_interval_secs),
         };
 
-        let max_buffered_samples = match env.get("EZYMONIT_AGENT_MAX_BUFFERED_SAMPLES") {
+        let max_buffered_samples = match env.get("DUMBMONIT_AGENT_MAX_BUFFERED_SAMPLES") {
             Some(raw) => raw.trim().parse::<usize>().with_context(|| {
-                format!("EZYMONIT_AGENT_MAX_BUFFERED_SAMPLES: invalid value '{raw}'")
+                format!("DUMBMONIT_AGENT_MAX_BUFFERED_SAMPLES: invalid value '{raw}'")
             })?,
             None => file.max_buffered_samples.unwrap_or(DEFAULT_MAX_BUFFERED_SAMPLES),
         };
@@ -349,7 +364,7 @@ impl Config {
             bail!("the catch-up buffer cannot be zero");
         }
 
-        let log_level = match env.get("EZYMONIT_AGENT_LOG").or(file.log_level) {
+        let log_level = match env.get("DUMBMONIT_AGENT_LOG").or(file.log_level) {
             Some(raw) => parse_level(&raw)?,
             None => tracing::Level::INFO,
         };
@@ -362,7 +377,7 @@ impl Config {
             token,
             interval: Duration::from_secs(interval_secs),
             hostname: env
-                .get("EZYMONIT_AGENT_HOSTNAME")
+                .get("DUMBMONIT_AGENT_HOSTNAME")
                 .or(file.hostname)
                 .map(|name| name.trim().to_string())
                 .filter(|name| !name.is_empty()),
@@ -370,7 +385,7 @@ impl Config {
             tags,
             docker,
             docker_socket: env
-                .get("EZYMONIT_AGENT_DOCKER_SOCKET")
+                .get("DUMBMONIT_AGENT_DOCKER_SOCKET")
                 .or(file.docker_socket)
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from(DEFAULT_DOCKER_SOCKET)),
@@ -382,7 +397,16 @@ impl Config {
             plakar,
             max_buffered_samples,
             log_level,
+            deprecated_env: env.deprecated(),
         })
+    }
+
+    /// Signale, une fois le journal en place, les variables d'environnement lues
+    /// sous leur ancien nom.
+    pub fn warn_deprecated_env(&self) {
+        for (legacy, name) in &self.deprecated_env {
+            dumbmonit_proto::env::warn_deprecated(legacy, name);
+        }
     }
 
     fn merge_system_health(file: SystemHealthFile, env: &EnvSource) -> Result<SystemHealthConfig> {
@@ -392,9 +416,9 @@ impl Config {
                 None => Ok(from_file.unwrap_or(default)),
             }
         };
-        let updates_interval_secs = match env.get("EZYMONIT_AGENT_UPDATES_INTERVAL_SECS") {
+        let updates_interval_secs = match env.get("DUMBMONIT_AGENT_UPDATES_INTERVAL_SECS") {
             Some(raw) => raw.trim().parse::<u64>().with_context(|| {
-                format!("EZYMONIT_AGENT_UPDATES_INTERVAL_SECS: invalid value '{raw}'")
+                format!("DUMBMONIT_AGENT_UPDATES_INTERVAL_SECS: invalid value '{raw}'")
             })?,
             None => file.updates_interval_secs.unwrap_or(DEFAULT_UPDATES_INTERVAL_SECS),
         };
@@ -404,12 +428,12 @@ impl Config {
             );
         }
         Ok(SystemHealthConfig {
-            enabled: flag("EZYMONIT_AGENT_SYSTEM_HEALTH", file.enabled, true)?,
-            check_updates: flag("EZYMONIT_AGENT_CHECK_UPDATES", file.check_updates, true)?,
+            enabled: flag("DUMBMONIT_AGENT_SYSTEM_HEALTH", file.enabled, true)?,
+            check_updates: flag("DUMBMONIT_AGENT_CHECK_UPDATES", file.check_updates, true)?,
             updates_interval: Duration::from_secs(updates_interval_secs),
-            check_reboot: flag("EZYMONIT_AGENT_CHECK_REBOOT", file.check_reboot, true)?,
+            check_reboot: flag("DUMBMONIT_AGENT_CHECK_REBOOT", file.check_reboot, true)?,
             check_failed_units: flag(
-                "EZYMONIT_AGENT_CHECK_FAILED_UNITS",
+                "DUMBMONIT_AGENT_CHECK_FAILED_UNITS",
                 file.check_failed_units,
                 true,
             )?,
@@ -420,15 +444,32 @@ impl Config {
 /// Source des surcharges. Indirection volontaire : elle rend la fusion testable
 /// sans toucher aux variables d'environnement du processus de test, qui sont
 /// globales et donc hostiles à l'exécution parallèle des tests.
-struct EnvSource(BTreeMap<String, String>);
+struct EnvSource {
+    vars: BTreeMap<String, String>,
+    /// Anciens noms rencontrés, dans l'ordre de lecture.
+    deprecated: std::cell::RefCell<Vec<(String, String)>>,
+}
 
 impl EnvSource {
     fn process() -> Self {
-        Self(std::env::vars().collect())
+        Self::from_map(std::env::vars().collect())
     }
 
+    fn from_map(vars: BTreeMap<String, String>) -> Self {
+        Self { vars, deprecated: Default::default() }
+    }
+
+    /// Lit une variable `DUMBMONIT_AGENT_*`, en acceptant encore `EZYMONIT_AGENT_*`.
     fn get(&self, key: &str) -> Option<String> {
-        self.0.get(key).map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
+        let found = dumbmonit_proto::env::lookup(key, |name| self.vars.get(name).cloned())?;
+        if let Some(legacy) = found.legacy_name {
+            self.deprecated.borrow_mut().push((legacy, key.to_string()));
+        }
+        Some(found.value.trim().to_string())
+    }
+
+    fn deprecated(&self) -> Vec<(String, String)> {
+        self.deprecated.borrow().clone()
     }
 }
 
@@ -475,13 +516,27 @@ mod tests {
     use super::*;
 
     fn env(pairs: &[(&str, &str)]) -> EnvSource {
-        EnvSource(pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect())
+        EnvSource::from_map(pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect())
+    }
+
+    #[test]
+    fn the_old_variable_names_are_still_read_and_reported() {
+        let config = Config::merge(
+            FileConfig::default(),
+            env(&[("EZYMONIT_AGENT_URL", "http://old:8080"), ("DUMBMONIT_AGENT_TOKEN", "dmon_x")]),
+        )
+        .expect("configuration");
+        assert_eq!(config.server_url, "http://old:8080");
+        assert_eq!(
+            config.deprecated_env,
+            vec![("EZYMONIT_AGENT_URL".to_string(), "DUMBMONIT_AGENT_URL".to_string())]
+        );
     }
 
     fn file_with_url_and_token() -> FileConfig {
         FileConfig {
             server_url: Some("http://serveur:8080/".into()),
-            token: Some("ezym_abc".into()),
+            token: Some("dmon_abc".into()),
             ..FileConfig::default()
         }
     }
@@ -518,7 +573,7 @@ docker_max_containers: 20
 "#;
         let file = FileConfig {
             server_url: Some("http://s:8080".into()),
-            token: Some("ezym_abc".into()),
+            token: Some("dmon_abc".into()),
             ..serde_yaml_ng::from_str(yaml).expect("YAML valide")
         };
         let config = Config::merge(file, env(&[])).expect("configuration");
@@ -542,16 +597,16 @@ docker_max_containers: 20
         let yaml = "interfaces_ignore: ^veth\ncpu_per_core: true\n";
         let file = FileConfig {
             server_url: Some("http://s:8080".into()),
-            token: Some("ezym_abc".into()),
+            token: Some("dmon_abc".into()),
             ..serde_yaml_ng::from_str(yaml).expect("YAML valide")
         };
         let config = Config::merge(
             file,
             env(&[
-                ("EZYMONIT_AGENT_INTERFACES_IGNORE", "^br-, docker0"),
-                ("EZYMONIT_AGENT_MOUNTS_IGNORE", "^/boot"),
-                ("EZYMONIT_AGENT_CPU_PER_CORE", "no"),
-                ("EZYMONIT_AGENT_DOCKER_MAX_CONTAINERS", "0"),
+                ("DUMBMONIT_AGENT_INTERFACES_IGNORE", "^br-, docker0"),
+                ("DUMBMONIT_AGENT_MOUNTS_IGNORE", "^/boot"),
+                ("DUMBMONIT_AGENT_CPU_PER_CORE", "no"),
+                ("DUMBMONIT_AGENT_DOCKER_MAX_CONTAINERS", "0"),
             ]),
         )
         .expect("configuration");
@@ -568,7 +623,7 @@ docker_max_containers: 20
         let yaml = "interfaces_ignore: []\nmounts_ignore: []\n";
         let file = FileConfig {
             server_url: Some("http://s:8080".into()),
-            token: Some("ezym_abc".into()),
+            token: Some("dmon_abc".into()),
             ..serde_yaml_ng::from_str(yaml).expect("YAML valide")
         };
         let config = Config::merge(file, env(&[])).expect("configuration");
@@ -580,9 +635,9 @@ docker_max_containers: 20
     #[test]
     fn an_invalid_pattern_is_refused_at_startup_with_its_key() {
         for (variable, key) in [
-            ("EZYMONIT_AGENT_INTERFACES_IGNORE", "interfaces_ignore"),
-            ("EZYMONIT_AGENT_INTERFACES_ONLY", "interfaces_only"),
-            ("EZYMONIT_AGENT_MOUNTS_IGNORE", "mounts_ignore"),
+            ("DUMBMONIT_AGENT_INTERFACES_IGNORE", "interfaces_ignore"),
+            ("DUMBMONIT_AGENT_INTERFACES_ONLY", "interfaces_only"),
+            ("DUMBMONIT_AGENT_MOUNTS_IGNORE", "mounts_ignore"),
         ] {
             let error = Config::merge(file_with_url_and_token(), env(&[(variable, "^(oops")]))
                 .expect_err("expression invalide")
@@ -593,7 +648,7 @@ docker_max_containers: 20
         let yaml = "mounts_ignore:\n  - '[unclosed'\n";
         let file = FileConfig {
             server_url: Some("http://s:8080".into()),
-            token: Some("ezym_abc".into()),
+            token: Some("dmon_abc".into()),
             ..serde_yaml_ng::from_str(yaml).expect("YAML valide")
         };
         let error = Config::merge(file, env(&[])).expect_err("expression invalide").to_string();
@@ -603,7 +658,7 @@ docker_max_containers: 20
         assert!(
             Config::merge(
                 file_with_url_and_token(),
-                env(&[("EZYMONIT_AGENT_DOCKER_MAX_CONTAINERS", "beaucoup")])
+                env(&[("DUMBMONIT_AGENT_DOCKER_MAX_CONTAINERS", "beaucoup")])
             )
             .is_err()
         );
@@ -614,8 +669,8 @@ docker_max_containers: 20
         let config = Config::merge(
             file_with_url_and_token(),
             env(&[
-                ("EZYMONIT_AGENT_DOCKER_UPDATE_CHECK", "false"),
-                ("EZYMONIT_AGENT_COMMANDS", "no"),
+                ("DUMBMONIT_AGENT_DOCKER_UPDATE_CHECK", "false"),
+                ("DUMBMONIT_AGENT_COMMANDS", "no"),
             ]),
         )
         .expect("configuration");
@@ -624,7 +679,7 @@ docker_max_containers: 20
         assert!(
             Config::merge(
                 file_with_url_and_token(),
-                env(&[("EZYMONIT_AGENT_COMMANDS", "peut-être")])
+                env(&[("DUMBMONIT_AGENT_COMMANDS", "peut-être")])
             )
             .is_err()
         );
@@ -635,7 +690,7 @@ docker_max_containers: 20
         let yaml = "plakar_klosets:\n  - /srv/backups/main\n  - ' '\nplakar_bin: /opt/plakar\nplakar_home: /root\nplakar_interval_secs: 120\n";
         let file = FileConfig {
             server_url: Some("http://s:8080".into()),
-            token: Some("ezym_abc".into()),
+            token: Some("dmon_abc".into()),
             ..serde_yaml_ng::from_str(yaml).expect("YAML valide")
         };
         let config = Config::merge(file, env(&[])).expect("configuration");
@@ -646,7 +701,7 @@ docker_max_containers: 20
 
         let config = Config::merge(
             file_with_url_and_token(),
-            env(&[("EZYMONIT_AGENT_PLAKAR_KLOSETS", "/a, ptar:/b ,")]),
+            env(&[("DUMBMONIT_AGENT_PLAKAR_KLOSETS", "/a, ptar:/b ,")]),
         )
         .expect("configuration");
         assert_eq!(config.plakar.klosets, vec!["/a", "ptar:/b"]);
@@ -656,7 +711,7 @@ docker_max_containers: 20
     fn too_frequent_a_plakar_reading_is_refused() {
         let config = Config::merge(
             file_with_url_and_token(),
-            env(&[("EZYMONIT_AGENT_PLAKAR_INTERVAL_SECS", "5")]),
+            env(&[("DUMBMONIT_AGENT_PLAKAR_INTERVAL_SECS", "5")]),
         );
         assert!(config.is_err());
     }
@@ -666,8 +721,8 @@ docker_max_containers: 20
         let config = Config::merge(
             file_with_url_and_token(),
             env(&[
-                ("EZYMONIT_AGENT_URL", "https://autre:9000"),
-                ("EZYMONIT_AGENT_INTERVAL_SECS", "60"),
+                ("DUMBMONIT_AGENT_URL", "https://autre:9000"),
+                ("DUMBMONIT_AGENT_INTERVAL_SECS", "60"),
             ]),
         )
         .expect("configuration");
@@ -677,7 +732,7 @@ docker_max_containers: 20
 
     #[test]
     fn a_missing_url_or_token_is_refused() {
-        let no_url = FileConfig { token: Some("ezym_abc".into()), ..FileConfig::default() };
+        let no_url = FileConfig { token: Some("dmon_abc".into()), ..FileConfig::default() };
         assert!(Config::merge(no_url, env(&[])).is_err());
 
         let no_token =
@@ -689,7 +744,7 @@ docker_max_containers: 20
     fn an_url_without_a_scheme_is_refused() {
         let file = FileConfig {
             server_url: Some("serveur:8080".into()),
-            token: Some("ezym_abc".into()),
+            token: Some("dmon_abc".into()),
             ..FileConfig::default()
         };
         // Sans schéma, reqwest échouerait à chaque envoi : autant le dire au
@@ -699,8 +754,10 @@ docker_max_containers: 20
 
     #[test]
     fn too_short_an_interval_is_refused() {
-        let config =
-            Config::merge(file_with_url_and_token(), env(&[("EZYMONIT_AGENT_INTERVAL_SECS", "1")]));
+        let config = Config::merge(
+            file_with_url_and_token(),
+            env(&[("DUMBMONIT_AGENT_INTERVAL_SECS", "1")]),
+        );
         assert!(config.is_err());
     }
 
@@ -709,8 +766,8 @@ docker_max_containers: 20
         let config = Config::merge(
             file_with_url_and_token(),
             env(&[
-                ("EZYMONIT_AGENT_SERVICES", "sshd, docker ,"),
-                ("EZYMONIT_AGENT_TAGS", "role=nas, salle = cave"),
+                ("DUMBMONIT_AGENT_SERVICES", "sshd, docker ,"),
+                ("DUMBMONIT_AGENT_TAGS", "role=nas, salle = cave"),
             ]),
         )
         .expect("configuration");
@@ -729,7 +786,7 @@ docker_max_containers: 20
     fn the_yaml_file_is_parsed_as_expected() {
         let yaml = r#"
 server_url: http://serveur:8080
-token: ezym_secret
+token: dmon_secret
 interval_secs: 15
 services:
   - sshd
@@ -765,9 +822,9 @@ system_health:
         let config = Config::merge(
             file_with_url_and_token(),
             env(&[
-                ("EZYMONIT_AGENT_SYSTEM_HEALTH", "false"),
-                ("EZYMONIT_AGENT_CHECK_FAILED_UNITS", "non"),
-                ("EZYMONIT_AGENT_UPDATES_INTERVAL_SECS", "7200"),
+                ("DUMBMONIT_AGENT_SYSTEM_HEALTH", "false"),
+                ("DUMBMONIT_AGENT_CHECK_FAILED_UNITS", "non"),
+                ("DUMBMONIT_AGENT_UPDATES_INTERVAL_SECS", "7200"),
             ]),
         )
         .expect("configuration");
@@ -781,7 +838,7 @@ system_health:
         // Relancer `dnf` toutes les dix secondes coûterait plus que tout le reste.
         let config = Config::merge(
             file_with_url_and_token(),
-            env(&[("EZYMONIT_AGENT_UPDATES_INTERVAL_SECS", "10")]),
+            env(&[("DUMBMONIT_AGENT_UPDATES_INTERVAL_SECS", "10")]),
         );
         assert!(config.is_err());
     }
@@ -791,7 +848,7 @@ system_health:
         let yaml = "system_health:\n  updates_interval_seconds: 1800\n";
         let file = FileConfig {
             server_url: Some("http://s:8080".into()),
-            token: Some("ezym_abc".into()),
+            token: Some("dmon_abc".into()),
             ..serde_yaml_ng::from_str(yaml).expect("YAML valide")
         };
         let config = Config::merge(file, env(&[])).expect("configuration");
@@ -802,7 +859,7 @@ system_health:
     fn the_token_never_appears_in_the_debug_output() {
         let config = Config::merge(file_with_url_and_token(), env(&[])).expect("configuration");
         let rendered = format!("{config:?}");
-        assert!(!rendered.contains("ezym_abc"), "le jeton a fuité : {rendered}");
+        assert!(!rendered.contains("dmon_abc"), "le jeton a fuité : {rendered}");
         assert!(rendered.contains("redacted"));
     }
 }

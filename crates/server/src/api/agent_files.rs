@@ -38,9 +38,9 @@ fn script(body: &'static str, content_type: &'static str) -> Response {
 /// Liste fermée : c'est ce qui empêche `/download/../secret.key` ou toute autre
 /// fantaisie de sortir du répertoire, sans avoir à normaliser un chemin.
 pub const AGENT_FILES: &[&str] = &[
-    "ezymonit-agent-linux-x86_64",
-    "ezymonit-agent-linux-aarch64",
-    "ezymonit-agent-windows-x86_64.exe",
+    "dumbmonit-agent-linux-x86_64",
+    "dumbmonit-agent-linux-aarch64",
+    "dumbmonit-agent-windows-x86_64.exe",
 ];
 
 pub async fn download(State(state): State<AppState>, Path(name): Path<String>) -> Response {
@@ -82,10 +82,10 @@ mod tests {
     fn les_scripts_embarques_demandent_les_fichiers_que_le_serveur_sait_servir() {
         // Un renommage d'un côté sans l'autre ne casserait rien à la compilation,
         // seulement l'installation chez l'utilisateur, en 404.
-        assert!(INSTALL_SH.contains("/download/ezymonit-agent-linux-$ARCH"));
-        assert!(INSTALL_PS1.contains("/download/ezymonit-agent-windows-$architecture.exe"));
+        assert!(INSTALL_SH.contains("/download/dumbmonit-agent-linux-$ARCH"));
+        assert!(INSTALL_PS1.contains("/download/dumbmonit-agent-windows-$architecture.exe"));
         for arch in ["x86_64", "aarch64"] {
-            assert!(AGENT_FILES.contains(&format!("ezymonit-agent-linux-{arch}").as_str()));
+            assert!(AGENT_FILES.contains(&format!("dumbmonit-agent-linux-{arch}").as_str()));
         }
     }
 }

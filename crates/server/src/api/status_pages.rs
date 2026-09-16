@@ -21,7 +21,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, put};
 use axum::{Json, Router};
 use chrono::{DateTime, NaiveDate, TimeDelta, Utc};
-use ezymonit_proto::{Target, TargetId};
+use dumbmonit_proto::{Target, TargetId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -851,7 +851,7 @@ fn selector(ids: &[TargetId]) -> String {
 /// comme des absences ; la moyenne donne la part de tranches vivantes.
 fn presence_query(sel: &str, window: &str) -> String {
     format!(
-        "avg_over_time(((count_over_time(ezymonit_up{{{sel}}}[5m]) > bool 0) default 0)[{window}:5m]) * 100"
+        "avg_over_time(((count_over_time(dumbmonit_up{{{sel}}}[5m]) > bool 0) default 0)[{window}:5m]) * 100"
     )
 }
 
@@ -889,14 +889,14 @@ async fn collect_metrics(
 
     if !probes.is_empty() {
         let sel = selector(&probes);
-        let q_last = format!("last_over_time(ezymonit_probe_success{{{sel}}}[{STATE_WINDOW}])");
-        let q_recent = format!("avg_over_time(ezymonit_probe_success{{{sel}}}[1h]) * 100");
-        let q_day = format!("avg_over_time(ezymonit_probe_success{{{sel}}}[24h]) * 100");
-        let q_week = format!("avg_over_time(ezymonit_probe_success{{{sel}}}[7d]) * 100");
-        let q_quarter = format!("avg_over_time(ezymonit_probe_success{{{sel}}}[90d]) * 100");
+        let q_last = format!("last_over_time(dumbmonit_probe_success{{{sel}}}[{STATE_WINDOW}])");
+        let q_recent = format!("avg_over_time(dumbmonit_probe_success{{{sel}}}[1h]) * 100");
+        let q_day = format!("avg_over_time(dumbmonit_probe_success{{{sel}}}[24h]) * 100");
+        let q_week = format!("avg_over_time(dumbmonit_probe_success{{{sel}}}[7d]) * 100");
+        let q_quarter = format!("avg_over_time(dumbmonit_probe_success{{{sel}}}[90d]) * 100");
         let q_latency =
-            format!("avg_over_time(ezymonit_probe_duration_seconds{{{sel}}}[1h]) * 1000");
-        let q_daily = format!("avg_over_time(ezymonit_probe_success{{{sel}}}[1d]) * 100");
+            format!("avg_over_time(dumbmonit_probe_duration_seconds{{{sel}}}[1h]) * 1000");
+        let q_daily = format!("avg_over_time(dumbmonit_probe_success{{{sel}}}[1d]) * 100");
         let result = tokio::try_join!(
             victoria.query(&q_last),
             victoria.query(&q_recent),
@@ -932,7 +932,7 @@ async fn collect_metrics(
 
     if !devices.is_empty() {
         let sel = selector(&devices);
-        let q_first = format!("tfirst_over_time(ezymonit_up{{{sel}}}[90d])");
+        let q_first = format!("tfirst_over_time(dumbmonit_up{{{sel}}}[90d])");
         let q_day = presence_query(&sel, "24h");
         let q_week = presence_query(&sel, "7d");
         let q_quarter = presence_query(&sel, "90d");

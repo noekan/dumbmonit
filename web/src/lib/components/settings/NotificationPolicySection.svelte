@@ -190,7 +190,7 @@
 				</Field>
 			</div>
 
-			<Field label="Public URL" for="policy-url" help="Used for the “Open in DumbMonit” link in every message. Leave empty to use EZYMONIT_PUBLIC_URL.">
+			<Field label="Public URL" for="policy-url" help="Used for the “Open in DumbMonit” link in every message. Leave empty to use DUMBMONIT_PUBLIC_URL.">
 				<input id="policy-url" type="url" class="input" bind:value={publicUrl} placeholder="https://monit.example.lan" autocomplete="off" disabled={saving || !auth.isAdmin} />
 			</Field>
 

@@ -129,7 +129,7 @@ per minute (429 with `Retry-After` beyond that).
   name it so you recognise it in the list.
 - **HTTPS before the internet.** ChatGPT's connectors need a public URL. Put
   DumbMonit behind a reverse proxy with TLS (Caddy, Traefik, nginx…) and set
-  `EZYMONIT_COOKIE_SECURE=1`. Never expose the plain HTTP port. Claude Desktop,
+  `DUMBMONIT_COOKIE_SECURE=1`. Never expose the plain HTTP port. Claude Desktop,
   Claude Code and Cursor run on your machine and can reach a LAN address
   directly, so they need no exposure at all.
 - **Watch "last used".** The token list shows when each token was last used

@@ -45,7 +45,7 @@ every other session.
 
 Login is rate-limited: after five failed attempts, each further attempt waits
 longer (30 s, doubling, up to 5 minutes). Sessions last 30 days. A forgotten
-password is reset with `EZYMONIT_RESET_PASSWORD=1`: see the
+password is reset with `DUMBMONIT_RESET_PASSWORD=1`: see the
 [FAQ](../faq.md#i-lost-the-password).
 
 ## About

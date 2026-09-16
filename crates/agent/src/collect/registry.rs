@@ -240,7 +240,7 @@ impl UpdateChecker {
         tokio::spawn(async move {
             let http = reqwest::Client::builder()
                 .timeout(HTTP_TIMEOUT)
-                .user_agent(concat!("ezymonit-agent/", env!("CARGO_PKG_VERSION")))
+                .user_agent(concat!("dumbmonit-agent/", env!("CARGO_PKG_VERSION")))
                 .build();
             let Ok(http) = http else {
                 checker.release();

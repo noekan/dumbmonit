@@ -17,14 +17,22 @@ struct ComponentHealth {
     ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    /// VictoriaMetrics seulement : `true` quand le serveur le lance lui-même,
+    /// `false` quand `DUMBMONIT_VM_URL` désigne une instance externe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    embedded: Option<bool>,
 }
 
 impl ComponentHealth {
     fn from(result: anyhow::Result<()>) -> Self {
         match result {
-            Ok(()) => Self { ok: true, error: None },
-            Err(error) => Self { ok: false, error: Some(error.to_string()) },
+            Ok(()) => Self { ok: true, error: None, embedded: None },
+            Err(error) => Self { ok: false, error: Some(error.to_string()), embedded: None },
         }
+    }
+
+    fn embedded(self, embedded: bool) -> Self {
+        Self { embedded: Some(embedded), ..self }
     }
 }
 
@@ -45,6 +53,6 @@ pub async fn health(State(state): State<AppState>) -> Json<Health> {
         status: if all_ok { "ok" } else { "degraded" },
         version: env!("CARGO_PKG_VERSION"),
         database: ComponentHealth::from(database),
-        victoria: ComponentHealth::from(victoria),
+        victoria: ComponentHealth::from(victoria).embedded(state.config.vm_embedded()),
     })
 }

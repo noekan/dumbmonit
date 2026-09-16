@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use ezymonit_proto::{ProbeError, Target};
+use dumbmonit_proto::{ProbeError, Target};
 use reqwest::header::{HeaderName, HeaderValue};
 use reqwest::{Method, Url};
 
@@ -332,7 +332,7 @@ mod tests {
     fn les_entetes_se_saisissent_sur_une_ligne_ou_plusieurs() {
         let options = options_ok(
             "https://exemple.fr",
-            &[("headers", "X-Origine: ezymonit | Accept: application/json")],
+            &[("headers", "X-Origine: dumbmonit | Accept: application/json")],
         );
         let noms: Vec<&str> = options.headers.iter().map(|(name, _)| name.as_str()).collect();
         assert_eq!(noms, vec!["x-origine", "accept"]);
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn un_entete_mal_forme_explique_la_syntaxe_attendue() {
         let error =
-            options("https://exemple.fr", &[("headers", "X-Origine ezymonit")]).unwrap_err();
+            options("https://exemple.fr", &[("headers", "X-Origine dumbmonit")]).unwrap_err();
         assert!(error.to_string().contains("Name: value"), "{error}");
     }
 

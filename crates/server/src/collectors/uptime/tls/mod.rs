@@ -34,7 +34,7 @@ pub(crate) mod options;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use ezymonit_proto::{Collector, ProbeError, Sample, Target};
+use dumbmonit_proto::{Collector, ProbeError, Sample, Target};
 use tracing::debug;
 
 use super::outcome::{Failure, Report};

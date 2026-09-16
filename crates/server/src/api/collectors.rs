@@ -759,7 +759,7 @@ fn describe(kind: &'static str) -> CollectorView {
                     "In the address, write the host name or IP address: \"192.168.1.1\" or \"router.home.lan\".",
                     "On each poll, the check sends four echoes and measures the response time, along with the share of lost packets.",
                     "By default, only a total loss counts as down; partial loss stays visible in the charts. Lower \"Tolerated loss\" to be warned earlier.",
-                    "If DumbMonit runs in Docker, add the NET_RAW capability to the container: in docker-compose.yml, uncomment the \"cap_add: - NET_RAW\" lines under the ezymonit service, then restart it.",
+                    "If DumbMonit runs in Docker, add the NET_RAW capability to the container: in docker-compose.yml, uncomment the \"cap_add: - NET_RAW\" lines under the dumbmonit service, then restart it.",
                 ],
                 warning: "Without the NET_RAW capability, the check cannot open an ICMP socket: it reports this as a configuration error, not as a host failure. Some devices also ignore pings on purpose: check that before drawing conclusions.",
                 doc_url: "",

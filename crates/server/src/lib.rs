@@ -1,4 +1,4 @@
-//! Serveur EzyMonit.
+//! Serveur DumbMonit.
 //!
 //! Le code vit dans une bibliothèque plutôt que directement dans le binaire, afin
 //! que les tests d'intégration puissent monter l'application complète — routeur,

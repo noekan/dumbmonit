@@ -11,7 +11,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use common::{PASSWORD, TestApp, setup_with};
-use ezymonit_server::auth::oidc::{OidcConfig, OidcEnv};
+use dumbmonit_server::auth::oidc::{OidcConfig, OidcEnv};
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use serde::Deserialize;
 use serde_json::{Value, json};

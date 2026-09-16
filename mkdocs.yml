@@ -1,5 +1,5 @@
 site_name: DumbMonit
-site_description: Simple monitoring for homelabs and small teams. Two containers, one IP address, useful alerts in a minute.
+site_description: Simple monitoring for homelabs and small teams. One container, one IP address, useful alerts in a minute.
 site_url: https://dumbmonit.readthedocs.io
 repo_url: https://github.com/noekan/dumbmonit
 repo_name: noekan/dumbmonit

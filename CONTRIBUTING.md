@@ -16,10 +16,10 @@ the `Dockerfile` doubles as a development environment.
 ### Full stack
 
 ```bash
-docker compose up -d --build                     # server + VictoriaMetrics, UI on http://localhost:8080
+docker compose up -d --build                     # one container (server + embedded VictoriaMetrics), UI on http://localhost:8080
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
                                                  # + a lab SNMP agent (address `snmp-lab`, community `public`)
-                                                 #   and VictoriaMetrics exposed on :8428
+                                                 #   and the embedded VictoriaMetrics published on :8428
 ```
 
 The first build takes about ten minutes; later ones reuse the dependency layers.
@@ -27,19 +27,19 @@ The first build takes about ten minutes; later ones reuse the dependency layers.
 ### Rust, without installing Rust
 
 ```bash
-docker build -t ezymonit-devenv --target builder .
-alias devenv='docker run --rm -v "$PWD:/build" -w /build ezymonit-devenv'
+docker build -t dumbmonit-devenv --target builder .
+alias devenv='docker run --rm -v "$PWD:/build" -w /build dumbmonit-devenv'
 
 devenv cargo test                                            # whole workspace
-devenv cargo test -p ezymonit-server --test alerts_api       # one integration test file
-devenv cargo test -p ezymonit-server name_of_the_test        # one test by name
+devenv cargo test -p dumbmonit-server --test alerts_api       # one integration test file
+devenv cargo test -p dumbmonit-server name_of_the_test        # one test by name
 devenv cargo clippy --all-targets --all-features -- -D warnings
 devenv cargo fmt --all --check
 devenv cargo deny check licenses bans                        # needs cargo-deny in the image, see below
 ```
 
 To keep cargo's registry and target directory between runs, mount named volumes:
-`-v ezymonit-cargo:/usr/local/cargo/registry -v ezymonit-target:/build/target`.
+`-v dumbmonit-cargo:/usr/local/cargo/registry -v dumbmonit-target:/build/target`.
 
 `cargo deny` is not part of the builder image. Install it once in a derived
 container (`cargo install cargo-deny`) or run it locally if you do have Rust.
@@ -114,7 +114,7 @@ dummy sources before the real ones.
    so no UI change is needed.
 4. Register it in `crates/server/src/main.rs` (`registry.register(...)`). The
    scheduler and the API never know concrete types.
-5. Emit metrics named `ezymonit_<kind>_*` with a `target` label; add default
+5. Emit metrics named `dumbmonit_<kind>_*` with a `target` label; add default
    alert rules in `alerting/` if the kind has obvious failure modes.
 6. Add tests: unit tests next to the parser, and an integration test under
    `crates/server/tests/` if there is an API surface.

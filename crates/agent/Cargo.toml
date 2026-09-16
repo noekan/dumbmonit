@@ -1,18 +1,20 @@
 [package]
-name = "ezymonit-agent"
-description = "Agent système EzyMonit : collecte les métriques d'une machine et les pousse vers le serveur."
+name = "dumbmonit-agent"
+description = "Agent système DumbMonit : collecte les métriques d'une machine et les pousse vers le serveur."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+# Distribué par image Docker, jamais sur crates.io.
+publish = false
 
 [[bin]]
-name = "ezymonit-agent"
+name = "dumbmonit-agent"
 path = "src/main.rs"
 
 [dependencies]
-ezymonit-proto = { path = "../proto" }
+dumbmonit-proto = { path = "../proto" }
 
 anyhow.workspace = true
 chrono.workspace = true

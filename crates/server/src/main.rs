@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use ezymonit_server::config::Config;
-use ezymonit_server::state::{AppState, Inner};
-use ezymonit_server::{alerting, api, auth, collectors, crypto, db, scheduler, tsdb};
+use dumbmonit_server::config::Config;
+use dumbmonit_server::state::{AppState, Inner};
+use dumbmonit_server::{alerting, api, auth, collectors, crypto, db, scheduler, tsdb};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -20,7 +20,7 @@ fn main() -> Result<()> {
         // Le pool bloquant ne sert qu'aux lectures de fichiers (`tokio::fs`) et à
         // quelques résolutions DNS : 512 threads par défaut, seize suffisent.
         .max_blocking_threads(16)
-        .thread_name("ezymonit-worker")
+        .thread_name("dumbmonit-worker")
         .enable_all()
         .build()
         .context("building the async runtime")?;
@@ -33,26 +33,48 @@ async fn run(config: Config) -> Result<()> {
         .with_context(|| format!("creating directory {}", config.data_dir.display()))?;
 
     let secret = resolve_secret(&config).await?;
+    db::adopt_legacy_database(&config.data_dir).await?;
     let pool = db::open_with(&config.database_path(), config.db_pool_size).await?;
     let cipher = db::init_cipher(&pool, &secret).await?;
     if config.reset_password {
         auth::reset_password(&pool).await?;
         warn!(
-            "EZYMONIT_RESET_PASSWORD is set: all accounts and sessions removed — \
+            "DUMBMONIT_RESET_PASSWORD is set: all accounts and sessions removed — \
              remove the variable once the first admin has been created again"
         );
     }
     info!(database = %config.database_path().display(), "database ready");
 
-    let victoria = tsdb::Victoria::new(&config.victoria_url)?;
-    match victoria.health().await {
-        Ok(()) => info!(url = %config.victoria_url, "VictoriaMetrics reachable"),
-        // On ne bloque pas le démarrage : l'ordre de lancement des conteneurs n'est
-        // pas garanti, et le tampon d'écriture retentera de lui-même.
-        Err(error) => {
-            warn!(url = %config.victoria_url, %error, "VictoriaMetrics unreachable at startup")
+    let victoria_url = config.effective_victoria_url();
+    let victoria = tsdb::Victoria::new(&victoria_url)?;
+    let embedded_vm = if config.vm_embedded() {
+        // Sans URL externe, l'image se suffit : VictoriaMetrics est lancé ici même
+        // et le démarrage attend qu'il réponde — une erreur à ce stade (binaire
+        // absent, port pris) doit arrêter le serveur, pas le laisser tourner à vide.
+        let vm = tsdb::EmbeddedVm::start(
+            tsdb::EmbeddedConfig {
+                binary: config.vm_binary.clone(),
+                data_path: config.vm_data_path(),
+                listen: config.vm_listen.clone(),
+                retention: config.vm_retention.clone(),
+                memory: config.vm_memory.clone(),
+            },
+            &victoria,
+        )
+        .await
+        .context("starting the embedded VictoriaMetrics")?;
+        Some(vm)
+    } else {
+        match victoria.health().await {
+            Ok(()) => info!(url = %victoria_url, "VictoriaMetrics reachable"),
+            // On ne bloque pas le démarrage : l'ordre de lancement des conteneurs
+            // n'est pas garanti, et le tampon d'écriture retentera de lui-même.
+            Err(error) => {
+                warn!(url = %victoria_url, %error, "VictoriaMetrics unreachable at startup")
+            }
         }
-    }
+        None
+    };
 
     let sink = tsdb::spawn_writer_with(
         victoria.clone(),
@@ -101,16 +123,28 @@ async fn run(config: Config) -> Result<()> {
     axum::serve(listener, api::router(state))
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .context("erreur du serveur HTTP")?;
+        .context("HTTP server error")?;
+
+    // VictoriaMetrics s'arrête après nous : les derniers lots du tampon d'écriture
+    // ont ainsi une chance d'être acceptés.
+    if let Some(vm) = embedded_vm {
+        vm.stop().await;
+    }
 
     info!("clean shutdown");
     Ok(())
 }
 
 fn init_tracing() {
-    let filter = EnvFilter::try_from_env("EZYMONIT_LOG")
-        .unwrap_or_else(|_| EnvFilter::new("info,sqlx=warn,hyper=warn"));
+    // Lecture brute des deux noms : `env_var` avertirait avant que l'abonné
+    // n'existe, et l'avertissement serait perdu. Il est rejoué juste après.
+    let raw = std::env::var("DUMBMONIT_LOG").or_else(|_| std::env::var("EZYMONIT_LOG")).ok();
+    let filter = raw
+        .as_deref()
+        .and_then(|directives| EnvFilter::try_new(directives).ok())
+        .unwrap_or_else(|| EnvFilter::new("info,sqlx=warn,hyper=warn"));
     tracing_subscriber::fmt().with_env_filter(filter).with_target(false).init();
+    let _ = dumbmonit_server::config::env_var("DUMBMONIT_LOG");
 }
 
 /// Détermine le secret d'instance : variable d'environnement si fournie, sinon

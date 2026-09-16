@@ -522,7 +522,7 @@ mod tests {
     fn point(target: TargetId, value: f64) -> SeriesPoint {
         SeriesPoint {
             labels: [
-                ("__name__".to_string(), "ezymonit_x".to_string()),
+                ("__name__".to_string(), "dumbmonit_x".to_string()),
                 ("target".to_string(), target.to_string()),
                 ("host".to_string(), format!("device-{target}")),
             ]

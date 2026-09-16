@@ -102,11 +102,11 @@
 			const name = serie.metric.__name__ ?? '';
 			const value = Number(serie.values.at(-1)?.[1]);
 			if (!Number.isFinite(value)) continue;
-			if (name === 'ezymonit_backup_plakar_present') {
+			if (name === 'dumbmonit_backup_plakar_present') {
 				installed = value >= 1;
 				continue;
 			}
-			if (name === 'ezymonit_backup_klosets_found') {
+			if (name === 'dumbmonit_backup_klosets_found') {
 				found = value;
 				continue;
 			}
@@ -117,14 +117,14 @@
 				k = { kloset, sizeBytes: null, sources: [] };
 				byKloset.set(kloset, k);
 			}
-			if (name === 'ezymonit_backup_size_bytes') {
+			if (name === 'dumbmonit_backup_size_bytes') {
 				k.sizeBytes = value;
 				continue;
 			}
 			const source = serie.metric.source ?? '';
-			if (name === 'ezymonit_backup_last_success_seconds') sourceOf(k, source).ageSeconds = value;
-			else if (name === 'ezymonit_backup_snapshot_count') sourceOf(k, source).snapshots = value;
-			else if (name === 'ezymonit_backup_last_status') sourceOf(k, source).ok = value >= 1;
+			if (name === 'dumbmonit_backup_last_success_seconds') sourceOf(k, source).ageSeconds = value;
+			else if (name === 'dumbmonit_backup_snapshot_count') sourceOf(k, source).snapshots = value;
+			else if (name === 'dumbmonit_backup_last_status') sourceOf(k, source).ok = value >= 1;
 		}
 		const list = [...byKloset.values()].sort((a, b) => a.kloset.localeCompare(b.kloset, 'en'));
 		for (const k of list) k.sources.sort((a, b) => a.source.localeCompare(b.source, 'en'));
@@ -135,7 +135,7 @@
 		error = null;
 		try {
 			const series = await queryInstant(
-				`{__name__=~"ezymonit_backup_(last_success_seconds|snapshot_count|size_bytes|last_status|plakar_present|klosets_found)", target="${target.id}"}`,
+				`{__name__=~"dumbmonit_backup_(last_success_seconds|snapshot_count|size_bytes|last_status|plakar_present|klosets_found)", target="${target.id}"}`,
 				signal
 			);
 			klosets = fold(series);

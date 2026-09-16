@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use ezymonit_proto::{ProbeError, Sample};
+use dumbmonit_proto::{ProbeError, Sample};
 use tracing::{debug, warn};
 
 use super::oid::ObjectId;

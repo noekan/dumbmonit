@@ -11,7 +11,8 @@
 		<script>
 			// Applied before first paint so the theme never flashes.
 			try {
-				const choice = localStorage.getItem('ezymonit-theme');
+				const choice =
+					localStorage.getItem('dumbmonit-theme') ?? localStorage.getItem('ezymonit-theme');
 				const dark =
 					choice === 'dark' ||
 					(choice !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);

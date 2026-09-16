@@ -3,7 +3,7 @@
 //! Module purement fonctionnel : il ne connaît ni résolveur ni socket, ce qui rend
 //! toute sa logique vérifiable sans serveur DNS en face.
 
-use ezymonit_proto::ProbeError;
+use dumbmonit_proto::ProbeError;
 use hickory_resolver::proto::rr::{Record, RecordType};
 
 /// Types d'enregistrement proposés.

@@ -49,8 +49,8 @@ export function isDownRule(uid: string, rule: AlertRule | undefined): boolean {
   if (uid === "host_down" || uid === "service_down") return true;
   const query = rule?.query ?? "";
   return (
-    query.includes("ezymonit_up") ||
-    query.includes("ezymonit_probe_success == 0")
+    query.includes("dumbmonit_up") ||
+    query.includes("dumbmonit_probe_success == 0")
   );
 }
 

@@ -7,7 +7,7 @@
 use std::io;
 use std::time::Duration;
 
-use ezymonit_proto::ProbeError;
+use dumbmonit_proto::ProbeError;
 
 /// Ce qu'une salve d'échos a donné.
 #[derive(Debug, Default, Clone)]
@@ -68,7 +68,7 @@ impl Burst {
 ///
 /// Sans cette traduction, l'utilisateur lit « Permission denied (os error 13) » et
 /// conclut naturellement que son équipement est éteint — alors que c'est le
-/// conteneur EzyMonit qui n'a pas le droit d'émettre un écho. Le message dit donc
+/// conteneur DumbMonit qui n'a pas le droit d'émettre un écho. Le message dit donc
 /// exactement quoi ajouter et où.
 pub fn socket_error(error: &io::Error) -> ProbeError {
     if error.kind() != io::ErrorKind::PermissionDenied {
@@ -77,7 +77,7 @@ pub fn socket_error(error: &io::Error) -> ProbeError {
 
     ProbeError::Config(
         "The DumbMonit container is not allowed to send ICMP packets. \
-         Add the NET_RAW capability to the \"ezymonit\" service in docker-compose.yml:\n\
+         Add the NET_RAW capability to the \"dumbmonit\" service in docker-compose.yml:\n\
          \n    cap_add:\n      - NET_RAW\n\n\
          then restart with \"docker compose up -d\". Alternatively, without an extra \
          capability, allow unprivileged ICMP echoes on the host with \

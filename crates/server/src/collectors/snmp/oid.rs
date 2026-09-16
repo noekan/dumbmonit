@@ -8,7 +8,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use ezymonit_proto::ProbeError;
+use dumbmonit_proto::ProbeError;
 
 /// Un identifiant d'objet, décomposé en arcs.
 ///

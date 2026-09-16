@@ -1,5 +1,5 @@
-# Development overlay: adds a lab SNMP agent and exposes VictoriaMetrics, so
-# collection can be tested without hardware.
+# Development overlay: adds a lab SNMP agent and exposes the embedded
+# VictoriaMetrics, so collection can be tested without hardware.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 #
@@ -14,7 +14,11 @@ services:
       - ./docker/snmpd-lab.conf:/etc/snmp/snmpd.conf:ro
     restart: unless-stopped
 
-  victoriametrics:
+  dumbmonit:
+    environment:
+      # The embedded VictoriaMetrics listens on the loopback by default; open it
+      # inside the container so the port below reaches it.
+      DUMBMONIT_VM_LISTEN: 0.0.0.0:8428
     ports:
       # Handy for querying MetricsQL directly while debugging.
-      - "${EZYMONIT_VM_PORT:-8428}:8428"
+      - "${DUMBMONIT_VM_PORT:-8428}:8428"

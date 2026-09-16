@@ -8,7 +8,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ezymonit_proto::{Credential, ProbeError};
+use dumbmonit_proto::{Credential, ProbeError};
 use ipnet::IpNet;
 use serde::Serialize;
 use tokio::sync::Semaphore;

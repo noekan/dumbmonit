@@ -1,9 +1,11 @@
-//! Envoi des lots au serveur EzyMonit.
+//! Envoi des lots au serveur DumbMonit.
 
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use ezymonit_proto::{AgentCommand, COMMANDS_PATH, CommandReport, INGEST_PATH, PushAck, PushBatch};
+use dumbmonit_proto::{
+    AgentCommand, COMMANDS_PATH, CommandReport, INGEST_PATH, PushAck, PushBatch,
+};
 
 /// Ce qui peut arriver à un envoi, et surtout ce qu'il faut en faire.
 ///
@@ -56,7 +58,7 @@ impl PushClient {
             // rétablir TLS toutes les trente secondes coûterait plus cher que la
             // collecte elle-même.
             .pool_idle_timeout(Duration::from_secs(300))
-            .user_agent(concat!("ezymonit-agent/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("dumbmonit-agent/", env!("CARGO_PKG_VERSION")))
             .build()
             .context("building the HTTP client")?;
 
@@ -214,14 +216,14 @@ mod tests {
         assert_eq!(ingest_url("http://serveur:8080"), "http://serveur:8080/api/ingest");
         assert_eq!(ingest_url("http://serveur:8080/"), "http://serveur:8080/api/ingest");
         assert_eq!(
-            ingest_url("https://mon.domaine/ezymonit/"),
-            "https://mon.domaine/ezymonit/api/ingest"
+            ingest_url("https://mon.domaine/dumbmonit/"),
+            "https://mon.domaine/dumbmonit/api/ingest"
         );
     }
 
     #[test]
     fn the_command_urls_follow_the_shared_contract() {
-        let client = PushClient::new("http://serveur:8080/", "ezym_x", Duration::from_secs(1))
+        let client = PushClient::new("http://serveur:8080/", "dmon_x", Duration::from_secs(1))
             .expect("client");
         assert_eq!(
             commands_url(&client.base_url, None, "9f4c"),
@@ -254,9 +256,9 @@ mod tests {
 
     #[test]
     fn the_token_is_scrubbed_from_transport_errors() {
-        let message = "error sending request for url (http://s/api/ingest?t=ezym_secret)";
-        let cleaned = sanitise(message, "ezym_secret");
-        assert!(!cleaned.contains("ezym_secret"), "le jeton a fuité : {cleaned}");
+        let message = "error sending request for url (http://s/api/ingest?t=dmon_secret)";
+        let cleaned = sanitise(message, "dmon_secret");
+        assert!(!cleaned.contains("dmon_secret"), "le jeton a fuité : {cleaned}");
     }
 
     #[test]

@@ -14,7 +14,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use ezymonit_proto::{PushAck, PushBatch};
+use dumbmonit_proto::{PushAck, PushBatch};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -214,9 +214,9 @@ mod tests {
     #[test]
     fn the_install_command_is_the_one_promised_in_the_documentation() {
         assert_eq!(
-            install_linux("http://serveur:8080", "ezym_abc"),
-            "curl -sSL http://serveur:8080/install.sh | sh -s -- --token=ezym_abc --url=http://serveur:8080"
+            install_linux("http://serveur:8080", "dmon_abc"),
+            "curl -sSL http://serveur:8080/install.sh | sh -s -- --token=dmon_abc --url=http://serveur:8080"
         );
-        assert!(install_windows("http://serveur:8080", "ezym_abc").contains("install.ps1"));
+        assert!(install_windows("http://serveur:8080", "dmon_abc").contains("install.ps1"));
     }
 }

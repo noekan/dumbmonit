@@ -105,18 +105,18 @@ pub struct OidcEnv {
 
 impl OidcEnv {
     pub fn from_env() -> Self {
-        let var = |key: &str| std::env::var(key).unwrap_or_default();
-        let auto_create = var("EZYMONIT_OIDC_AUTO_CREATE");
+        let var = |key: &str| crate::config::env_var(key).unwrap_or_default();
+        let auto_create = var("DUMBMONIT_OIDC_AUTO_CREATE");
         let config = OidcConfig {
-            issuer: var("EZYMONIT_OIDC_ISSUER"),
-            client_id: var("EZYMONIT_OIDC_CLIENT_ID"),
-            client_secret: var("EZYMONIT_OIDC_CLIENT_SECRET"),
-            provider_name: var("EZYMONIT_OIDC_PROVIDER_NAME"),
-            scopes: var("EZYMONIT_OIDC_SCOPES"),
+            issuer: var("DUMBMONIT_OIDC_ISSUER"),
+            client_id: var("DUMBMONIT_OIDC_CLIENT_ID"),
+            client_secret: var("DUMBMONIT_OIDC_CLIENT_SECRET"),
+            provider_name: var("DUMBMONIT_OIDC_PROVIDER_NAME"),
+            scopes: var("DUMBMONIT_OIDC_SCOPES"),
             auto_create: auto_create.trim().is_empty() || flag(&auto_create),
-            admin_groups: vec![var("EZYMONIT_OIDC_ADMIN_GROUPS")],
-            groups_claim: var("EZYMONIT_OIDC_GROUPS_CLAIM"),
-            public_url: var("EZYMONIT_PUBLIC_URL"),
+            admin_groups: vec![var("DUMBMONIT_OIDC_ADMIN_GROUPS")],
+            groups_claim: var("DUMBMONIT_OIDC_GROUPS_CLAIM"),
+            public_url: var("DUMBMONIT_PUBLIC_URL"),
         }
         .normalized();
         Self { config }

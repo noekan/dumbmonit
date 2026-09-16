@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use ezymonit_proto::{ProbeError, Target};
+use dumbmonit_proto::{ProbeError, Target};
 
 use crate::collectors::uptime::tags;
 

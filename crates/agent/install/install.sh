@@ -1,7 +1,7 @@
 #!/bin/sh
-# Installe l'agent système EzyMonit et son service (systemd ou OpenRC).
+# Installe l'agent système DumbMonit et son service (systemd ou OpenRC).
 #
-#   curl -sSL http://serveur:8080/install.sh | sh -s -- --token=ezym_xxx --url=http://serveur:8080
+#   curl -sSL http://serveur:8080/install.sh | sh -s -- --token=dmon_xxx --url=http://serveur:8080
 #
 # C'est la commande que le serveur affiche à la création d'un jeton ; le binaire
 # est téléchargé sur ce même serveur, qui l'embarque dans son image.
@@ -11,13 +11,15 @@
 # d'installation universel.
 #
 # Idempotent : le relancer met à jour le binaire et la configuration sans rien
-# casser, ce qui en fait aussi la procédure de mise à jour.
+# casser, ce qui en fait aussi la procédure de mise à jour. Une machine encore
+# équipée de l'agent d'avant le renommage (ezymonit-agent) est migrée sur place
+# par la même commande.
 
 set -eu
 
 # URL du serveur, à défaut de `--url=` : pratique quand le script est lancé par
 # un outil de déploiement qui préfère l'environnement aux arguments.
-EZYMONIT_URL="${EZYMONIT_URL:-}"
+DUMBMONIT_URL="${DUMBMONIT_URL:-}"
 
 TOKEN=""
 URL=""
@@ -29,12 +31,21 @@ LOCAL_BIN=""
 UNINSTALL=0
 NO_START=0
 
-CONFIG_DIR="/etc/ezymonit"
+CONFIG_DIR="/etc/dumbmonit"
 CONFIG_FILE="$CONFIG_DIR/agent.yaml"
-BIN_PATH="/usr/local/bin/ezymonit-agent"
-UNIT_PATH="/etc/systemd/system/ezymonit-agent.service"
-OPENRC_PATH="/etc/init.d/ezymonit-agent"
-SERVICE_NAME="ezymonit-agent"
+BIN_PATH="/usr/local/bin/dumbmonit-agent"
+UNIT_PATH="/etc/systemd/system/dumbmonit-agent.service"
+OPENRC_PATH="/etc/init.d/dumbmonit-agent"
+SERVICE_NAME="dumbmonit-agent"
+
+# Noms d'avant le renommage EzyMonit → DumbMonit. Une installation qui les porte
+# encore est migrée sur place à l'installation, et `--uninstall` en fait aussi
+# le ménage.
+LEGACY_CONFIG_DIR="/etc/ezymonit"
+LEGACY_BIN_PATH="/usr/local/bin/ezymonit-agent"
+LEGACY_UNIT_PATH="/etc/systemd/system/ezymonit-agent.service"
+LEGACY_OPENRC_PATH="/etc/init.d/ezymonit-agent"
+LEGACY_SERVICE_NAME="ezymonit-agent"
 
 usage() {
     cat <<'FIN'
@@ -99,6 +110,68 @@ else
     INIT=""
 fi
 
+# --------------------------------------------------------- ancien agent
+
+# Vrai si le service d'avant le renommage est encore connu du gestionnaire de
+# services : fichier d'unité ou script d'init présent, ou unité listée par
+# systemd (elle peut venir d'ailleurs que /etc).
+ancien_service_present() {
+    case "$INIT" in
+        systemd)
+            [ -f "$LEGACY_UNIT_PATH" ] && return 0
+            systemctl list-unit-files "$LEGACY_SERVICE_NAME.service" 2>/dev/null \
+                | grep -q "^$LEGACY_SERVICE_NAME\.service"
+            ;;
+        openrc) [ -f "$LEGACY_OPENRC_PATH" ] ;;
+        *) return 1 ;;
+    esac
+}
+
+# Arrête et retire le service, l'unité et le binaire de l'ancien agent. Ne
+# touche pas à sa configuration. Silencieux quand rien d'ancien n'est présent ;
+# renvoie 0 si quelque chose a été retiré.
+retirer_ancien_agent() {
+    retire=1
+    if ancien_service_present; then
+        case "$INIT" in
+            systemd) systemctl disable --now "$LEGACY_SERVICE_NAME" 2>/dev/null || true ;;
+            openrc)
+                rc-service "$LEGACY_SERVICE_NAME" stop 2>/dev/null || true
+                rc-update del "$LEGACY_SERVICE_NAME" default 2>/dev/null || true
+                ;;
+        esac
+        retire=0
+    fi
+    for fichier in "$LEGACY_UNIT_PATH" "$LEGACY_OPENRC_PATH" "$LEGACY_BIN_PATH"; do
+        if [ -e "$fichier" ] || [ -L "$fichier" ]; then
+            rm -f "$fichier"
+            retire=0
+        fi
+    done
+    if [ "$retire" -eq 0 ] && [ "$INIT" = "systemd" ]; then
+        systemctl daemon-reload 2>/dev/null || true
+    fi
+    return "$retire"
+}
+
+# Migration sur place d'une installation d'avant le renommage : l'ancien service
+# est arrêté et retiré, et sa configuration reprend sa place sous le nouveau nom.
+# Elle est réécrite juste après depuis --token/--url, mais les clés qu'un
+# utilisateur y aurait ajoutées restent à portée de main. Sans rien d'ancien,
+# ne fait rien et ne dit rien.
+migrate_legacy() {
+    migre=1
+    if retirer_ancien_agent; then migre=0; fi
+    if [ -d "$LEGACY_CONFIG_DIR" ] && [ ! -e "$CONFIG_DIR" ]; then
+        # `mv` garde propriétaire et droits, ceux du fichier de jeton compris.
+        mv "$LEGACY_CONFIG_DIR" "$CONFIG_DIR"
+        migre=0
+    fi
+    if [ "$migre" -eq 0 ]; then
+        info "migrating the $LEGACY_SERVICE_NAME install to $SERVICE_NAME"
+    fi
+}
+
 if [ "$UNINSTALL" -eq 1 ]; then
     info "stopping the service"
     case "$INIT" in
@@ -110,6 +183,9 @@ if [ "$UNINSTALL" -eq 1 ]; then
     esac
     rm -f "$UNIT_PATH" "$OPENRC_PATH" "$BIN_PATH"
     rm -rf "$CONFIG_DIR"
+    # Les restes d'une installation d'avant le renommage partent aussi.
+    retirer_ancien_agent || true
+    rm -rf "$LEGACY_CONFIG_DIR"
     [ "$INIT" = "systemd" ] && systemctl daemon-reload 2>/dev/null || true
     info "agent uninstalled"
     exit 0
@@ -122,7 +198,7 @@ fi
 
 # À défaut d'option explicite, l'URL est celle depuis laquelle ce script a été
 # téléchargé. Sans l'une ni l'autre, impossible de deviner : autant le dire.
-[ -n "$URL" ] || URL="$EZYMONIT_URL"
+[ -n "$URL" ] || URL="$DUMBMONIT_URL"
 [ -n "$URL" ] || echec "the server URL is required (--url=http://server:8080)"
 URL="${URL%/}"
 
@@ -149,7 +225,7 @@ install_binaire() {
         return
     fi
 
-    source_url="$URL/download/ezymonit-agent-linux-$ARCH"
+    source_url="$URL/download/dumbmonit-agent-linux-$ARCH"
     info "downloading $source_url"
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "$source_url" -o "$destination" \
@@ -169,6 +245,11 @@ TMP_BIN="$BIN_PATH.nouveau"
 install_binaire "$TMP_BIN"
 chmod 0755 "$TMP_BIN"
 mv -f "$TMP_BIN" "$BIN_PATH"
+
+# Le nouveau binaire est en place : l'ancien agent, s'il est là, peut être
+# arrêté et sa configuration déplacée avant que la nouvelle ne soit écrite. Pas
+# avant — un téléchargement raté ne doit pas laisser la machine sans agent.
+migrate_legacy
 
 # --------------------------------------------------------- configuration
 
@@ -216,7 +297,7 @@ ecrire_unite_systemd() {
     cat > "$UNIT_PATH" <<FIN
 [Unit]
 Description=DumbMonit system agent
-Documentation=https://github.com/noekan/ezymonit
+Documentation=https://github.com/noekan/dumbmonit
 # Sans réseau, le premier envoi échouerait et l'agent temporiserait pour rien.
 After=network-online.target
 Wants=network-online.target

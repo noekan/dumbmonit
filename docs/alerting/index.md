@@ -24,7 +24,7 @@ alert keeps firing (Info → Advisory → Warning; Warning stays).
 ## Phases
 
 Every alert is a state machine, evaluated every 30 seconds
-(`EZYMONIT_ALERT_INTERVAL_SECS`).
+(`DUMBMONIT_ALERT_INTERVAL_SECS`).
 
 | Phase | In the UI | Meaning |
 |---|---|---|

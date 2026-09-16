@@ -1,11 +1,13 @@
 [package]
-name = "ezymonit-proto"
-description = "Types partagés entre le serveur EzyMonit, ses collecteurs et l'agent."
+name = "dumbmonit-proto"
+description = "Types partagés entre le serveur DumbMonit, ses collecteurs et l'agent."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+# Distribué par image Docker, jamais sur crates.io.
+publish = false
 
 [dependencies]
 anyhow.workspace = true
@@ -14,3 +16,4 @@ chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tracing.workspace = true

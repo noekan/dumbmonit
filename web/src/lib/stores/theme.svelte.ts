@@ -9,12 +9,21 @@ import { browser } from '$app/environment';
 
 export type ThemePreference = 'auto' | 'light' | 'dark';
 
-const STORAGE_KEY = 'ezymonit-theme';
+const STORAGE_KEY = 'dumbmonit-theme';
+/** Key used before the product rename; read once, then moved to the new one. */
+const LEGACY_STORAGE_KEY = 'ezymonit-theme';
 
 function readPreference(): ThemePreference {
 	if (!browser) return 'auto';
 	try {
-		const stored = localStorage.getItem(STORAGE_KEY);
+		let stored = localStorage.getItem(STORAGE_KEY);
+		if (stored === null) {
+			stored = localStorage.getItem(LEGACY_STORAGE_KEY);
+			if (stored !== null) {
+				localStorage.setItem(STORAGE_KEY, stored);
+				localStorage.removeItem(LEGACY_STORAGE_KEY);
+			}
+		}
 		if (stored === 'light' || stored === 'dark') return stored;
 	} catch {
 		// Storage unavailable (strict private browsing): stay in automatic mode.

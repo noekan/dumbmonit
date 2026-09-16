@@ -7,7 +7,7 @@ announces a failure long before a volume falls over.
 
 ## What it watches
 
-All metrics are prefixed `ezymonit_synology_`.
+All metrics are prefixed `dumbmonit_synology_`.
 
 | Family | Metrics | Labels |
 |---|---|---|
@@ -20,7 +20,7 @@ All metrics are prefixed `ezymonit_synology_`.
 | Collection | `up`, `scrape_errors`, `scrape_duration_seconds` | |
 
 Active Backup for Business metrics are the exception: they are prefixed
-`ezymonit_abb_` (see below).
+`dumbmonit_abb_` (see below).
 
 A partial failure stays a successful probe: if the storage inventory fails, the
 system state and utilisation are still published and the failure is counted in
@@ -37,11 +37,11 @@ family off.
 
 | Metric | Value | Labels |
 |---|---|---|
-| `ezymonit_abb_tasks` | Number of tasks. | |
-| `ezymonit_abb_task_last_status` | Last run: `1` success, `0` failed, `2` running, `-1` unknown (never run, cancelled, no backup). A *partial* success counts as failed: at least one device was not backed up. | `task`, `task_id`, `source_type`, `result` |
-| `ezymonit_abb_task_last_success_seconds` | Age of the last successful backup run, in seconds. Absent for a task that never succeeded. | `task`, `task_id`, `source_type` |
-| `ezymonit_abb_task_enabled` | `1` if the task has a schedule and is not paused, `0` if it only runs by hand. | `task`, `task_id`, `source_type` |
-| `ezymonit_abb_task_device_count` | Devices attached to the task. | `task`, `task_id`, `source_type` |
+| `dumbmonit_abb_tasks` | Number of tasks. | |
+| `dumbmonit_abb_task_last_status` | Last run: `1` success, `0` failed, `2` running, `-1` unknown (never run, cancelled, no backup). A *partial* success counts as failed: at least one device was not backed up. | `task`, `task_id`, `source_type`, `result` |
+| `dumbmonit_abb_task_last_success_seconds` | Age of the last successful backup run, in seconds. Absent for a task that never succeeded. | `task`, `task_id`, `source_type` |
+| `dumbmonit_abb_task_enabled` | `1` if the task has a schedule and is not paused, `0` if it only runs by hand. | `task`, `task_id`, `source_type` |
+| `dumbmonit_abb_task_device_count` | Devices attached to the task. | `task`, `task_id`, `source_type` |
 
 `task` is the task name as shown in ABB; `source_type` is `pc`, `vm`,
 `physical_server`, `file_server` or `nas`; `result` is the raw result of the
@@ -125,5 +125,5 @@ used over HTTPS and 5000 over HTTP.
 | Authentication error | Wrong password, or two-step verification required for this account. DSM answers HTTP 200 even on failure; the error code in the JSON body is what counts, and DumbMonit reads it. |
 | Certificate error | Self-signed certificate: enable `insecure_tls`. This is a configuration error, never "unreachable": a NAS that answers is not shown as off. |
 | No disk or volume metrics | The account is not in the `administrators` group (see the note above). |
-| No `ezymonit_abb_*` metrics, `scrape_errors` at 1 | The account cannot use Active Backup for Business: delegate the package to it, or disable the `abb` option. Without the package installed there is no error and no metric. |
+| No `dumbmonit_abb_*` metrics, `scrape_errors` at 1 | The account cannot use Active Backup for Business: delegate the package to it, or disable the `abb` option. Without the package installed there is no error and no metric. |
 | Disks spin up on every probe | The storage inventory wakes sleeping disks. Lengthen the check interval. |

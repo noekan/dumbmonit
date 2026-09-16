@@ -7,6 +7,7 @@
 mod collector;
 mod command;
 mod credential;
+pub mod env;
 mod push;
 mod sample;
 mod target;

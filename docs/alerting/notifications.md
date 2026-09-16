@@ -26,7 +26,7 @@ evaluate (hysteresis, per-device overrides)
 | Quiet hours | Channel → Delivery options | off |
 | Batch window | Settings → Notification policy | 60 s |
 | Messages per channel per hour | Settings → Notification policy | 20 |
-| Public URL (deep links) | Settings → Notification policy, or `EZYMONIT_PUBLIC_URL` | empty |
+| Public URL (deep links) | Settings → Notification policy, or `DUMBMONIT_PUBLIC_URL` | empty |
 
 ## Hysteresis and per-device overrides
 
@@ -117,7 +117,7 @@ Delivery failures keep the lines queued; the next cycle retries.
 
 Every message ends with a link to the device (`{public_url}/targets/{id}`)
 when a public URL is known — the `public_url` of the policy, or
-`EZYMONIT_PUBLIC_URL`. Custom webhooks also get it as the `{{link}}`
+`DUMBMONIT_PUBLIC_URL`. Custom webhooks also get it as the `{{link}}`
 variable unless their own `base_url` is set.
 
 There is deliberately no "silence for 1 h" link in messages: chat services

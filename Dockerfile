@@ -42,7 +42,7 @@ RUN mkdir -p crates/proto/src crates/server/src crates/agent/src \
  && echo '' > crates/server/src/lib.rs \
  && echo 'fn main() {}' > crates/server/src/main.rs \
  && echo 'fn main() {}' > crates/agent/src/main.rs \
- && cargo build --release --locked -p ezymonit-server \
+ && cargo build --release --locked -p dumbmonit-server \
  && rm -rf crates/proto/src crates/server/src
 
 # La coquille de l'agent reste en place : ses vraies sources ne servent à rien
@@ -59,8 +59,8 @@ COPY --from=web /src/web/build web/build
 
 # Sans cela, cargo réutiliserait les artefacts des sources factices.
 RUN touch crates/proto/src/lib.rs crates/server/src/lib.rs crates/server/src/main.rs \
- && cargo build --release --locked -p ezymonit-server \
- && strip target/release/ezymonit
+ && cargo build --release --locked -p dumbmonit-server \
+ && strip target/release/dumbmonit
 
 # ---------------------------------------------------------------------------
 # Compilation croisée de l'agent, pour les trois plateformes que le serveur sait
@@ -101,7 +101,7 @@ RUN mkdir -p crates/proto/src crates/server/src crates/agent/src \
  && echo '' > crates/server/src/lib.rs \
  && echo 'fn main() {}' > crates/server/src/main.rs \
  && echo 'fn main() {}' > crates/agent/src/main.rs \
- && cargo zigbuild --release --locked -p ezymonit-agent \
+ && cargo zigbuild --release --locked -p dumbmonit-agent \
       $(for t in $AGENT_TARGETS; do echo "--target $t"; done) \
  && rm -rf crates/proto/src crates/agent/src
 
@@ -110,16 +110,24 @@ COPY crates/agent crates/agent
 
 # Les binaires prennent les noms exacts que les scripts d'installation demandent.
 RUN touch crates/proto/src/lib.rs crates/agent/src/main.rs \
- && cargo zigbuild --release --locked -p ezymonit-agent \
+ && cargo zigbuild --release --locked -p dumbmonit-agent \
       $(for t in $AGENT_TARGETS; do echo "--target $t"; done) \
  && mkdir -p /agents \
- && cp target/x86_64-unknown-linux-musl/release/ezymonit-agent  /agents/ezymonit-agent-linux-x86_64 \
- && cp target/aarch64-unknown-linux-musl/release/ezymonit-agent /agents/ezymonit-agent-linux-aarch64 \
- && cp target/x86_64-pc-windows-gnu/release/ezymonit-agent.exe  /agents/ezymonit-agent-windows-x86_64.exe \
+ && cp target/x86_64-unknown-linux-musl/release/dumbmonit-agent  /agents/dumbmonit-agent-linux-x86_64 \
+ && cp target/aarch64-unknown-linux-musl/release/dumbmonit-agent /agents/dumbmonit-agent-linux-aarch64 \
+ && cp target/x86_64-pc-windows-gnu/release/dumbmonit-agent.exe  /agents/dumbmonit-agent-windows-x86_64.exe \
  && ls -l /agents
 
 # ---------------------------------------------------------------------------
-# Image finale : le binaire et rien d'autre.
+# VictoriaMetrics, tel que publié par ses auteurs : un binaire Go statique. Il
+# est recopié dans l'image finale et lancé par le serveur quand aucune instance
+# externe n'est désignée (DUMBMONIT_VM_URL) — un seul conteneur suffit.
+# Version épinglée : le serveur en connaît les options.
+# ---------------------------------------------------------------------------
+FROM victoriametrics/victoria-metrics:v1.152.0 AS victoriametrics
+
+# ---------------------------------------------------------------------------
+# Image finale : les deux binaires et rien d'autre.
 # ---------------------------------------------------------------------------
 FROM scratch
 
@@ -127,16 +135,19 @@ FROM scratch
 # intégrations en HTTPS. Monter un autre fichier à cet emplacement permet de faire
 # reconnaître une autorité de certification privée.
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=builder /build/target/release/ezymonit /ezymonit
+COPY --from=builder /build/target/release/dumbmonit /dumbmonit
+# VictoriaMetrics embarqué ; `DUMBMONIT_VM_BINARY` permet d'en désigner un autre.
+COPY --from=victoriametrics /victoria-metrics-prod /victoria-metrics-prod
 # Binaires de l'agent, servis sur /download/… aux machines qui s'installent.
-# `EZYMONIT_AGENT_DIR` permet d'en monter d'autres à la place.
+# `DUMBMONIT_AGENT_DIR` permet d'en monter d'autres à la place.
 COPY --from=agent /agents /agents
 
-ENV EZYMONIT_BIND=0.0.0.0:8080 \
-    EZYMONIT_DATA_DIR=/data \
-    EZYMONIT_AGENT_DIR=/agents
+ENV DUMBMONIT_BIND=0.0.0.0:8080 \
+    DUMBMONIT_DATA_DIR=/data \
+    DUMBMONIT_AGENT_DIR=/agents \
+    DUMBMONIT_VM_BINARY=/victoria-metrics-prod
 
 VOLUME ["/data"]
 EXPOSE 8080
 
-ENTRYPOINT ["/ezymonit"]
+ENTRYPOINT ["/dumbmonit"]

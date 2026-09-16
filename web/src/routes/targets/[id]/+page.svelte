@@ -105,7 +105,7 @@
 
 	/**
 	 * An agent's address is its opaque host id; the machine's own name and OS
-	 * come from the `ezymonit_agent_os_info` labels, read once per device.
+	 * come from the `dumbmonit_agent_os_info` labels, read once per device.
 	 */
 	let osInfo = $state<Record<string, string> | null>(null);
 	const hostname = $derived(osInfo?.host || osInfo?.hostname || null);
@@ -324,7 +324,7 @@
 
 	async function loadOsInfo(signal?: AbortSignal) {
 		try {
-			const series = await queryInstant(`last_over_time(ezymonit_agent_os_info{target="${id}"}[1d])`, signal);
+			const series = await queryInstant(`last_over_time(dumbmonit_agent_os_info{target="${id}"}[1d])`, signal);
 			osInfo = series[0]?.metric ?? null;
 		} catch {
 			osInfo = null;
@@ -350,7 +350,7 @@
 				loadUptimeSummary(id, signal),
 				loadUptimeHistory(id, rangeSeconds, signal),
 				loadResponseTimes(id, rangeSeconds, signal),
-				queryInstant(`count_over_time(ezymonit_probe_success{target="${id}"}[${range}])`, signal)
+				queryInstant(`count_over_time(dumbmonit_probe_success{target="${id}"}[${range}])`, signal)
 			]);
 			summary = s;
 			history = h;

@@ -1,5 +1,10 @@
+# One container: the DumbMonit server runs its own VictoriaMetrics (embedded in
+# the image) and keeps everything under a single volume. To use an external
+# VictoriaMetrics instead, set DUMBMONIT_VM_URL and the embedded one is not started.
+name: dumbmonit
+
 services:
-  ezymonit:
+  dumbmonit:
     # `docker compose up -d` pulls the published image (latest release; use
     # `:edge` for the last commit on main). To build from this checkout instead,
     # run `docker compose up -d --build`: the result is tagged with the same name
@@ -8,51 +13,36 @@ services:
     build: .
     ports:
       # The host port is configurable: 8080 is a crowded port on a homelab
-      # machine. `EZYMONIT_PORT=8099 docker compose up -d` moves it.
-      - "${EZYMONIT_PORT:-8080}:8080"
+      # machine. `DUMBMONIT_PORT=8099 docker compose up -d` moves it.
+      - "${DUMBMONIT_PORT:-8080}:8080"
     volumes:
-      - ezymonit-data:/data
+      # SQLite database, instance secret and the time series (/data/vm).
+      - dumbmonit-data:/data
     environment:
-      EZYMONIT_VM_URL: http://victoriametrics:8428
       # Uncomment to set the secret yourself instead of letting DumbMonit
       # generate it in /data/secret.key. It encrypts device credentials: losing
       # it means re-entering every one of them.
-      # EZYMONIT_SECRET: replace-me-with-32-random-characters
-      # Lost password: `EZYMONIT_RESET_PASSWORD=1 docker compose up -d` clears
+      # DUMBMONIT_SECRET: replace-me-with-32-random-characters
+      # Lost password: `DUMBMONIT_RESET_PASSWORD=1 docker compose up -d` clears
       # the password at startup and the UI asks for a new one; then start again
       # without the variable.
-      EZYMONIT_RESET_PASSWORD: ${EZYMONIT_RESET_PASSWORD:-}
-    depends_on:
-      - victoriametrics
+      DUMBMONIT_RESET_PASSWORD: ${DUMBMONIT_RESET_PASSWORD:-}
+      # Embedded VictoriaMetrics: retention (months, or e.g. 30d / 2y) and the
+      # memory budget of its caches. A homelab of a few dozen devices fits in
+      # 256 MB; raise it when you monitor hundreds of hosts.
+      DUMBMONIT_VM_RETENTION: ${DUMBMONIT_VM_RETENTION:-12}
+      DUMBMONIT_VM_MEMORY: ${DUMBMONIT_VM_MEMORY:-256MB}
+      # External VictoriaMetrics instead of the embedded one:
+      # DUMBMONIT_VM_URL: http://victoriametrics:8428
     # Only needed for "ping" (ICMP) monitors:
     # cap_add:
     #   - NET_RAW
-    restart: unless-stopped
-
-  victoriametrics:
-    image: victoriametrics/victoria-metrics:latest
-    command:
-      - "-retentionPeriod=12"        # 12 months
-      - "-storageDataPath=/vmdata"
-      - "-httpListenAddr=:8428"
-      # Memory budget for VictoriaMetrics' caches. Without it VM sizes them for
-      # 60 % of the host's RAM and its RSS grows for days; a homelab of a few
-      # dozen devices fits comfortably in 256 MB. Raise it (or replace by
-      # "-memory.allowedPercent=10") when you monitor hundreds of hosts.
-      - "-memory.allowedBytes=256MB"
-      # One DumbMonit instance never queries more than a few thousand series:
-      # cap a runaway query before it eats the budget above.
-      - "-search.maxUniqueTimeseries=100000"
-      # Collapse duplicate points closer than 10 s (agent retries, a probe run
-      # twice): fewer rows on disk, nothing lost at a 30 s cadence.
-      - "-dedup.minScrapeInterval=10s"
-      # Four concurrent queries are plenty for one UI plus the alert engine, and
-      # each one runs with a bounded memory share of the budget.
-      - "-search.maxConcurrentRequests=4"
-    volumes:
-      - vm-data:/vmdata
+    # The server stops VictoriaMetrics after itself: leave it the time to do so.
+    stop_grace_period: 30s
     restart: unless-stopped
 
 volumes:
-  ezymonit-data:
-  vm-data:
+  dumbmonit-data:
+    # Fixed name, independent of the compose project name: the volume is what
+    # you back up and what an upgrade must find again.
+    name: dumbmonit-data

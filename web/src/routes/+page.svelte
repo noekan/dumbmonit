@@ -103,7 +103,7 @@
 	/** Days left per service certificate, one reading per device (the soonest wins). */
 	async function loadCertificates(signal?: AbortSignal) {
 		const series = await queryInstant(
-			`last_over_time({__name__=~"ezymonit_(probe_)?ssl_cert_expiry_days"}[1h])`,
+			`last_over_time({__name__=~"dumbmonit_(probe_)?ssl_cert_expiry_days"}[1h])`,
 			signal
 		);
 		const byTarget = new Map<TargetId, number>();

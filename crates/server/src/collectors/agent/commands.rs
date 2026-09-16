@@ -7,7 +7,7 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use ezymonit_proto::{AgentCommand, COMMAND_MAX_AGE_SECS, CommandReport, CommandStatus, TargetId};
+use dumbmonit_proto::{AgentCommand, COMMAND_MAX_AGE_SECS, CommandReport, CommandStatus, TargetId};
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
 
@@ -451,7 +451,7 @@ fn truncate_result(text: &str) -> String {
 mod tests {
     use std::collections::BTreeMap;
 
-    use ezymonit_proto::{AgentIdentity, CMD_CONTAINER_RESTART, CMD_CONTAINER_UPDATE};
+    use dumbmonit_proto::{AgentIdentity, CMD_CONTAINER_RESTART, CMD_CONTAINER_UPDATE};
 
     use super::*;
     use crate::collectors::agent::store;

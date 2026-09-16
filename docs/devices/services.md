@@ -9,7 +9,7 @@ bar, a response time and an availability percentage on its device page.
 A service can answer and still be down: a `500`, a missing keyword, an expired
 certificate. So these monitors write a point on every check, `probe_success`
 being 1 or 0, instead of going silent like a hardware device. That is what
-makes an availability percentage possible: `avg_over_time(ezymonit_probe_success[30d])`.
+makes an availability percentage possible: `avg_over_time(dumbmonit_probe_success[30d])`.
 
 | Situation | What happens |
 |---|---|
@@ -18,7 +18,7 @@ makes an availability percentage possible: `avg_over_time(ezymonit_probe_success
 | All good | `probe_success = 1`. |
 
 Every monitor has its own timeout (`timeout_seconds`, 5 s by default, 60 s at
-most), shorter than the server's `EZYMONIT_PROBE_TIMEOUT_SECS`: interrupted by
+most), shorter than the server's `DUMBMONIT_PROBE_TIMEOUT_SECS`: interrupted by
 the scheduler, it could not write its zero.
 
 Built-in rules that apply to all five: Service down (3 minutes), Service
@@ -28,7 +28,7 @@ than 3 s for ten minutes). For `http` and `tls`: Certificate expiring soon
 
 ### Metrics
 
-All gauges, all prefixed `ezymonit_`, all labelled `probe="http|tcp|dns|ping|tls"`
+All gauges, all prefixed `dumbmonit_`, all labelled `probe="http|tcp|dns|ping|tls"`
 in addition to `target`, `host` and `tag_*`.
 
 | Metric | Monitors | Meaning |
@@ -171,7 +171,7 @@ machine without agent or SNMP, remote host.
    the charts. Lower "Tolerated loss" to be warned earlier.
 4. If DumbMonit runs in Docker, add the NET_RAW capability to the container: in
    docker-compose.yml, uncomment the "cap_add: - NET_RAW" lines under the
-   ezymonit service, then restart it.
+   dumbmonit service, then restart it.
 
 !!! warning
     Without the NET_RAW capability, the check cannot open an ICMP socket: it
@@ -180,7 +180,7 @@ machine without agent or SNMP, remote host.
 
 ```yaml
 services:
-  ezymonit:
+  dumbmonit:
     cap_add:
       - NET_RAW
 ```

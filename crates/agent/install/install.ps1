@@ -5,13 +5,14 @@
 .DESCRIPTION
     Downloads the binary, writes the configuration with the token, registers the
     service and starts it. Running the script again updates the agent: it is also
-    the upgrade procedure.
+    the upgrade procedure. A machine still running the agent under its former
+    name (EzyMonitAgent) is migrated in place by the same command.
 
 .EXAMPLE
-    & ([scriptblock]::Create((irm http://serveur:8080/install.ps1))) -Token ezym_xxx -Url http://serveur:8080
+    & ([scriptblock]::Create((irm http://serveur:8080/install.ps1))) -Token dmon_xxx -Url http://serveur:8080
 
 .EXAMPLE
-    .\install.ps1 -Token ezym_xxx -Url http://serveur:8080 -Services @('Spooler','MSSQLSERVER')
+    .\install.ps1 -Token dmon_xxx -Url http://serveur:8080 -Services @('Spooler','MSSQLSERVER')
 #>
 [CmdletBinding()]
 param(
@@ -28,17 +29,57 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ServiceName = 'EzyMonitAgent'
-$InstallDir  = Join-Path $env:ProgramFiles 'EzyMonit'
-$ConfigDir   = Join-Path $env:ProgramData 'EzyMonit'
-$ExePath     = Join-Path $InstallDir 'ezymonit-agent.exe'
+$ServiceName = 'DumbMonitAgent'
+$InstallDir  = Join-Path $env:ProgramFiles 'DumbMonit'
+$ConfigDir   = Join-Path $env:ProgramData 'DumbMonit'
+$ExePath     = Join-Path $InstallDir 'dumbmonit-agent.exe'
 $ConfigPath  = Join-Path $ConfigDir 'agent.yaml'
+
+# Noms d'avant le renommage EzyMonit → DumbMonit. Une installation qui les porte
+# encore est migrée sur place à l'installation, et -Uninstall en fait aussi le
+# ménage.
+$LegacyServiceName = 'EzyMonitAgent'
+$LegacyInstallDir  = Join-Path $env:ProgramFiles 'EzyMonit'
+$LegacyConfigDir   = Join-Path $env:ProgramData 'EzyMonit'
 
 function Write-Etape($message) { Write-Host "==> $message" }
 
 function Stop-Sur($message) {
     Write-Error $message
     exit 1
+}
+
+# Arrête et retire le service et le dossier d'installation de l'ancien agent.
+# Ne touche pas à sa configuration. Silencieux quand rien d'ancien n'est
+# présent ; renvoie $true si quelque chose a été retiré.
+function Remove-AncienAgent {
+    $retire = $false
+    if (Get-Service -Name $LegacyServiceName -ErrorAction SilentlyContinue) {
+        Stop-Service -Name $LegacyServiceName -Force -ErrorAction SilentlyContinue
+        & sc.exe delete $LegacyServiceName | Out-Null
+        $retire = $true
+    }
+    if (Test-Path $LegacyInstallDir) {
+        Remove-Item -Path $LegacyInstallDir -Recurse -Force -ErrorAction SilentlyContinue
+        $retire = $true
+    }
+    return $retire
+}
+
+# Migration sur place d'une installation d'avant le renommage : l'ancien service
+# est arrêté et retiré, et sa configuration reprend sa place sous le nouveau nom.
+# Elle est réécrite juste après depuis -Token/-Url, mais les clés qu'un
+# utilisateur y aurait ajoutées restent à portée de main. Sans rien d'ancien,
+# ne fait rien et ne dit rien.
+function Migrate-Legacy {
+    $migre = Remove-AncienAgent
+    if ((Test-Path $LegacyConfigDir) -and -not (Test-Path $ConfigDir)) {
+        # Sur un même volume, Move-Item est un renommage : les droits posés par
+        # icacls sur l'ancien fichier de configuration sont conservés.
+        Move-Item -Path $LegacyConfigDir -Destination $ConfigDir
+        $migre = $true
+    }
+    if ($migre) { Write-Etape "Migrating the $LegacyServiceName install to $ServiceName" }
 }
 
 # --------------------------------------------------------------- privilèges
@@ -61,6 +102,9 @@ if ($Uninstall) {
     }
     Remove-Item -Path $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -Path $ConfigDir -Recurse -Force -ErrorAction SilentlyContinue
+    # Les restes d'une installation d'avant le renommage partent aussi.
+    Remove-AncienAgent | Out-Null
+    Remove-Item -Path $LegacyConfigDir -Recurse -Force -ErrorAction SilentlyContinue
     Write-Etape "Agent uninstalled"
     exit 0
 }
@@ -89,7 +133,7 @@ if ($BinPath) {
     Write-Etape "Installing from $BinPath"
     Copy-Item -Path $BinPath -Destination $exeTemporaire -Force
 } else {
-    $source = "$Url/download/ezymonit-agent-windows-$architecture.exe"
+    $source = "$Url/download/dumbmonit-agent-windows-$architecture.exe"
     Write-Etape "Downloading $source"
     try {
         # Sans la barre de progression, `Invoke-WebRequest` est plusieurs fois plus
@@ -109,6 +153,11 @@ if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
     Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
 }
 Move-Item -Path $exeTemporaire -Destination $ExePath -Force
+
+# Le nouveau binaire est en place : l'ancien agent, s'il est là, peut être
+# arrêté et sa configuration déplacée avant que la nouvelle ne soit écrite. Pas
+# avant — un téléchargement raté ne doit pas laisser la machine sans agent.
+Migrate-Legacy
 
 # ------------------------------------------------------------ configuration
 

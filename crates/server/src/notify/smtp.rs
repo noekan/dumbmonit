@@ -157,8 +157,10 @@ mod tests {
 
     #[test]
     fn un_serveur_sans_destinataire_est_refuse() {
-        let config =
-            channel(json!({"host": "smtp.exemple.org", "from": "ezymonit@exemple.org"}), json!({}));
+        let config = channel(
+            json!({"host": "smtp.exemple.org", "from": "dumbmonit@exemple.org"}),
+            json!({}),
+        );
         let Err(erreur) = Smtp::new(&config) else { panic!("missing recipient accepted") };
         assert!(erreur.to_string().contains("recipient"));
     }
@@ -176,9 +178,9 @@ mod tests {
             json!({
                 "host": "smtp.exemple.org",
                 "security": "starttls",
-                "from": "ezymonit@exemple.org",
+                "from": "dumbmonit@exemple.org",
                 "to": ["admin@exemple.org"],
-                "username": "ezymonit"
+                "username": "dumbmonit"
             }),
             json!({"password": "mot-de-passe-long"}),
         );

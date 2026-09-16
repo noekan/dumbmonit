@@ -1,22 +1,24 @@
 [package]
-name = "ezymonit-server"
-description = "Serveur EzyMonit : collecte, stockage, alerting et interface web."
+name = "dumbmonit-server"
+description = "Serveur DumbMonit : collecte, stockage, alerting et interface web."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+# Distribué par image Docker, jamais sur crates.io.
+publish = false
 
 [lib]
-name = "ezymonit_server"
+name = "dumbmonit_server"
 path = "src/lib.rs"
 
 [[bin]]
-name = "ezymonit"
+name = "dumbmonit"
 path = "src/main.rs"
 
 [dependencies]
-ezymonit-proto = { path = "../proto" }
+dumbmonit-proto = { path = "../proto" }
 
 anyhow.workspace = true
 async-trait.workspace = true
@@ -24,7 +26,8 @@ chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "fs"] }
+# `process` et `io-util` : lancement du VictoriaMetrics embarqué et recopie de son journal.
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "fs", "process", "io-util"] }
 tracing.workspace = true
 
 axum = "0.8"
@@ -92,6 +95,10 @@ subtle = "2.6"
 jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "rust_crypto"] }
 # Encodage base64url du défi PKCE.
 base64 = "0.22"
+
+[target.'cfg(unix)'.dependencies]
+# SIGTERM vers le VictoriaMetrics embarqué : tokio ne sait envoyer que SIGKILL.
+libc = "0.2"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

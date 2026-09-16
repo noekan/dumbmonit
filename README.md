@@ -6,7 +6,7 @@
 
 **Dumb-simple monitoring for homelabs and small teams.**
 
-Two containers, one IP address to type in, useful graphs and alerts in under a minute.<br>
+One container, one IP address to type in, useful graphs and alerts in under a minute.<br>
 The UI reads like a weather bulletin for your network. The mascot is a pigeon.
 
 [![CI](https://github.com/noekan/dumbmonit/actions/workflows/ci.yml/badge.svg)](https://github.com/noekan/dumbmonit/actions/workflows/ci.yml)
@@ -108,11 +108,11 @@ Then open http://localhost:8080. The first visit lands on `/setup`, where you
 choose the instance password. Add a device with its IP address and SNMP
 community: the collection profile is detected automatically.
 
-- **Another port**: `EZYMONIT_PORT=8099 docker compose up -d` (8080 is busy on
+- **Another port**: `DUMBMONIT_PORT=8099 docker compose up -d` (8080 is busy on
   most homelab machines).
 - **Build locally instead of pulling the image**: `docker compose up -d --build`
   (about 10 minutes cold; needs nothing but Docker).
-- **Lost password**: `EZYMONIT_RESET_PASSWORD=1 docker compose up -d` clears the
+- **Lost password**: `DUMBMONIT_RESET_PASSWORD=1 docker compose up -d` clears the
   password and all sessions at startup; the UI asks for a new one at `/setup`.
   Then run `docker compose up -d` again without the variable.
 - **ICMP ping monitors** need the `NET_RAW` capability: uncomment the `cap_add`
@@ -124,7 +124,7 @@ Create a token in *Settings → Agents*; the UI shows the install command with t
 token filled in:
 
 ```sh
-curl -sSL http://server:8080/install.sh | sh -s -- --token=ezym_xxx --url=http://server:8080
+curl -sSL http://server:8080/install.sh | sh -s -- --token=dmon_xxx --url=http://server:8080
 ```
 
 The agent registers itself as a device. A PowerShell script is served at
@@ -145,12 +145,14 @@ More screenshots, in both themes, in [`.github/assets/screenshots/`](.github/ass
 
 | Container | Role | Footprint |
 |---|---|---|
-| `ezymonit` | Collection, API, alerting, web UI | ~20 MB image, ~40 MB RAM |
-| `victoriametrics` | Time series storage | ~100 MB RAM |
+| `dumbmonit` | Collection, API, alerting, web UI, and the embedded VictoriaMetrics for time series | ~40 MB RAM + the VictoriaMetrics budget (256 MB by default) |
 
-Configuration and state live in an embedded SQLite database: there is no third
-database container. The published image is `ghcr.io/noekan/dumbmonit`
-(`latest` = last release, `edge` = last commit on `main`).
+One container, one volume. The image ships the VictoriaMetrics binary and the
+server runs it as a child process; set `DUMBMONIT_VM_URL` to use an instance
+you already have instead. Configuration and state live in an embedded SQLite
+database: there is no database container. The published image is
+`ghcr.io/noekan/dumbmonit` (`latest` = last release, `edge` = last commit on
+`main`).
 
 ## Configuration
 
@@ -158,19 +160,23 @@ Everything goes through environment variables; none is required.
 
 | Variable | Default | Role |
 |---|---|---|
-| `EZYMONIT_BIND` | `0.0.0.0:8080` | Listen address |
-| `EZYMONIT_DATA_DIR` | `/data` | SQLite database and instance secret |
-| `EZYMONIT_VM_URL` | `http://victoriametrics:8428` | VictoriaMetrics URL |
-| `EZYMONIT_SECRET` | *(generated)* | Encrypts device credentials |
-| `EZYMONIT_MAX_CONCURRENT_PROBES` | `64` | Concurrent probes |
-| `EZYMONIT_PROBE_TIMEOUT_SECS` | `10` | Maximum duration of one probe |
-| `EZYMONIT_FLUSH_INTERVAL_SECS` | `5` | Write period towards VictoriaMetrics |
-| `EZYMONIT_LOG` | `info` | Log filter (`tracing` syntax) |
-| `EZYMONIT_AGENT_DIR` | `/agents` | Agent binaries served under `/download/…` |
-| `EZYMONIT_RESET_PASSWORD` | *(empty)* | Set to `1` to clear the password and sessions at startup |
+| `DUMBMONIT_BIND` | `0.0.0.0:8080` | Listen address |
+| `DUMBMONIT_DATA_DIR` | `/data` | SQLite database, instance secret, time series |
+| `DUMBMONIT_VM_URL` | *(unset)* | External VictoriaMetrics; unset, the embedded one is started |
+| `DUMBMONIT_VM_RETENTION` | `12` | Retention of the embedded VictoriaMetrics (months, or `30d`, `2y`) |
+| `DUMBMONIT_VM_MEMORY` | `256MB` | Memory budget of the embedded VictoriaMetrics |
+| `DUMBMONIT_SECRET` | *(generated)* | Encrypts device credentials |
+| `DUMBMONIT_MAX_CONCURRENT_PROBES` | `64` | Concurrent probes |
+| `DUMBMONIT_PROBE_TIMEOUT_SECS` | `10` | Maximum duration of one probe |
+| `DUMBMONIT_FLUSH_INTERVAL_SECS` | `5` | Write period towards VictoriaMetrics |
+| `DUMBMONIT_LOG` | `info` | Log filter (`tracing` syntax) |
+| `DUMBMONIT_AGENT_DIR` | `/agents` | Agent binaries served under `/download/…` |
+| `DUMBMONIT_RESET_PASSWORD` | *(empty)* | Set to `1` to clear the password and sessions at startup |
 
-The `EZYMONIT_PORT` variable is read by `docker-compose.yml` only and sets the
-host port (default `8080`).
+The `DUMBMONIT_PORT` variable is read by `docker-compose.yml` only and sets the
+host port (default `8080`). The former `EZYMONIT_*` names are still accepted,
+with a deprecation warning; see [CHANGELOG.md](CHANGELOG.md) for what the
+rename changes.
 
 ### About the instance secret
 
@@ -185,7 +191,8 @@ with an explicit message, rather than failing silently on every probe.
 ## Architecture
 
 One Rust binary (which embeds the SvelteKit build) plus VictoriaMetrics for time
-series and SQLite for configuration and state.
+series, started by the server from the same image, and SQLite for configuration
+and state.
 
 ```
 crates/proto     shared types: Sample, Target, Credential, trait Collector (+ ProbeError)
@@ -231,7 +238,7 @@ This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
 
 Early, actively developed, and used daily on the author's own homelab. The HTTP
 API is not frozen yet: expect changes between releases until 1.0. Crates,
-environment variables and image names still say `ezymonit` (the former name);
+environment variables and image names still say `dumbmonit` (the former name);
 they will keep working.
 
 ## License

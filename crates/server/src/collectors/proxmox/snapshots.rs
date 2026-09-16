@@ -7,7 +7,7 @@
 //! La liste coûte un appel par invité ; l'orchestration (`mod.rs`) limite le
 //! parallélisme et le nombre d'invités inventoriés par collecte.
 
-use ezymonit_proto::Sample;
+use dumbmonit_proto::Sample;
 
 use super::backup::GuestRef;
 use super::metrics::gauge;

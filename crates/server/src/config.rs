@@ -14,8 +14,22 @@ pub struct Config {
     pub bind: SocketAddr,
     /// Répertoire persistant : base SQLite et clé de chiffrement.
     pub data_dir: PathBuf,
-    /// URL de base de VictoriaMetrics.
-    pub victoria_url: String,
+    /// URL de base d'une instance VictoriaMetrics externe (`DUMBMONIT_VM_URL`).
+    ///
+    /// `None` : le serveur lance lui-même le binaire VictoriaMetrics embarqué dans
+    /// l'image et le pilote comme un processus enfant (voir [`crate::tsdb::embedded`]).
+    pub victoria_url: Option<String>,
+    /// Chemin du binaire VictoriaMetrics utilisé en mode embarqué.
+    pub vm_binary: PathBuf,
+    /// Adresse d'écoute HTTP du VictoriaMetrics embarqué. Sur la boucle locale par
+    /// défaut : rien d'autre que ce serveur n'a à lui parler. L'overlay de
+    /// développement l'ouvre sur `0.0.0.0` pour interroger MetricsQL à la main.
+    pub vm_listen: String,
+    /// Durée de rétention des séries du VictoriaMetrics embarqué, dans la syntaxe
+    /// de son option `-retentionPeriod` (`12` = douze mois, `30d`, `2y`).
+    pub vm_retention: String,
+    /// Budget mémoire des caches du VictoriaMetrics embarqué (`-memory.allowedBytes`).
+    pub vm_memory: String,
     /// Secret d'instance, fourni par l'environnement ou lu depuis `data_dir`.
     /// `None` ici signifie « à charger ou générer au démarrage ».
     pub secret: Option<String>,
@@ -55,43 +69,77 @@ pub struct Config {
     /// efface tous les comptes et toutes les sessions au démarrage (les réglages
     /// SSO restent), puis l'interface repropose l'écran de première configuration.
     pub reset_password: bool,
-    /// Connexion OpenID Connect décrite par l'environnement (`EZYMONIT_OIDC_*`,
-    /// `EZYMONIT_PUBLIC_URL`). Un réglage enregistré depuis l'interface l'emporte.
+    /// Connexion OpenID Connect décrite par l'environnement (`DUMBMONIT_OIDC_*`,
+    /// `DUMBMONIT_PUBLIC_URL`). Un réglage enregistré depuis l'interface l'emporte.
     pub oidc: OidcEnv,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self> {
         Ok(Self {
-            bind: env_parsed("EZYMONIT_BIND", "0.0.0.0:8080")?,
-            data_dir: PathBuf::from(env_or("EZYMONIT_DATA_DIR", "/data")),
-            victoria_url: env_or("EZYMONIT_VM_URL", "http://victoriametrics:8428")
-                .trim_end_matches('/')
-                .to_string(),
-            secret: std::env::var("EZYMONIT_SECRET").ok().filter(|s| !s.is_empty()),
-            max_concurrent_probes: env_parsed("EZYMONIT_MAX_CONCURRENT_PROBES", "64")?,
-            probe_timeout: Duration::from_secs(env_parsed("EZYMONIT_PROBE_TIMEOUT_SECS", "10")?),
+            bind: env_parsed("DUMBMONIT_BIND", "0.0.0.0:8080")?,
+            data_dir: PathBuf::from(env_or("DUMBMONIT_DATA_DIR", "/data")),
+            victoria_url: env_var("DUMBMONIT_VM_URL")
+                .map(|url| url.trim_end_matches('/').to_string()),
+            vm_binary: PathBuf::from(env_or("DUMBMONIT_VM_BINARY", "/victoria-metrics-prod")),
+            vm_listen: env_or("DUMBMONIT_VM_LISTEN", "127.0.0.1:8428"),
+            vm_retention: env_or("DUMBMONIT_VM_RETENTION", "12"),
+            vm_memory: env_or("DUMBMONIT_VM_MEMORY", "256MB"),
+            secret: env_var("DUMBMONIT_SECRET"),
+            max_concurrent_probes: env_parsed("DUMBMONIT_MAX_CONCURRENT_PROBES", "64")?,
+            probe_timeout: Duration::from_secs(env_parsed("DUMBMONIT_PROBE_TIMEOUT_SECS", "10")?),
             write_flush_interval: Duration::from_secs(env_parsed(
-                "EZYMONIT_FLUSH_INTERVAL_SECS",
+                "DUMBMONIT_FLUSH_INTERVAL_SECS",
                 "5",
             )?),
-            write_flush_size: env_parsed("EZYMONIT_FLUSH_BATCH", "5000")?,
-            workers: env_parsed::<usize>("EZYMONIT_WORKERS", &default_workers().to_string())?
+            write_flush_size: env_parsed("DUMBMONIT_FLUSH_BATCH", "5000")?,
+            workers: env_parsed::<usize>("DUMBMONIT_WORKERS", &default_workers().to_string())?
                 .clamp(1, 256),
-            db_pool_size: env_parsed::<u32>("EZYMONIT_DB_POOL", "4")?.clamp(1, 64),
-            agent_dir: PathBuf::from(env_or("EZYMONIT_AGENT_DIR", "/agents")),
-            reset_password: env_flag("EZYMONIT_RESET_PASSWORD"),
+            db_pool_size: env_parsed::<u32>("DUMBMONIT_DB_POOL", "4")?.clamp(1, 64),
+            agent_dir: PathBuf::from(env_or("DUMBMONIT_AGENT_DIR", "/agents")),
+            reset_password: env_flag("DUMBMONIT_RESET_PASSWORD"),
             oidc: OidcEnv::from_env(),
         })
     }
 
     pub fn database_path(&self) -> PathBuf {
-        self.data_dir.join("ezymonit.db")
+        self.data_dir.join(crate::db::DATABASE_FILE)
     }
 
     pub fn secret_path(&self) -> PathBuf {
         self.data_dir.join("secret.key")
     }
+
+    /// Répertoire de stockage du VictoriaMetrics embarqué : sous `data_dir`, pour
+    /// qu'un seul volume porte toute la persistance.
+    pub fn vm_data_path(&self) -> PathBuf {
+        self.data_dir.join("vm")
+    }
+
+    /// VictoriaMetrics est-il lancé par ce serveur plutôt que fourni de l'extérieur ?
+    pub fn vm_embedded(&self) -> bool {
+        self.victoria_url.is_none()
+    }
+
+    /// URL effective de VictoriaMetrics : celle de l'environnement, ou celle du
+    /// processus embarqué.
+    pub fn effective_victoria_url(&self) -> String {
+        match &self.victoria_url {
+            Some(url) => url.clone(),
+            None => format!("http://{}", loopback_address(&self.vm_listen)),
+        }
+    }
+}
+
+/// Adresse par laquelle joindre un processus local qui écoute sur `listen` :
+/// `0.0.0.0:8428` ou `:8428` s'interrogent sur `127.0.0.1:8428`.
+fn loopback_address(listen: &str) -> String {
+    let (host, port) = listen.rsplit_once(':').unwrap_or((listen, "8428"));
+    let host = match host.trim_matches(|c| c == '[' || c == ']') {
+        "" | "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
+        other => other,
+    };
+    if host.contains(':') { format!("[{host}]:{port}") } else { format!("{host}:{port}") }
 }
 
 /// Threads de travail par défaut : au plus quatre, et jamais plus que de cœurs.
@@ -99,13 +147,20 @@ fn default_workers() -> usize {
     std::thread::available_parallelism().map_or(2, |n| n.get()).min(4)
 }
 
+/// Lecture d'une variable `DUMBMONIT_*`, avec repli sur `EZYMONIT_*` (voir
+/// [`dumbmonit_proto::env`]). Tout le serveur passe par ici : c'est ce qui
+/// garantit que l'ancien nom est accepté partout, et signalé une seule fois.
+pub fn env_var(key: &str) -> Option<String> {
+    dumbmonit_proto::env::var(key)
+}
+
 fn env_or(key: &str, default: &str) -> String {
-    std::env::var(key).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| default.to_string())
+    env_var(key).unwrap_or_else(|| default.to_string())
 }
 
 /// Drapeau booléen : `1`, `true`, `yes` ou `on`, sans distinction de casse.
-fn env_flag(key: &str) -> bool {
-    std::env::var(key)
+pub fn env_flag(key: &str) -> bool {
+    env_var(key)
         .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
         .unwrap_or(false)
 }
@@ -119,4 +174,18 @@ where
     raw.parse::<T>()
         .map_err(|e| anyhow::anyhow!("{e}"))
         .with_context(|| format!("{key}: invalid value \"{raw}\""))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_embedded_instance_is_reached_on_the_loopback() {
+        assert_eq!(loopback_address("127.0.0.1:8428"), "127.0.0.1:8428");
+        assert_eq!(loopback_address("0.0.0.0:8428"), "127.0.0.1:8428");
+        assert_eq!(loopback_address(":8428"), "127.0.0.1:8428");
+        assert_eq!(loopback_address("[::]:8428"), "127.0.0.1:8428");
+        assert_eq!(loopback_address("10.0.0.5:9000"), "10.0.0.5:9000");
+    }
 }

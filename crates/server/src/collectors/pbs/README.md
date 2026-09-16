@@ -4,7 +4,7 @@ Intégration de Proxmox Backup Server (PBS) : état du nœud, remplissage des
 datastores, ancienneté et vérification de la dernière sauvegarde de chaque
 machine, tâches en échec, nettoyage (GC), travaux planifiés (synchronisation,
 vérification, purge) et mises à jour en attente. Le module est calqué sur celui
-de Proxmox VE ; il ne dépend que de `ezymonit-proto`, `reqwest` (via le client
+de Proxmox VE ; il ne dépend que de `dumbmonit-proto`, `reqwest` (via le client
 partagé `collectors::http`), `serde`, `chrono`, `tokio` et `futures`.
 
 ## Câblage
@@ -92,7 +92,7 @@ la sauvegarde en cours.
 
 ## Métriques
 
-Toutes préfixées `pbs_` ici, `ezymonit_pbs_` une fois écrites.
+Toutes préfixées `pbs_` ici, `dumbmonit_pbs_` une fois écrites.
 
 | Métrique | Étiquettes | Sens |
 |---|---|---|

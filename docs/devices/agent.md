@@ -10,7 +10,7 @@ the monitored machine.
 
 ## What it watches
 
-All metrics are prefixed `ezymonit_`. Identity labels (`target`, `host`,
+All metrics are prefixed `dumbmonit_`. Identity labels (`target`, `host`,
 `tag_*`) are set by the server on reception, never by the agent: a machine
 cannot write into another machine's series, even by forging its labels.
 
@@ -47,12 +47,12 @@ received and declares the machine silent after three missed periods (at least
 === "Linux (systemd or OpenRC)"
 
     ```sh
-    curl -sSL http://server:8080/install.sh | sh -s -- --token=ezym_xxx --url=http://server:8080
+    curl -sSL http://server:8080/install.sh | sh -s -- --token=dmon_xxx --url=http://server:8080
     ```
 
     The script is POSIX `sh` (BusyBox and dash work), downloads the binary for
     the machine's architecture (x86_64 or aarch64) from the server, writes
-    `/etc/ezymonit/agent.yaml` (mode 0600) and registers `ezymonit-agent` with
+    `/etc/dumbmonit/agent.yaml` (mode 0600) and registers `dumbmonit-agent` with
     systemd, or with OpenRC on Alpine. The systemd unit is hardened
     (`ProtectSystem=strict`, `NoNewPrivileges`, `MemoryMax=128M`,
     `CPUQuota=20%`).
@@ -60,11 +60,11 @@ received and declares the machine silent after three missed periods (at least
 === "Windows (service)"
 
     ```powershell
-    & ([scriptblock]::Create((irm http://server:8080/install.ps1))) -Token ezym_xxx -Url http://server:8080
+    & ([scriptblock]::Create((irm http://server:8080/install.ps1))) -Token dmon_xxx -Url http://server:8080
     ```
 
     The script installs the binary, writes
-    `C:\ProgramData\EzyMonit\agent.yaml` and registers a Windows service set to
+    `C:\ProgramData\DumbMonit\agent.yaml` and registers a Windows service set to
     restart on failure.
 
 One token can enrol several machines: name it after a group or a machine.
@@ -74,7 +74,7 @@ One token can enrol several machines: name it after a group or a machine.
 | `install.sh` | `install.ps1` | Effect |
 |---|---|---|
 | `--token=TOKEN` | `-Token` | Enrollment token (required). |
-| `--url=URL` | `-Url` | Server URL, for example `http://server:8080`. On Linux, `EZYMONIT_URL` in the environment is used if the flag is absent. |
+| `--url=URL` | `-Url` | Server URL, for example `http://server:8080`. On Linux, `DUMBMONIT_URL` in the environment is used if the flag is absent. |
 | `--interval=N` | `-Interval` | Sampling period in seconds (default 30). |
 | `--services=a,b,c` | `-Services @('a','b')` | systemd units or Windows services whose state is reported. |
 | `--tags=key=value,…` | `-Tags @{key='value'}` | Tags, copied as `tag_<key>` on every series. |
@@ -84,17 +84,28 @@ One token can enrol several machines: name it after a group or a machine.
 | `--uninstall` | `-Uninstall` | Uninstall the agent and delete its configuration. |
 | `--help` | | Show the help. |
 
-The Linux script is idempotent: running it again updates the binary and the
-configuration, which makes it the update procedure too.
+### Upgrade
+
+Both scripts are idempotent: running the install command again, with the same
+token and URL, replaces the binary, rewrites the configuration and restarts the
+service. That is the upgrade procedure.
+
+The same command migrates a machine still running the EzyMonit agent, on Linux
+and on Windows. The installer stops and removes the old service
+(`ezymonit-agent`, or `EzyMonitAgent` on Windows), moves the configuration to
+the new path (`/etc/dumbmonit/agent.yaml`, `C:\ProgramData\DumbMonit\agent.yaml`)
+and installs `dumbmonit-agent` in its place. The old `ezym_…` token stays
+valid, so the command shown when the token was created still works; nothing
+has to be revoked first.
 
 ## Configuration file
 
-`/etc/ezymonit/agent.yaml` on Linux, `C:\ProgramData\EzyMonit\agent.yaml` on
+`/etc/dumbmonit/agent.yaml` on Linux, `C:\ProgramData\DumbMonit\agent.yaml` on
 Windows:
 
 ```yaml
 server_url: http://server:8080
-token: ezym_...
+token: dmon_...
 interval_secs: 30          # sampling period
 hostname: nas-basement     # optional: name announced to the server
 services:                  # systemd units or Windows services
@@ -114,29 +125,29 @@ a container without mounting a file:
 
 | Variable | Effect |
 |---|---|
-| `EZYMONIT_AGENT_CONFIG` | Path of the configuration file |
-| `EZYMONIT_AGENT_URL` | Server URL |
-| `EZYMONIT_AGENT_TOKEN` | Enrollment token |
-| `EZYMONIT_AGENT_INTERVAL_SECS` | Sampling period |
-| `EZYMONIT_AGENT_HOSTNAME` | Name announced to the server |
-| `EZYMONIT_AGENT_SERVICES` | Services to watch, comma-separated |
-| `EZYMONIT_AGENT_TAGS` | `key=value`, comma-separated |
-| `EZYMONIT_AGENT_DOCKER` | `true` / `false` |
-| `EZYMONIT_AGENT_DOCKER_SOCKET` | Docker socket path |
-| `EZYMONIT_AGENT_DOCKER_MAX_CONTAINERS` | Containers detailed per host, default `200` (`0`: counts only) |
-| `EZYMONIT_AGENT_INTERFACES_IGNORE` | Interfaces left out, comma-separated names or regexes; default `^(veth|br-|docker|virbr|lo$|vEthernet)` |
-| `EZYMONIT_AGENT_INTERFACES_ONLY` | Interfaces to keep; when set, replaces the ignore list |
-| `EZYMONIT_AGENT_MOUNTS_IGNORE` | Mount points left out of filesystems and disk I/O; default skips `/var/lib/docker/`, `/run/…`, `/sys/`, `/proc/`, `/dev/`, `/snap/` |
-| `EZYMONIT_AGENT_CPU_PER_CORE` | `true` to also send one CPU series per core (default `false`) |
-| `EZYMONIT_AGENT_MAX_BUFFERED_SAMPLES` | Size of the catch-up buffer |
-| `EZYMONIT_AGENT_LOG` | `trace`, `debug`, `info`, `warn`, `error` |
+| `DUMBMONIT_AGENT_CONFIG` | Path of the configuration file |
+| `DUMBMONIT_AGENT_URL` | Server URL |
+| `DUMBMONIT_AGENT_TOKEN` | Enrollment token |
+| `DUMBMONIT_AGENT_INTERVAL_SECS` | Sampling period |
+| `DUMBMONIT_AGENT_HOSTNAME` | Name announced to the server |
+| `DUMBMONIT_AGENT_SERVICES` | Services to watch, comma-separated |
+| `DUMBMONIT_AGENT_TAGS` | `key=value`, comma-separated |
+| `DUMBMONIT_AGENT_DOCKER` | `true` / `false` |
+| `DUMBMONIT_AGENT_DOCKER_SOCKET` | Docker socket path |
+| `DUMBMONIT_AGENT_DOCKER_MAX_CONTAINERS` | Containers detailed per host, default `200` (`0`: counts only) |
+| `DUMBMONIT_AGENT_INTERFACES_IGNORE` | Interfaces left out, comma-separated names or regexes; default `^(veth|br-|docker|virbr|lo$|vEthernet)` |
+| `DUMBMONIT_AGENT_INTERFACES_ONLY` | Interfaces to keep; when set, replaces the ignore list |
+| `DUMBMONIT_AGENT_MOUNTS_IGNORE` | Mount points left out of filesystems and disk I/O; default skips `/var/lib/docker/`, `/run/…`, `/sys/`, `/proc/`, `/dev/`, `/snap/` |
+| `DUMBMONIT_AGENT_CPU_PER_CORE` | `true` to also send one CPU series per core (default `false`) |
+| `DUMBMONIT_AGENT_MAX_BUFFERED_SAMPLES` | Size of the catch-up buffer |
+| `DUMBMONIT_AGENT_LOG` | `trace`, `debug`, `info`, `warn`, `error` |
 
 ## Token lifecycle
 
 - Tokens are created in **Settings → Agents** or when adding a device of type
   agent. The server keeps only a fingerprint: the clear token is shown once, in
   the creation response, with the two install commands.
-- The agent sends it as `Authorization: Bearer ezym_…` on `POST /api/ingest`.
+- The agent sends it as `Authorization: Bearer dmon_…` on `POST /api/ingest`.
   It never appears in the agent's logs, not even truncated.
 - **Settings → Agents** lists tokens with their prefix, creation date and last
   use. **Revoke** stops every agent that uses that token at its next push; the
@@ -153,10 +164,10 @@ bounded (`max_buffered_samples`, about an hour by default) and drops the oldest
 readings when full. Retries back off from 5 seconds to 5 minutes with jitter.
 
 ```sh
-ezymonit-agent --dry-run          # print the readings, send nothing
-ezymonit-agent --once             # send one batch then exit
-journalctl -u ezymonit-agent -f   # service log (systemd)
-tail -f /var/log/ezymonit-agent.log   # service log (OpenRC)
+dumbmonit-agent --dry-run          # print the readings, send nothing
+dumbmonit-agent --once             # send one batch then exit
+journalctl -u dumbmonit-agent -f   # service log (systemd)
+tail -f /var/log/dumbmonit-agent.log   # service log (OpenRC)
 ```
 
 ## Common errors
@@ -164,15 +175,15 @@ tail -f /var/log/ezymonit-agent.log   # service log (OpenRC)
 | Symptom | Likely cause |
 |---|---|
 | Installer says "could not reach the server" | Wrong URL or token. The configuration is written: fix `agent.yaml`, then restart the service. |
-| Download fails with 404 | The server has no agent binaries (`EZYMONIT_AGENT_DIR` empty). Use `--bin=PATH` with a binary you built. |
+| Download fails with 404 | The server has no agent binaries (`DUMBMONIT_AGENT_DIR` empty). Use `--bin=PATH` with a binary you built. |
 | Machine never appears | The push goes to `/api/ingest` on the URL in the install command; behind a reverse proxy, make sure it is forwarded and that bodies up to 16 MB are allowed. |
-| *Unreachable* although the agent runs | The token was revoked, or the pushes are rejected. Check `journalctl -u ezymonit-agent`: the error is logged there. |
+| *Unreachable* although the agent runs | The token was revoked, or the pushes are rejected. Check `journalctl -u dumbmonit-agent`: the error is logged there. |
 | Windows | The Windows service parts had not been exercised in the project's build image at the time of writing; report issues on GitHub. |
 
 ## Docker containers
 
 When the agent can read the Docker socket (`docker: true`, the default, and a
-user in the `docker` group or root — `usermod -aG docker ezymonit`, then
+user in the `docker` group or root — `usermod -aG docker dumbmonit`, then
 restart the agent), every container becomes a handful of series, labelled
 `container` and `image` (the `name:tag` shown by `docker ps`). If the device
 page says "No Docker on this machine" while Docker is installed, that is the
@@ -192,7 +203,7 @@ registry announces for the tag (`HEAD /v2/<name>/manifests/<tag>`, anonymous
 token flow on Docker Hub and GHCR). It runs in the background at most once an
 hour per image and never delays the 30-second cycle; a private registry that
 refuses anonymous access simply reads as -1. Disable it with
-`docker_update_check: false` (`EZYMONIT_AGENT_DOCKER_UPDATE_CHECK`).
+`docker_update_check: false` (`DUMBMONIT_AGENT_DOCKER_UPDATE_CHECK`).
 
 Built-in rules: **Container stopped** (`container_up == 0` for 2 minutes),
 **Container unhealthy** (`container_health == 2` for 3 minutes), **Container
@@ -222,7 +233,7 @@ minutes are never executed; the agent runs one command at a time.
 
 Compose-managed containers (labels `com.docker.compose.*`) are updated all the
 same, but the result warns that the next `docker compose up` will recreate the
-container from the compose file. Containers whose name starts with `ezymonit`
+container from the compose file. Containers whose name starts with `dumbmonit`
 or `dumbmonit` are refused: the monitor never updates itself.
 
 ### Policies
@@ -263,7 +274,7 @@ Automatic actions show in "Recent actions" as requested by `policy`.
   uses.
 - An update that does not come back healthy is rolled back to the previous
   container, and the old image is only removed once the new container runs.
-- Containers named `ezymonit*` or `dumbmonit*` are refused, by hand or by
+- Containers named `dumbmonit*` or `dumbmonit*` are refused, by hand or by
   policy: the monitor never acts on its own containers.
 - Compose-managed containers are updated, but the next `docker compose up`
   recreates them from the compose file: bump the tag there too.
@@ -313,12 +324,12 @@ plakar_interval_secs: 600            # minimum 60
 
 | Variable | Effect |
 |---|---|
-| `EZYMONIT_AGENT_PLAKAR_BIN` | Path of the `plakar` binary |
-| `EZYMONIT_AGENT_PLAKAR_KLOSETS` | Klosets, comma-separated (overrides discovery) |
-| `EZYMONIT_AGENT_PLAKAR_HOME` | Home directory used when running `plakar` |
-| `EZYMONIT_AGENT_PLAKAR_INTERVAL_SECS` | Seconds between two readings |
-| `EZYMONIT_AGENT_DOCKER_UPDATE_CHECK` | `true` / `false` — registry check for container updates |
-| `EZYMONIT_AGENT_COMMANDS` | `true` / `false` — accept actions from the server |
+| `DUMBMONIT_AGENT_PLAKAR_BIN` | Path of the `plakar` binary |
+| `DUMBMONIT_AGENT_PLAKAR_KLOSETS` | Klosets, comma-separated (overrides discovery) |
+| `DUMBMONIT_AGENT_PLAKAR_HOME` | Home directory used when running `plakar` |
+| `DUMBMONIT_AGENT_PLAKAR_INTERVAL_SECS` | Seconds between two readings |
+| `DUMBMONIT_AGENT_DOCKER_UPDATE_CHECK` | `true` / `false` — registry check for container updates |
+| `DUMBMONIT_AGENT_COMMANDS` | `true` / `false` — accept actions from the server |
 
 An encrypted kloset needs its passphrase: put it in the store entry
 (`plakar store set <name> passphrase=…`, which is what `plakar store add` does)
@@ -371,5 +382,5 @@ plakar at /tmp/plakar-lab ls
 ```
 
 then add `plakar_klosets: ["/tmp/plakar-lab"]` to `agent.yaml` (a bare path
-outside a home is not discovered) and check with `ezymonit-agent --dry-run`
+outside a home is not discovered) and check with `dumbmonit-agent --dry-run`
 that `backup_*` samples appear.

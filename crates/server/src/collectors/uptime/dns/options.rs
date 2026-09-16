@@ -3,7 +3,7 @@
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
-use ezymonit_proto::{ProbeError, Target};
+use dumbmonit_proto::{ProbeError, Target};
 use hickory_resolver::proto::rr::RecordType;
 
 use super::answer;

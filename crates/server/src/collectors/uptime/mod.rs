@@ -8,7 +8,7 @@
 //!
 //! # Un collecteur par type de sonde
 //!
-//! Chaque sonde est un [`Collector`](ezymonit_proto::Collector) à part entière —
+//! Chaque sonde est un [`Collector`](dumbmonit_proto::Collector) à part entière —
 //! `http`, `tcp`, `dns`, `ping`, `tls` — plutôt qu'un collecteur unique
 //! paramétré. Elle hérite ainsi sans rien écrire du planificateur, de l'intervalle
 //! par cible, de la découverte, des alertes et de l'interface ; et l'utilisateur
@@ -25,7 +25,7 @@
 //!
 //! ```text
 //! # Taux de disponibilité sur trente jours, par cible :
-//! avg_over_time(ezymonit_probe_success[30d])
+//! avg_over_time(dumbmonit_probe_success[30d])
 //! ```
 //!
 //! # Métriques produites
@@ -61,7 +61,7 @@
 //! | `probe_icmp_packets_received` | ping | Échos revenus. |
 //!
 //! Toutes sont des jauges : rien ici n'est cumulatif, chaque interrogation mesure
-//! un instant. Le préfixe `ezymonit_` est ajouté à l'écriture, comme partout.
+//! un instant. Le préfixe `dumbmonit_` est ajouté à l'écriture, comme partout.
 //!
 //! Les étiquettes d'identité restent de faible cardinalité : `probe` prend cinq
 //! valeurs, `reason` onze, `record_type` dix, et `url`, `port`, `server_name`,
@@ -84,7 +84,7 @@ pub use tls::TlsCollector;
 
 #[cfg(test)]
 mod tests {
-    use ezymonit_proto::Collector;
+    use dumbmonit_proto::Collector;
 
     use super::*;
 

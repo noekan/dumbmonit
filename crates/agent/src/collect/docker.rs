@@ -239,7 +239,7 @@ async fn raw_request(
         "{method} {API_VERSION}{path} HTTP/1.1\r\n\
          Host: localhost\r\n\
          Accept: application/json\r\n\
-         User-Agent: ezymonit-agent/{}\r\n\
+         User-Agent: dumbmonit-agent/{}\r\n\
          Connection: close\r\n",
         env!("CARGO_PKG_VERSION")
     );
@@ -728,7 +728,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_missing_socket_is_not_an_error() {
-        let missing = Path::new("/tmp/ezymonit-socket-inexistant.sock");
+        let missing = Path::new("/tmp/dumbmonit-socket-inexistant.sock");
         assert!(!DockerClient::new(missing).exists());
         assert!(DockerProbe::new(missing, DEFAULT_MAX_CONTAINERS).read().await.is_none());
     }

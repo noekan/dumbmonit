@@ -49,7 +49,7 @@ body:
     attributes:
       label: Logs
       description: |
-        `docker compose logs --tail=200 ezymonit` (set `EZYMONIT_LOG=debug` for more).
+        `docker compose logs --tail=200 dumbmonit` (set `DUMBMONIT_LOG=debug` for more).
         Redact addresses, communities and tokens.
       render: text
   - type: textarea

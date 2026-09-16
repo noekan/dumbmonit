@@ -22,7 +22,7 @@ pub(crate) mod options;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use ezymonit_proto::{Collector, ProbeError, Sample, Target};
+use dumbmonit_proto::{Collector, ProbeError, Sample, Target};
 use hickory_resolver::config::{ConnectionConfig, NameServerConfig, ResolveHosts, ResolverConfig};
 use hickory_resolver::net::NetError;
 use hickory_resolver::net::runtime::TokioRuntimeProvider;

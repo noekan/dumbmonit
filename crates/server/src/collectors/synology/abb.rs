@@ -47,7 +47,7 @@
 //! sur DSM 7). Un compte sans ces droits reçoit le code 105 : la collecte le
 //! compte dans `scrape_errors`, comme pour l'inventaire du stockage.
 
-use ezymonit_proto::{MetricKind, ProbeError, Sample};
+use dumbmonit_proto::{MetricKind, ProbeError, Sample};
 use tracing::warn;
 
 use super::client::DsmClient;
@@ -218,7 +218,7 @@ pub fn is_enabled(task: &AbbTask) -> bool {
 
 /// Convertit les tâches en échantillons.
 ///
-/// `now_s` est l'horloge du serveur EzyMonit, en secondes Unix : les dates d'ABB
+/// `now_s` est l'horloge du serveur DumbMonit, en secondes Unix : les dates d'ABB
 /// sont des horodatages Unix, ce qui dispense de l'horloge du NAS nécessaire à
 /// Hyper Backup.
 pub fn task_samples(tasks: &[TaskState], now_s: i64, ts_ms: i64) -> Vec<Sample> {
@@ -463,7 +463,7 @@ mod lab_tests {
     use axum::extract::{Query, State};
     use axum::routing::get;
     use axum::{Json, Router};
-    use ezymonit_proto::{Collector, Credential, Sample, Target};
+    use dumbmonit_proto::{Collector, Credential, Sample, Target};
     use serde_json::{Value, json};
 
     use crate::collectors::synology::SynologyCollector;

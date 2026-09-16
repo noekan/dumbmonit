@@ -89,7 +89,7 @@ payload that a script can use:
 
 ```json
 {
-  "source": "ezymonit",
+  "source": "dumbmonit",
   "target": "nas",
   "rule": "Disk full",
   "severity": "warning",
@@ -157,8 +157,8 @@ write your JSON normally.
 | `{{color}}` | Accent colour, without hash | `D98A00` |
 | `{{color_hex}}` | Accent colour, with hash | `#D98A00` |
 | `{{emoji}}` | Status pictogram | `🔴`, `⚠️`, `ℹ️` or `✅` |
-| `{{link}}` | Link to the device in DumbMonit | `https://ezymonit.home/targets/42` |
-| `{{source}}` | Always `ezymonit` | `ezymonit` |
+| `{{link}}` | Link to the device in DumbMonit | `https://dumbmonit.home/targets/42` |
+| `{{source}}` | Always `dumbmonit` | `dumbmonit` |
 | `{{token}}` | The channel's `token` secret | *(your token)* |
 
 Two useful remarks:
@@ -187,9 +187,9 @@ header.
   "url": "https://api.internal.example.org/incidents",
   "method": "POST",
   "content_type": "json",
-  "base_url": "https://ezymonit.home",
+  "base_url": "https://dumbmonit.home",
   "headers": {
-    "X-Application": "ezymonit"
+    "X-Application": "dumbmonit"
   },
   "body_template": "{\"title\": \"{{title}}\", \"device\": \"{{target}}\", \"severity\": \"{{severity}}\", \"state\": \"{{status}}\", \"value\": {{value_raw}}, \"threshold\": {{threshold_raw}}, \"detail\": \"{{message}}\", \"link\": \"{{link}}\", \"seen_at\": \"{{timestamp}}\"}"
 }
@@ -213,7 +213,7 @@ the application receives:
   "value": 95,
   "threshold": 90,
   "detail": "⚠️ Disk full — 95 % (threshold > 90 %)",
-  "link": "https://ezymonit.home/targets/42",
+  "link": "https://dumbmonit.home/targets/42",
   "seen_at": "2026-09-01T14:12:05+00:00"
 }
 ```
@@ -646,11 +646,11 @@ In PagerDuty: **Services → your service → Integrations → Add integration**
 choose **Events API v2**. Copy the *Integration Key*.
 
 - **Settings** — `region` (`eu` if your account is hosted in Europe), `source`
-  (optional, default `ezymonit`)
+  (optional, default `dumbmonit`)
 - **Secrets** — `token` (the *Integration Key*)
 
 An alert opens an incident; its resolution **closes it automatically**. Matching is
-done on the alert's fingerprint, prefixed with `ezymonit-`, so a reminder never opens
+done on the alert's fingerprint, prefixed with `dumbmonit-`, so a reminder never opens
 a second incident.
 
 > A key of another type ("Events API v1", "REST API") gets a terse refusal. Check

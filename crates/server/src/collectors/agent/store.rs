@@ -1,7 +1,7 @@
 //! Persistance de l'agent : jetons d'enregistrement et machines enregistrées.
 
 use anyhow::{Context, Result};
-use ezymonit_proto::{AgentIdentity, Credential, TargetId};
+use dumbmonit_proto::{AgentIdentity, Credential, TargetId};
 use sqlx::{Row, SqlitePool};
 
 use crate::crypto::Cipher;
@@ -346,7 +346,7 @@ mod tests {
         let db = setup().await;
         create_token(&db.pool, "parc").await.expect("création");
         assert_eq!(
-            find_active_token(&db.pool, &token::fingerprint("ezym_inconnu")).await.unwrap(),
+            find_active_token(&db.pool, &token::fingerprint("dmon_inconnu")).await.unwrap(),
             None
         );
     }

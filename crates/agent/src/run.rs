@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use ezymonit_proto::{AgentIdentity, MAX_BATCH_SAMPLES, PushBatch, Sample};
+use dumbmonit_proto::{AgentIdentity, MAX_BATCH_SAMPLES, PushBatch, Sample};
 use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
@@ -293,7 +293,7 @@ mod tests {
     fn config() -> Config {
         Config {
             server_url: "http://127.0.0.1:1".into(),
-            token: "ezym_test".into(),
+            token: "dmon_test".into(),
             interval: Duration::from_secs(30),
             hostname: Some("machine-de-test".into()),
             services: Vec::new(),
@@ -308,6 +308,7 @@ mod tests {
             plakar: crate::collect::plakar::PlakarConfig::default(),
             max_buffered_samples: 1_000,
             log_level: tracing::Level::INFO,
+            deprecated_env: Vec::new(),
         }
     }
 

@@ -5,7 +5,7 @@
 //! C'est là que se décide le choix `Gauge` / `Counter`, et lui seul détermine si
 //! un graphe affichera une valeur ou un débit.
 
-use ezymonit_proto::{MetricKind, Sample};
+use dumbmonit_proto::{MetricKind, Sample};
 
 use super::model::{
     AptPackage, CertificateInfo, ClusterStatusEntry, GuestEntry, NodeStatus, Num, StorageEntry,
@@ -14,7 +14,7 @@ use super::model::{
 
 /// Préfixe commun à toutes les métriques de l'intégration.
 ///
-/// Il n'est pas redondant avec le préfixe `ezymonit_` ajouté à l'écriture : ce
+/// Il n'est pas redondant avec le préfixe `dumbmonit_` ajouté à l'écriture : ce
 /// dernier isole l'outil, celui-ci isole l'intégration. Sans lui, `node_up`
 /// entrerait en collision avec la même notion venue de SNMP ou de l'agent.
 const P: &str = "proxmox_";
@@ -107,7 +107,7 @@ pub fn node_samples(node: &str, status: &NodeStatus, ts_ms: i64) -> Vec<Sample> 
     let mut push = |sample: Sample| samples.push(sample.with_label("node", node));
 
     // La charge CPU de PVE est un ratio 0..1 ; on l'expose en pourcentage pour
-    // rester homogène avec le reste d'EzyMonit.
+    // rester homogène avec le reste d'DumbMonit.
     if let Some(cpu) = status.cpu {
         push(gauge("node_cpu_percent", cpu.0 * 100.0, ts_ms));
     }

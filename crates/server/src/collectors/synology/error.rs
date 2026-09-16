@@ -19,7 +19,7 @@
 //! Source : « DSM Login Web API Guide », Synology, révision du 19 avril 2023,
 //! chapitres « Common Error Codes » et « SYNO.API.Auth › API Error Codes ».
 
-use ezymonit_proto::ProbeError;
+use dumbmonit_proto::ProbeError;
 
 /// Codes qui signalent une session périmée plutôt qu'un refus définitif.
 ///

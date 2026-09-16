@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 
-use ezymonit_proto::Sample;
+use dumbmonit_proto::Sample;
 
 use super::metrics::gauge;
 use super::model::{SnapshotEntry, TaskEntry};

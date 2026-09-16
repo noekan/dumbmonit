@@ -66,7 +66,7 @@ pub struct GlobalPolicy {
     /// Durée pendant laquelle une empreinte en battement se tait.
     pub flap_hold_secs: u32,
     /// URL publique de l'instance, pour les liens vers l'équipement dans les
-    /// messages. Vide : `EZYMONIT_PUBLIC_URL`, sinon pas de lien.
+    /// messages. Vide : `DUMBMONIT_PUBLIC_URL`, sinon pas de lien.
     pub public_url: String,
 }
 

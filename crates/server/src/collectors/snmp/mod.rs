@@ -25,7 +25,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use ezymonit_proto::{Collector, ProbeError, Sample, Target};
+use dumbmonit_proto::{Collector, ProbeError, Sample, Target};
 use tracing::{debug, warn};
 
 use oid::ObjectId;
@@ -167,7 +167,7 @@ impl Collector for SnmpCollector {
                 if error.means_down()
                     && matches!(
                         target.credential,
-                        ezymonit_proto::Credential::SnmpCommunity { .. }
+                        dumbmonit_proto::Credential::SnmpCommunity { .. }
                     )
                     && CommunityVersion::from_tags(&target.tags) == CommunityVersion::V2c =>
             {
@@ -196,7 +196,7 @@ impl Collector for SnmpCollector {
 mod tests {
     use std::collections::BTreeMap;
 
-    use ezymonit_proto::Credential;
+    use dumbmonit_proto::Credential;
 
     use super::*;
 

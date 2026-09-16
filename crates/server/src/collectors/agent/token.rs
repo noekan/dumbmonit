@@ -10,7 +10,7 @@
 //! et l'empreinte est calculée à chaque lot reçu — soit, pour un parc de cent
 //! machines, plusieurs fois par seconde.
 
-use ezymonit_proto::TOKEN_PREFIX;
+use dumbmonit_proto::TOKEN_PREFIX;
 use sha2::{Digest, Sha256};
 
 /// Longueur de la partie aléatoire, en octets. 192 bits : hors de portée d'une
@@ -77,7 +77,7 @@ mod tests {
 
     #[test]
     fn two_different_tokens_have_two_different_fingerprints() {
-        assert_ne!(fingerprint("ezym_aaa"), fingerprint("ezym_aab"));
+        assert_ne!(fingerprint("dmon_aaa"), fingerprint("dmon_aab"));
     }
 
     #[test]
@@ -91,16 +91,16 @@ mod tests {
 
     #[test]
     fn a_bearer_header_yields_the_token() {
-        assert_eq!(extract_bearer(Some("Bearer ezym_abc")), Some("ezym_abc"));
-        assert_eq!(extract_bearer(Some("bearer   ezym_abc  ")), Some("ezym_abc"));
-        assert_eq!(extract_bearer(Some("  BEARER ezym_abc")), Some("ezym_abc"));
+        assert_eq!(extract_bearer(Some("Bearer dmon_abc")), Some("dmon_abc"));
+        assert_eq!(extract_bearer(Some("bearer   dmon_abc  ")), Some("dmon_abc"));
+        assert_eq!(extract_bearer(Some("  BEARER dmon_abc")), Some("dmon_abc"));
     }
 
     #[test]
     fn anything_else_is_refused() {
         assert_eq!(extract_bearer(None), None);
         assert_eq!(extract_bearer(Some("")), None);
-        assert_eq!(extract_bearer(Some("ezym_abc")), None, "le schéma est obligatoire");
+        assert_eq!(extract_bearer(Some("dmon_abc")), None, "le schéma est obligatoire");
         assert_eq!(extract_bearer(Some("Basic dXNlcjpwYXNz")), None);
         assert_eq!(extract_bearer(Some("Bearer ")), None);
     }

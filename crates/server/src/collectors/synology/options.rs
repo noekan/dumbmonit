@@ -11,7 +11,7 @@
 
 use std::time::Duration;
 
-use ezymonit_proto::{ProbeError, Target};
+use dumbmonit_proto::{ProbeError, Target};
 
 /// Port de l'interface DSM en HTTPS.
 const DEFAULT_HTTPS_PORT: u16 = 5001;
@@ -58,11 +58,11 @@ pub struct Options {
     pub request_timeout: Duration,
     /// Interrogation d'Active Backup for Business. Actif par défaut : un NAS sans le
     /// paquet ne l'annonce pas au catalogue, et rien n'est alors demandé. L'option
-    /// sert à qui préfère ne pas voir ses sauvegardes de postes dans EzyMonit, ou
+    /// sert à qui préfère ne pas voir ses sauvegardes de postes dans DumbMonit, ou
     /// dont le compte de supervision n'a pas les droits sur le paquet.
     pub abb: bool,
     /// Nom de session annoncé à DSM à la connexion. Un nom distinct de celui du
-    /// navigateur évite que la connexion d'EzyMonit et celle de l'administrateur
+    /// navigateur évite que la connexion d'DumbMonit et celle de l'administrateur
     /// s'invalident mutuellement (code d'erreur 107).
     pub session_name: String,
 }
@@ -186,7 +186,7 @@ fn base_url(address: &str, scheme: Scheme, port: u16) -> Result<String, ProbeErr
 mod tests {
     use std::collections::BTreeMap;
 
-    use ezymonit_proto::Credential;
+    use dumbmonit_proto::Credential;
 
     use super::*;
 

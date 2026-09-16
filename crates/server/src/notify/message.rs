@@ -83,7 +83,7 @@ pub const TEMPLATE_VARIABLES: &[(&str, &str)] = &[
     ("color_hex", "Accent color with the hash sign, for example #D98A00"),
     ("emoji", "State glyph: 🔴, ⚠️, ℹ️ or ✅"),
     ("link", "Link to DumbMonit, if \"base_url\" is set in the settings"),
-    ("source", "Always \"ezymonit\": identifies the sender"),
+    ("source", "Always \"dumbmonit\": identifies the sender"),
     ("token", "The channel's \"token\" secret, for services that expect it in the body"),
 ];
 
@@ -126,7 +126,7 @@ impl Message {
             ("color_hex", format!("#{:06X}", self.color())),
             ("emoji", self.emoji().to_string()),
             ("link", self.link.clone().unwrap_or_default()),
-            ("source", "ezymonit".to_string()),
+            ("source", "dumbmonit".to_string()),
             ("token", String::new()),
         ])
     }
@@ -152,7 +152,7 @@ impl Message {
 
     /// Clé identifiant le fil de discussion d'un équipement.
     ///
-    /// Un message EzyMonit couvre un équipement et un cycle, jamais une règle isolée :
+    /// Un message DumbMonit couvre un équipement et un cycle, jamais une règle isolée :
     /// c'est donc l'équipement qui identifie l'incident à ouvrir puis à refermer. Se
     /// caler sur l'empreinte de la règle casserait la fermeture dès qu'un équipement
     /// porte deux alertes, puisque la résolution de l'une ne cite plus l'autre.
@@ -530,7 +530,7 @@ pub fn test_message(channel_name: &str) -> Message {
         rule_name: "Configuration test".to_string(),
         // Empreinte constante : un test répété ne doit pas ouvrir une astreinte de
         // plus à chaque clic sur le bouton.
-        fingerprint: "ezymonit-test".to_string(),
+        fingerprint: "dumbmonit-test".to_string(),
         value: None,
         threshold: None,
         unit: String::new(),
@@ -716,7 +716,7 @@ mod tests {
         assert_eq!(vars["operator"], ">");
         assert_eq!(vars["color_hex"], "#D98A00");
         assert_eq!(vars["emoji"], "⚠️");
-        assert_eq!(vars["source"], "ezymonit");
+        assert_eq!(vars["source"], "dumbmonit");
         // Complétés par le canal, qui seul connaît son URL publique et son secret.
         assert_eq!(vars["link"], "");
         assert_eq!(vars["token"], "");

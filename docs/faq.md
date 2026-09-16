@@ -3,22 +3,22 @@
 ## I lost the password
 
 There is no recovery e-mail and no second account. Start the server once with
-`EZYMONIT_RESET_PASSWORD=1`:
+`DUMBMONIT_RESET_PASSWORD=1`:
 
 ```bash
-EZYMONIT_RESET_PASSWORD=1 docker compose up -d ezymonit
+DUMBMONIT_RESET_PASSWORD=1 docker compose up -d dumbmonit
 ```
 
 The password and every session are cleared at startup and the UI shows
 `/setup` again. Choose a new password, then start again without the variable
-(`docker compose up -d ezymonit`, with the variable unset or empty in your
+(`docker compose up -d dumbmonit`, with the variable unset or empty in your
 environment). Devices, rules and channels are untouched.
 
 ## No data after adding a device
 
 Give it a minute: the first probe runs at the device's interval (60 s by
 default) and writes reach VictoriaMetrics every 5 seconds
-(`EZYMONIT_FLUSH_INTERVAL_SECS`). Then:
+(`DUMBMONIT_FLUSH_INTERVAL_SECS`). Then:
 
 1. Open the device page and click **Probe now**. It reports how many samples
    and series one probe produced, or the exact error.
@@ -36,20 +36,20 @@ default) and writes reach VictoriaMetrics every 5 seconds
 
 The ping monitor needs to open a raw ICMP socket, and the image gets no
 capability by default. Uncomment the `cap_add: - NET_RAW` lines under the
-`ezymonit` service in `docker-compose.yml` and run `docker compose up -d`. See
+`dumbmonit` service in `docker-compose.yml` and run `docker compose up -d`. See
 [ICMP ping needs NET_RAW](install/docker.md#icmp-ping-needs-net_raw).
 
 ## The agent does not appear
 
 - The installer does a test push before starting the service and stops with an
-  explicit error if the URL or token is wrong. Fix `/etc/ezymonit/agent.yaml`
-  and restart `ezymonit-agent`.
+  explicit error if the URL or token is wrong. Fix `/etc/dumbmonit/agent.yaml`
+  and restart `dumbmonit-agent`.
 - The URL in the install command is the one your browser used to reach the UI.
   From the monitored machine, that URL must reach the server: `curl
   http://server:8080/api/health` from there tells you.
 - Behind a reverse proxy, `/api/ingest` must be forwarded and bodies of up to
   16 MB allowed (`client_max_body_size 16m` in nginx).
-- `journalctl -u ezymonit-agent -f` shows every rejected push. The token
+- `journalctl -u dumbmonit-agent -f` shows every rejected push. The token
   itself never appears in the log.
 - A revoked token stops the agent at its next push; re-run the installer with
   a new token.
@@ -59,14 +59,14 @@ See [Linux and Windows agent](devices/agent.md).
 ## Changing the port
 
 The container listens on 8080; the host port is whatever `docker-compose.yml`
-publishes. Set `EZYMONIT_PORT` (in a `.env` file next to the Compose file, or
+publishes. Set `DUMBMONIT_PORT` (in a `.env` file next to the Compose file, or
 on the command line):
 
 ```bash
-EZYMONIT_PORT=8099 docker compose up -d
+DUMBMONIT_PORT=8099 docker compose up -d
 ```
 
-To change the port *inside* the container, set `EZYMONIT_BIND`, for example
+To change the port *inside* the container, set `DUMBMONIT_BIND`, for example
 `0.0.0.0:9000`, and adjust the port mapping.
 
 ## Why is the alert "Advisory" when the rule says "warning"?
@@ -90,16 +90,17 @@ series. During that time it only shows what it would have fired. See
 
 ## Can I use my own VictoriaMetrics?
 
-Yes: point `EZYMONIT_VM_URL` at it and drop the `victoriametrics` service from
-the Compose file. Every metric is prefixed `ezymonit_`, so it can share the
-instance with other tools.
+Yes: set `DUMBMONIT_VM_URL` to its address (`http://host:8428`) and the
+embedded VictoriaMetrics is not started. Every metric is prefixed
+`dumbmonit_`, so it can share the instance with other tools. `GET /api/health`
+reports `victoria.embedded: false` once the switch is done.
 
 ## Does DumbMonit need to be reachable from the internet?
 
 No. It reaches out to devices and to notification services; nothing calls
 back, except agents, which need to reach the server's URL. Keep it on your
 LAN or behind a VPN; if you expose it, use a reverse proxy with TLS and set
-`EZYMONIT_COOKIE_SECURE=1`.
+`DUMBMONIT_COOKIE_SECURE=1`.
 
 ## Is there an API token?
 

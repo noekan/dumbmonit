@@ -1,7 +1,7 @@
 //! Passerelles et domotique : Apprise et Home Assistant.
 //!
 //! Ces deux canaux ne sont pas des destinations mais des relais. Apprise ouvre en
-//! une configuration l'accès à des dizaines de services qu'EzyMonit n'implémentera
+//! une configuration l'accès à des dizaines de services qu'DumbMonit n'implémentera
 //! jamais lui-même ; Home Assistant permet à une alerte d'allumer une lampe plutôt
 //! que d'afficher une bannière.
 
@@ -23,7 +23,7 @@ use crate::notify::secret::SecretString;
 ///
 /// Deux modes coexistent, et l'utilisateur choisit implicitement en renseignant
 /// l'un ou l'autre réglage : soit les URL de destination sont stockées dans Apprise
-/// sous une clé de configuration, soit EzyMonit les fournit à chaque envoi. Le
+/// sous une clé de configuration, soit DumbMonit les fournit à chaque envoi. Le
 /// second cas met des identifiants tiers — `mailto://utilisateur:motdepasse@…` —
 /// dans la configuration du canal, d'où leur rangement parmi les secrets.
 pub struct Apprise {

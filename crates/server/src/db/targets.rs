@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use ezymonit_proto::{Credential, Target, TargetId};
+use dumbmonit_proto::{Credential, Target, TargetId};
 use sqlx::{Row, SqlitePool, sqlite::SqliteRow};
 
 use crate::crypto::Cipher;

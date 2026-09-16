@@ -8,7 +8,7 @@
 //! # Le ping exige un droit particulier
 //!
 //! ICMP demande une socket brute (`CAP_NET_RAW`) ou, sous Linux, l'appartenance à
-//! la plage `net.ipv4.ping_group_range`. L'image EzyMonit est construite depuis
+//! la plage `net.ipv4.ping_group_range`. L'image DumbMonit est construite depuis
 //! `scratch` et ne reçoit aucune capacité : **le ping échoue tant que le
 //! `docker-compose.yml` n'a pas été complété**. Ce cas est détecté explicitement et
 //! renvoie un `ProbeError::Config` qui indique quoi ajouter — sans quoi
@@ -34,7 +34,7 @@ mod stats;
 use std::net::IpAddr;
 
 use async_trait::async_trait;
-use ezymonit_proto::{Collector, ProbeError, Sample, Target};
+use dumbmonit_proto::{Collector, ProbeError, Sample, Target};
 use surge_ping::{Client, Config, ICMP, PingIdentifier, PingSequence, SurgeError};
 use tracing::debug;
 

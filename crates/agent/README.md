@@ -1,8 +1,8 @@
-# Agent système EzyMonit
+# Agent système DumbMonit
 
 Petit binaire installé sur la machine à surveiller. Il mesure le processeur, la
 mémoire, les disques, le réseau, les services et les conteneurs, puis **pousse**
-ses relevés vers le serveur EzyMonit en HTTP.
+ses relevés vers le serveur DumbMonit en HTTP.
 
 Le sens de connexion est délibéré : c'est l'agent qui appelle le serveur, jamais
 l'inverse. Il traverse donc les NAT et les pare-feux domestiques, et n'impose
@@ -13,13 +13,13 @@ d'ouvrir **aucun port** sur la machine surveillée.
 ### Linux (systemd)
 
 ```sh
-curl -sSL http://serveur:8080/install.sh | sh -s -- --token=ezym_xxx --url=http://serveur:8080
+curl -sSL http://serveur:8080/install.sh | sh -s -- --token=dmon_xxx --url=http://serveur:8080
 ```
 
 ### Windows (service)
 
 ```powershell
-& ([scriptblock]::Create((irm http://serveur:8080/install.ps1))) -Token ezym_xxx -Url http://serveur:8080
+& ([scriptblock]::Create((irm http://serveur:8080/install.ps1))) -Token dmon_xxx -Url http://serveur:8080
 ```
 
 Le jeton s'obtient dans l'interface, ou par l'API :
@@ -36,12 +36,12 @@ faites.
 
 ## Configuration
 
-Fichier YAML, `/etc/ezymonit/agent.yaml` sur Linux,
-`C:\ProgramData\EzyMonit\agent.yaml` sur Windows :
+Fichier YAML, `/etc/dumbmonit/agent.yaml` sur Linux,
+`C:\ProgramData\DumbMonit\agent.yaml` sur Windows :
 
 ```yaml
 server_url: http://serveur:8080
-token: ezym_...
+token: dmon_...
 interval_secs: 30          # période d'échantillonnage
 hostname: nas-cave         # facultatif : nom annoncé au serveur
 services:                  # unités systemd ou services Windows
@@ -61,29 +61,29 @@ conteneur sans monter de fichier :
 
 | Variable | Effet |
 | --- | --- |
-| `EZYMONIT_AGENT_CONFIG` | Chemin du fichier de configuration |
-| `EZYMONIT_AGENT_URL` | URL du serveur |
-| `EZYMONIT_AGENT_TOKEN` | Jeton d'enregistrement |
-| `EZYMONIT_AGENT_INTERVAL_SECS` | Période d'échantillonnage |
-| `EZYMONIT_AGENT_HOSTNAME` | Nom annoncé au serveur |
-| `EZYMONIT_AGENT_SERVICES` | Services à surveiller, séparés par des virgules |
-| `EZYMONIT_AGENT_TAGS` | `cle=valeur`, séparés par des virgules |
-| `EZYMONIT_AGENT_DOCKER` | `true` / `false` |
-| `EZYMONIT_AGENT_DOCKER_SOCKET` | Chemin du socket Docker |
-| `EZYMONIT_AGENT_DOCKER_MAX_CONTAINERS` | Conteneurs détaillés par hôte, `200` par défaut (`0` : décomptes seuls) |
-| `EZYMONIT_AGENT_INTERFACES_IGNORE` | Interfaces ignorées (noms ou regex, séparés par des virgules) ; par défaut `^(veth|br-|docker|virbr|lo$|vEthernet)` |
-| `EZYMONIT_AGENT_INTERFACES_ONLY` | Interfaces à garder ; remplace la liste d'exclusion quand elle est définie |
-| `EZYMONIT_AGENT_MOUNTS_IGNORE` | Points de montage exclus des systèmes de fichiers et des E/S disque |
-| `EZYMONIT_AGENT_CPU_PER_CORE` | `true` pour envoyer aussi une série par cœur (`false` par défaut) |
-| `EZYMONIT_AGENT_MAX_BUFFERED_SAMPLES` | Taille du tampon de reprise |
-| `EZYMONIT_AGENT_LOG` | `trace`, `debug`, `info`, `warn`, `error` |
+| `DUMBMONIT_AGENT_CONFIG` | Chemin du fichier de configuration |
+| `DUMBMONIT_AGENT_URL` | URL du serveur |
+| `DUMBMONIT_AGENT_TOKEN` | Jeton d'enregistrement |
+| `DUMBMONIT_AGENT_INTERVAL_SECS` | Période d'échantillonnage |
+| `DUMBMONIT_AGENT_HOSTNAME` | Nom annoncé au serveur |
+| `DUMBMONIT_AGENT_SERVICES` | Services à surveiller, séparés par des virgules |
+| `DUMBMONIT_AGENT_TAGS` | `cle=valeur`, séparés par des virgules |
+| `DUMBMONIT_AGENT_DOCKER` | `true` / `false` |
+| `DUMBMONIT_AGENT_DOCKER_SOCKET` | Chemin du socket Docker |
+| `DUMBMONIT_AGENT_DOCKER_MAX_CONTAINERS` | Conteneurs détaillés par hôte, `200` par défaut (`0` : décomptes seuls) |
+| `DUMBMONIT_AGENT_INTERFACES_IGNORE` | Interfaces ignorées (noms ou regex, séparés par des virgules) ; par défaut `^(veth|br-|docker|virbr|lo$|vEthernet)` |
+| `DUMBMONIT_AGENT_INTERFACES_ONLY` | Interfaces à garder ; remplace la liste d'exclusion quand elle est définie |
+| `DUMBMONIT_AGENT_MOUNTS_IGNORE` | Points de montage exclus des systèmes de fichiers et des E/S disque |
+| `DUMBMONIT_AGENT_CPU_PER_CORE` | `true` pour envoyer aussi une série par cœur (`false` par défaut) |
+| `DUMBMONIT_AGENT_MAX_BUFFERED_SAMPLES` | Taille du tampon de reprise |
+| `DUMBMONIT_AGENT_LOG` | `trace`, `debug`, `info`, `warn`, `error` |
 
 ## Diagnostic
 
 ```sh
-ezymonit-agent --dry-run          # affiche les mesures, n'envoie rien
-ezymonit-agent --once             # envoie un seul lot puis s'arrête
-journalctl -u ezymonit-agent -f   # journal du service
+dumbmonit-agent --dry-run          # affiche les mesures, n'envoie rien
+dumbmonit-agent --once             # envoie un seul lot puis s'arrête
+journalctl -u dumbmonit-agent -f   # journal du service
 ```
 
 Le jeton n'apparaît jamais dans les journaux, pas même tronqué, y compris dans
@@ -131,9 +131,9 @@ tous sur le serveur à la milliseconde où il redémarre.
 ### Poste de développement
 
 ```sh
-cargo build -p ezymonit-agent
-cargo test  -p ezymonit-agent
-cargo clippy -p ezymonit-agent --all-targets -- -D warnings
+cargo build -p dumbmonit-agent
+cargo test  -p dumbmonit-agent
+cargo clippy -p dumbmonit-agent --all-targets -- -D warnings
 ```
 
 ### Linux x86_64, binaire statique
@@ -142,8 +142,8 @@ C'est la cible native de l'image de développement du projet.
 
 ```sh
 rustup target add x86_64-unknown-linux-musl
-cargo build -p ezymonit-agent --release --target x86_64-unknown-linux-musl
-# cible/x86_64-unknown-linux-musl/release/ezymonit-agent
+cargo build -p dumbmonit-agent --release --target x86_64-unknown-linux-musl
+# cible/x86_64-unknown-linux-musl/release/dumbmonit-agent
 ```
 
 ### Linux ARM64, binaire statique
@@ -155,14 +155,14 @@ rustup target add aarch64-unknown-linux-musl
 # Un éditeur de liens croisé est nécessaire : `aarch64-linux-musl-gcc`
 # (musl.cc) ou le paquet `gcc-aarch64-linux-gnu` de la distribution.
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-musl-gcc
-cargo build -p ezymonit-agent --release --target aarch64-unknown-linux-musl
+cargo build -p dumbmonit-agent --release --target aarch64-unknown-linux-musl
 ```
 
 Le plus simple reste `cross`, qui apporte son propre conteneur de compilation :
 
 ```sh
 cargo install cross
-cross build -p ezymonit-agent --release --target aarch64-unknown-linux-musl
+cross build -p dumbmonit-agent --release --target aarch64-unknown-linux-musl
 ```
 
 `aws-lc-rs`, tiré par `rustls`, se compile en C : la compilation croisée exige
@@ -173,11 +173,11 @@ compilation croisée à la main les demande explicitement.
 
 ```sh
 # Depuis Windows, avec les outils de compilation Visual Studio :
-cargo build -p ezymonit-agent --release --target x86_64-pc-windows-msvc
+cargo build -p dumbmonit-agent --release --target x86_64-pc-windows-msvc
 
 # Depuis Linux, avec MinGW-w64 :
 rustup target add x86_64-pc-windows-gnu
-cargo build -p ezymonit-agent --release --target x86_64-pc-windows-gnu
+cargo build -p dumbmonit-agent --release --target x86_64-pc-windows-gnu
 ```
 
 **État connu :** la compilation Windows n'a pas pu être exercée dans l'image de

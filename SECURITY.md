@@ -44,13 +44,14 @@ This is a volunteer-maintained project; there is no bug bounty.
 In scope, roughly in order of how much we care:
 
 - **Authentication and sessions** — the instance password, `/setup`, the login
-  rate limit, the session cookie, `EZYMONIT_RESET_PASSWORD`, and any way to
+  rate limit, the session cookie, `DUMBMONIT_RESET_PASSWORD`, and any way to
   reach `/api/*` without a session.
 - **Secrets at rest** — the AES-256-GCM encryption of SNMP communities, API
   tokens and passwords, the derivation of the key from `/data/secret.key` or
-  `EZYMONIT_SECRET`, and any path by which a secret is returned by the API
+  `DUMBMONIT_SECRET`, and any path by which a secret is returned by the API
   (`credential` / `secrets` must never round-trip).
-- **Agent ingest** — the `ezym_…` tokens, `/api/ingest`, `install.sh` /
+- **Agent ingest** — the `dmon_…` tokens (and the `ezym_…` ones still accepted
+  from before the rename), `/api/ingest`, `install.sh` /
   `install.ps1`, the binaries served under `/download/…`, and anything a
   malicious agent or a spoofed server could do to the other side.
 - **Outbound requests** — SSRF through device addresses, notification webhooks
@@ -73,3 +74,6 @@ without a demonstrated impact.
   screenshots.
 - Prefer SNMP v3 on shared networks: a v2c community travels in clear text.
 - Give agent tokens one per machine so a leaked token can be revoked alone.
+- The embedded VictoriaMetrics has no authentication. It listens on the
+  container's loopback by default; leave `DUMBMONIT_VM_LISTEN` alone unless
+  you publish the port on purpose.

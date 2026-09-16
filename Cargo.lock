@@ -793,6 +793,86 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
+name = "dumbmonit-agent"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dumbmonit-proto",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sysinfo",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "windows-service",
+]
+
+[[package]]
+name = "dumbmonit-proto"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "dumbmonit-server"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "argon2",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "dumbmonit-proto",
+ "futures",
+ "hex",
+ "hickory-resolver",
+ "http-body-util",
+ "humantime-serde",
+ "ipnet",
+ "jsonwebtoken",
+ "lettre",
+ "libc",
+ "mime_guess",
+ "rand 0.10.2",
+ "reqwest",
+ "rust-embed",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "sha2 0.11.0",
+ "snmp2",
+ "sqlx",
+ "subtle",
+ "surge-ping",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "tower",
+ "tower-http 0.7.1",
+ "tracing",
+ "tracing-subscriber",
+ "webpki-roots",
+ "x509-parser",
+]
+
+[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -916,84 +996,6 @@ checksum = "5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2"
 dependencies = [
  "parking",
  "pin-project-lite",
-]
-
-[[package]]
-name = "ezymonit-agent"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "ezymonit-proto",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "sysinfo",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "windows-service",
-]
-
-[[package]]
-name = "ezymonit-proto"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "ezymonit-server"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "anyhow",
- "argon2",
- "async-trait",
- "axum",
- "base64 0.22.1",
- "chrono",
- "ezymonit-proto",
- "futures",
- "hex",
- "hickory-resolver",
- "http-body-util",
- "humantime-serde",
- "ipnet",
- "jsonwebtoken",
- "lettre",
- "mime_guess",
- "rand 0.10.2",
- "reqwest",
- "rust-embed",
- "rustls",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "sha2 0.11.0",
- "snmp2",
- "sqlx",
- "subtle",
- "surge-ping",
- "tempfile",
- "thiserror 2.0.20",
- "tokio",
- "tokio-rustls",
- "tokio-util",
- "tower",
- "tower-http 0.7.1",
- "tracing",
- "tracing-subscriber",
- "webpki-roots",
- "x509-parser",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 # DumbMonit
 
-Simple monitoring for homelabs and small teams. Two containers, one IP address
+Simple monitoring for homelabs and small teams. One container, one IP address
 to type in, useful graphs and alerts in under a minute.
 
 DumbMonit reads the network like a **weather bulletin**: the home page states
@@ -32,16 +32,18 @@ windows are scheduled.
 
 | Container | Role | Footprint |
 |---|---|---|
-| `ezymonit` | Collection, API, alerting, web UI | ~20 MB image, ~40 MB RAM |
-| `victoriametrics` | Time series storage | ~100 MB RAM |
+| `dumbmonit` | Collection, API, alerting, web UI, and the embedded VictoriaMetrics for time series | ~40 MB RAM + the VictoriaMetrics budget (256 MB by default) |
 
-Configuration and state live in an embedded SQLite database: there is no third
-database container.
+One container, one volume: the server starts VictoriaMetrics from the same
+image, and configuration and state live in an embedded SQLite database. There
+is no database container. An external VictoriaMetrics can be used instead
+(`DUMBMONIT_VM_URL`).
 
 !!! note "About the name"
     DumbMonit was called EzyMonit until September 2026. Commands, environment
-    variables, image names and paths still say `ezymonit`; this documentation uses
-    them as they are.
+    variables, image names and paths were renamed with it; the old
+    `EZYMONIT_*` variables and `ezym_` agent tokens are still accepted. See
+    [Upgrading](install/docker.md#upgrading).
 
 DumbMonit is 100% open source under the Apache 2.0 license, dependencies
 included: no feature is held back for a paid edition.

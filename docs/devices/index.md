@@ -23,9 +23,9 @@ form always matches what this version can monitor.
 
 The scheduler runs every enabled device on its own interval (default 60 s,
 minimum 10 s) through the collector for its kind, with at most
-`EZYMONIT_MAX_CONCURRENT_PROBES` probes in flight and a hard timeout of
-`EZYMONIT_PROBE_TIMEOUT_SECS` per probe. Each successful probe writes its
-samples plus `ezymonit_up = 1`; a failed probe writes nothing, and it is the
+`DUMBMONIT_MAX_CONCURRENT_PROBES` probes in flight and a hard timeout of
+`DUMBMONIT_PROBE_TIMEOUT_SECS` per probe. Each successful probe writes its
+samples plus `dumbmonit_up = 1`; a failed probe writes nothing, and it is the
 silence of the series that the "Device unreachable" rule detects.
 
 Failures are classified. A device that does not answer is *unreachable* and

@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use ezymonit_proto::Sample;
+use dumbmonit_proto::Sample;
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 
@@ -17,7 +17,7 @@ use super::Victoria;
 const MAX_BUFFERED: usize = 200_000;
 
 /// Taille de lot déclenchant un envoi immédiat, sans attendre l'échéance, quand
-/// l'appelant n'en précise pas (`EZYMONIT_FLUSH_BATCH` côté serveur).
+/// l'appelant n'en précise pas (`DUMBMONIT_FLUSH_BATCH` côté serveur).
 pub const DEFAULT_FLUSH_SIZE: usize = 5_000;
 
 /// Capacité initiale du tampon. Il grandit à la demande jusqu'à la taille de lot

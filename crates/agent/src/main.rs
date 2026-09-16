@@ -1,4 +1,4 @@
-//! Agent système EzyMonit.
+//! Agent système DumbMonit.
 //!
 //! Un petit binaire installé sur la machine à surveiller, qui mesure et pousse ses
 //! relevés vers le serveur. C'est l'agent qui se connecte, jamais le serveur :
@@ -31,7 +31,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if args.version {
-        println!("ezymonit-agent {}", env!("CARGO_PKG_VERSION"));
+        println!("dumbmonit-agent {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 
@@ -44,6 +44,7 @@ fn main() -> Result<()> {
 
     let config = Config::load(&args.config_path())?;
     init_tracing(config.log_level);
+    config.warn_deprecated_env();
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -122,19 +123,19 @@ impl Args {
     fn config_path(&self) -> PathBuf {
         self.config
             .clone()
-            .or_else(|| std::env::var_os("EZYMONIT_AGENT_CONFIG").map(PathBuf::from))
+            .or_else(|| dumbmonit_proto::env::var("DUMBMONIT_AGENT_CONFIG").map(PathBuf::from))
             .unwrap_or_else(Config::default_path)
     }
 }
 
 fn print_help() {
     println!(
-        "ezymonit-agent {version}
+        "dumbmonit-agent {version}
 
 Collects this machine's metrics and pushes them to a DumbMonit server.
 
 USAGE:
-    ezymonit-agent [OPTIONS]
+    dumbmonit-agent [OPTIONS]
 
 OPTIONS:
     -c, --config <FILE>     Configuration file
@@ -146,21 +147,21 @@ OPTIONS:
     -V, --version           Show the version
 
 ENVIRONMENT VARIABLES (override the file):
-    EZYMONIT_AGENT_CONFIG           Configuration file path
-    EZYMONIT_AGENT_URL              Server URL, for example http://server:8080
-    EZYMONIT_AGENT_TOKEN            Enrollment token
-    EZYMONIT_AGENT_INTERVAL_SECS    Sampling period
-    EZYMONIT_AGENT_HOSTNAME         Hostname announced to the server
-    EZYMONIT_AGENT_SERVICES         Services to watch, comma-separated
-    EZYMONIT_AGENT_TAGS             Tags as key=value, comma-separated
-    EZYMONIT_AGENT_DOCKER           Container inventory (true/false)
-    EZYMONIT_AGENT_DOCKER_UPDATE_CHECK  Compare images with their registry (true/false)
-    EZYMONIT_AGENT_COMMANDS         Accept container actions from the server (true/false)
-    EZYMONIT_AGENT_PLAKAR_KLOSETS   Plakar klosets to watch, comma-separated (default: discovered)
-    EZYMONIT_AGENT_PLAKAR_BIN       Path to the plakar binary (default: plakar on PATH)
-    EZYMONIT_AGENT_PLAKAR_HOME      HOME used when running plakar
-    EZYMONIT_AGENT_PLAKAR_INTERVAL_SECS  Seconds between two kloset readings
-    EZYMONIT_AGENT_LOG              Log level (info, debug, ...)",
+    DUMBMONIT_AGENT_CONFIG           Configuration file path
+    DUMBMONIT_AGENT_URL              Server URL, for example http://server:8080
+    DUMBMONIT_AGENT_TOKEN            Enrollment token
+    DUMBMONIT_AGENT_INTERVAL_SECS    Sampling period
+    DUMBMONIT_AGENT_HOSTNAME         Hostname announced to the server
+    DUMBMONIT_AGENT_SERVICES         Services to watch, comma-separated
+    DUMBMONIT_AGENT_TAGS             Tags as key=value, comma-separated
+    DUMBMONIT_AGENT_DOCKER           Container inventory (true/false)
+    DUMBMONIT_AGENT_DOCKER_UPDATE_CHECK  Compare images with their registry (true/false)
+    DUMBMONIT_AGENT_COMMANDS         Accept container actions from the server (true/false)
+    DUMBMONIT_AGENT_PLAKAR_KLOSETS   Plakar klosets to watch, comma-separated (default: discovered)
+    DUMBMONIT_AGENT_PLAKAR_BIN       Path to the plakar binary (default: plakar on PATH)
+    DUMBMONIT_AGENT_PLAKAR_HOME      HOME used when running plakar
+    DUMBMONIT_AGENT_PLAKAR_INTERVAL_SECS  Seconds between two kloset readings
+    DUMBMONIT_AGENT_LOG              Log level (info, debug, ...)",
         version = env!("CARGO_PKG_VERSION"),
         default = Config::default_path().display(),
     );
@@ -184,8 +185,8 @@ mod tests {
         // La forme accolée est celle qu'écrivent les fichiers d'unité systemd, la
         // forme séparée celle qu'on tape à la main.
         assert_eq!(
-            parse(&["--config=/etc/ezymonit/agent.yaml"]).unwrap().config,
-            Some(PathBuf::from("/etc/ezymonit/agent.yaml"))
+            parse(&["--config=/etc/dumbmonit/agent.yaml"]).unwrap().config,
+            Some(PathBuf::from("/etc/dumbmonit/agent.yaml"))
         );
         assert_eq!(
             parse(&["-c", "/autre/agent.yaml"]).unwrap().config,
