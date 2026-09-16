@@ -12,12 +12,13 @@ Tout ce qui était demandé est construit, testé et poussé (`main`, image mono
 - Notifications intelligentes : hystérésis, anti-flap, cooldown, heures calmes, regroupement, plafond horaire, 22 canaux.
 - 41 règles intégrées, suppression par dépendance, baseline saisonnière, prévisions.
 - Ressources : 123 Mo RAM en moyenne (serveur + VictoriaMetrics embarqué), CPU ≈ 1 %.
+- Non couvert par les tests de bout en bout (agent à court de temps) : OIDC/comptes et MCP en conditions réelles — vérifiés seulement par les tests unitaires/intégration et la revue de sécurité.
 - Qualité : fmt/clippy/tests (≈ 1 100) verts, `svelte-check` 0 erreur, docs `mkdocs --strict` OK.
 - Doc : **tout est sur Read the Docs** désormais ; la page `/docs/notifications` de l'app est supprimée, l'app renvoie vers https://dumbmonit.readthedocs.io.
 
 ## Ce qui a cassé (trouvé par les tests de bout en bout, sur le lab)
 
-1. **Supprimer ou renommer un appareil laisse des alertes fantômes** (`host_down` évalue les anciennes séries pendant 7 jours, un e-mail est parti pour un appareil supprimé ; l'accueil, le mur et l'historique affichent des cartes sans nom). → règles à clé sur `target`, purge de l'état à la suppression. **Priorité 1.**
+1. **Supprimer, désactiver ou renommer un appareil laisse des alertes fantômes** (`host_down` évalue les anciennes séries pendant 7 jours, un e-mail est parti pour un appareil supprimé ; l'accueil, le mur et l'historique affichent des cartes sans nom). → règles à clé sur `target`, purge de l'état à la suppression. **Priorité 1.**
 2. **Commandes Docker en attente qui n'expirent jamais** : si l'agent ne répond pas (ancien binaire, `commands: false`), tout nouveau « Restart/Update » renvoie 409 pour toujours et la politique automatique saute le conteneur. → expiration côté serveur + bouton Annuler + afficher la version/capacités de l'agent.
 3. **Mobile (390 px)** : Réglages › Pages de statut et Utilisateurs, la colonne texte s'écrase à 60 px ; titres d'alertes tronqués ; pastille de navigation mal placée quand le badge Alertes se charge.
 4. Page de statut publique : bannière « Major outage » alors que tout est opérationnel.
