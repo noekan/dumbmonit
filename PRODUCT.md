@@ -29,7 +29,7 @@ DumbMonit monitors ten-ish machines and a few switches for people who do not wan
 - The UI talks only to `/api/*` (contract in `web/src/lib/api/types.ts` and `web/src/lib/api/index.ts`); the server never exposes secrets back.
 - Sources: SNMP v1/v2c/v3 (5 profiles), Proxmox VE, Proxmox Backup Server, Synology DSM, Linux/Windows agent (token created in Settings → Agents, one-line install command), service availability monitors (HTTP(S), TCP, DNS, ping, TLS expiry) à la Uptime Kuma, network discovery by CIDR.
 - Alerting: default rules (unreachable, CPU saturated, disk nearly/soon full, UPS on battery/low battery, backup too old, service down/flapping/slow, certificate expiring/expired), dependency suppression via parent target, grouping, dedup, periodic reminder, escalation, maintenance windows (one-off or weekly), seasonal baseline anomaly detection.
-- Notifications: 22 channels (Discord, Slack, Teams, Telegram, Matrix, Mattermost, Rocket.Chat, Google Chat, ntfy, Gotify, Pushover, Pushbullet, Bark, Signal, Twilio, PagerDuty, Opsgenie, Home Assistant, Zulip, Apprise, SMTP, webhook), each described by the server (`GET /api/notify/kinds`) with a "Test" action. Docs served at `/docs/notifications`.
+- Notifications: 22 channels (Discord, Slack, Teams, Telegram, Matrix, Mattermost, Rocket.Chat, Google Chat, ntfy, Gotify, Pushover, Pushbullet, Bark, Signal, Twilio, PagerDuty, Opsgenie, Home Assistant, Zulip, Apprise, SMTP, webhook), each described by the server (`GET /api/notify/kinds`) with a "Test" action. Docs on Read the Docs (the UI links to them).
 - Auth: single password for the instance, set on first run (`/setup`), session cookie; the server may also run unprotected.
 - Graphs: uPlot, fed by MetricsQL range queries proxied by the server.
 

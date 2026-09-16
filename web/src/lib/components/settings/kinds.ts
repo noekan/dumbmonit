@@ -103,5 +103,5 @@ export function kindIcon(kind: string): typeof LucideIcon {
 
 /** Documentation anchor of a kind: the server's `doc_url`, or the catalogue page. */
 export function kindDocUrl(info: KindInfo | undefined): string {
-	return info?.doc_url || '/docs/notifications';
+	return info?.doc_url || 'https://dumbmonit.readthedocs.io/en/latest/notifications/';
 }

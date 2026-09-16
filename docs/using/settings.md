@@ -20,8 +20,7 @@ secrets (write-only). **Send test** sends a test message and shows the result in
 
 Editing a channel and leaving the secret empty keeps the stored one. Channel
 types and their fields are documented in
-[Notification channels](../notifications.md), which is also served by the UI at
-`/docs/notifications`.
+[Notification channels](../notifications.md).
 
 Built-in alert rules notify every enabled channel; a rule can also be limited
 to specific channels in its editor.

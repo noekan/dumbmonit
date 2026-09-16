@@ -50,11 +50,16 @@ pub struct KindInfo {
     pub kind: &'static str,
     pub label: &'static str,
     pub summary: &'static str,
-    /// Ancre dans `docs/notifications.md`, servie par l'interface.
+    /// Lien absolu vers la section du canal dans la documentation en ligne
+    /// (Read the Docs), qui publie `docs/notifications.md`.
     pub doc_url: &'static str,
     pub settings: Vec<Field>,
     pub secrets: Vec<Field>,
 }
+
+/// Page de la documentation en ligne qui décrit chaque canal ; chaque `doc_url`
+/// en est une ancre.
+pub const NOTIFICATIONS_DOC: &str = "https://dumbmonit.readthedocs.io/en/latest/notifications/";
 
 /// Tous les types de canaux, dans l'ordre de [`CHANNEL_KINDS`] — celui du menu.
 pub fn all() -> Vec<KindInfo> {
@@ -191,7 +196,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Discord",
             "Rich message in a Discord channel, through a webhook.",
-            "/docs/notifications#discord",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#discord",
             vec![],
             vec![webhook_url(
                 "Channel settings → Integrations → Webhooks → Copy webhook URL.",
@@ -202,7 +207,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Slack",
             "Message in a Slack channel, through an incoming webhook.",
-            "/docs/notifications#slack",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#slack",
             vec![],
             vec![webhook_url(
                 "URL provided by \"Incoming Webhooks\" in your Slack app.",
@@ -213,7 +218,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Telegram",
             "Message from a Telegram bot to you, in a group or in a channel.",
-            "/docs/notifications#telegram",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#telegram",
             vec![
                 text(
                     "chat_id",
@@ -253,7 +258,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Microsoft Teams",
             "Adaptive card in a Teams channel, through a Workflows flow.",
-            "/docs/notifications#microsoft-teams",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#microsoft-teams",
             vec![],
             vec![webhook_url(
                 "HTTPS POST URL of the \"Post to a channel when a webhook request is \
@@ -265,7 +270,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Matrix",
             "Message in a Matrix room, from an account dedicated to DumbMonit.",
-            "/docs/notifications#matrix",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#matrix",
             vec![
                 server_url("Homeserver of the DumbMonit account.", "https://matrix.org"),
                 text(
@@ -291,7 +296,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Mattermost",
             "Message in a Mattermost channel, through an incoming webhook.",
-            "/docs/notifications#mattermost",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#mattermost",
             vec![
                 text(
                     "channel",
@@ -311,7 +316,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Rocket.Chat",
             "Message in a Rocket.Chat room, through an incoming webhook.",
-            "/docs/notifications#rocketchat",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#rocketchat",
             vec![
                 text(
                     "channel",
@@ -331,7 +336,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Google Chat",
             "Card in a Google Chat space, through a webhook.",
-            "/docs/notifications#google-chat",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#google-chat",
             vec![],
             vec![webhook_url(
                 "Space → Apps & integrations → Webhooks. The URL already contains the key \
@@ -343,7 +348,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Zulip",
             "Message from a Zulip bot in a stream, under a dedicated topic.",
-            "/docs/notifications#zulip",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#zulip",
             vec![
                 server_url("Address of your Zulip organization.", "https://your-org.zulipchat.com"),
                 text(
@@ -379,7 +384,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "ntfy",
             "Notification on an ntfy topic, on the public instance or your own.",
-            "/docs/notifications#ntfy",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#ntfy",
             vec![
                 text(
                     "topic",
@@ -403,7 +408,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Gotify",
             "Notification on your self-hosted Gotify server.",
-            "/docs/notifications#gotify",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#gotify",
             vec![server_url("Address of your Gotify server.", "https://gotify.home")],
             vec![
                 password(
@@ -419,7 +424,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Pushover",
             "Pushover notification on your devices, with priority following severity.",
-            "/docs/notifications#pushover",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#pushover",
             vec![
                 number(
                     "priority",
@@ -465,7 +470,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Pushbullet",
             "Pushbullet notification on all your devices, or on a single one.",
-            "/docs/notifications#pushbullet",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#pushbullet",
             vec![text(
                 "device_iden",
                 "Device identifier",
@@ -486,7 +491,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Bark (iOS)",
             "Notification on iPhone through Bark, with interruption level following severity.",
-            "/docs/notifications#bark-ios",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#bark-ios",
             vec![
                 url("server_url", "Server address", "Your own Bark instance, if you host one.", "")
                     .with_default("https://api.day.app"),
@@ -518,7 +523,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Apprise",
             "Gateway to dozens of services, through an Apprise instance.",
-            "/docs/notifications#apprise",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#apprise",
             vec![
                 server_url("Address of your Apprise instance.", "http://apprise.home:8000"),
                 text(
@@ -549,7 +554,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Home Assistant",
             "Call to a Home Assistant service: a notification, or any other action.",
-            "/docs/notifications#home-assistant",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#home-assistant",
             vec![
                 server_url("Address of Home Assistant.", "http://homeassistant.local:8123"),
                 text(
@@ -588,7 +593,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Email (SMTP)",
             "Email sent by your own SMTP server, with no third-party service.",
-            "/docs/notifications#email-smtp",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#email-smtp",
             vec![
                 text("host", "SMTP server", "Host name or IP address.", "smtp.example.org")
                     .required(),
@@ -622,7 +627,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Signal",
             "Signal message sent by your signal-cli-rest-api instance.",
-            "/docs/notifications#signal",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#signal",
             vec![
                 server_url("Address of your signal-cli-rest-api.", "http://signal.home:8080"),
                 text(
@@ -659,7 +664,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "SMS via Twilio",
             "SMS sent by Twilio, trimmed to the essentials to fit in one segment.",
-            "/docs/notifications#sms-via-twilio",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#sms-via-twilio",
             vec![
                 text(
                     "account_sid",
@@ -705,7 +710,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "PagerDuty",
             "PagerDuty incident opened by the alert, closed by its resolution.",
-            "/docs/notifications#pagerduty",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#pagerduty",
             vec![
                 select(
                     "region",
@@ -730,7 +735,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Opsgenie",
             "Opsgenie alert opened by the alert, closed by its resolution.",
-            "/docs/notifications#opsgenie",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#opsgenie",
             vec![
                 select("region", "Account region", "\"eu\" for a European account.", &["us", "eu"]),
                 textarea("responders", "Teams to notify", "One team name per line.", "on-call")
@@ -753,7 +758,7 @@ fn describe(kind: &'static str) -> Option<KindInfo> {
             kind,
             "Custom webhook",
             "HTTP request fully described by you: method, headers, templated body.",
-            "/docs/notifications#custom-webhook",
+            "https://dumbmonit.readthedocs.io/en/latest/notifications/#custom-webhook",
             vec![
                 select("method", "Method", "A GET request has no body.", &["POST", "PUT", "GET"]),
                 select(
@@ -943,7 +948,7 @@ mod tests {
         assert!(anchors.contains("#email-smtp"), "inconsistent anchor computation: {anchors:?}");
         assert!(anchors.contains("#bark-ios"), "inconsistent anchor computation: {anchors:?}");
         for kind in all() {
-            let Some(fragment) = kind.doc_url.strip_prefix("/docs/notifications") else {
+            let Some(fragment) = kind.doc_url.strip_prefix(NOTIFICATIONS_DOC) else {
                 panic!("{}: unexpected link \"{}\"", kind.kind, kind.doc_url)
             };
             assert!(

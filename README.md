@@ -84,8 +84,7 @@ back for a paid edition.
   Matrix, Mattermost, Rocket.Chat, Google Chat, ntfy, Gotify, Pushover, Pushbullet,
   Bark, Signal, Twilio (SMS), PagerDuty, Opsgenie, Home Assistant, Zulip, Apprise,
   email (SMTP) and a custom webhook. Each has a "Test" button; setup notes live in
-  [`docs/notifications.md`](docs/notifications.md) and in the UI at
-  `/docs/notifications`.
+  [the documentation](https://dumbmonit.readthedocs.io/en/latest/notifications/).
 
 **Interface**
 

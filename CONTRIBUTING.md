@@ -133,8 +133,8 @@ For an SNMP device that only needs a new profile, add a YAML file under
    the API). The UI renders the form from this description.
 3. Add its kind to `CHANNEL_KINDS` in `notify/channel.rs` (a test there checks
    every kind has a catalog entry).
-4. Document it in `docs/notifications.md` (the page is also served by the UI at
-   `/docs/notifications`).
+4. Document it in `docs/notifications.md` (published on Read the Docs; the UI
+   links to its anchors).
 5. Test it with the "Send test message" button in *Settings → Notifications*.
 
 ## Conventions

@@ -1,0 +1,2430 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Simple monitoring for homelabs and small teams. One container, one IP address, useful alerts in a minute.">
+      
+      
+      
+        <link rel="canonical" href="https://dumbmonit.readthedocs.io/reference/api/">
+      
+      
+        <link rel="prev" href="../../using/status-pages/">
+      
+      
+        <link rel="next" href="../configuration/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>HTTP API - DumbMonit</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#http-api" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="DumbMonit" class="md-header__button md-logo" aria-label="DumbMonit" data-md-component="logo">
+      
+  <img src="../../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DumbMonit
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              HTTP API
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/noekan/dumbmonit" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    noekan/dumbmonit
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../install/docker/" class="md-tabs__link">
+          
+  
+  
+  Install
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../devices/" class="md-tabs__link">
+          
+  
+  
+  Devices
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../alerting/" class="md-tabs__link">
+          
+  
+  
+  Alerting
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../using/overview/" class="md-tabs__link">
+          
+  
+  
+  Using DumbMonit
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../development/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Development
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../faq/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="DumbMonit" class="md-nav__button md-logo" aria-label="DumbMonit" data-md-component="logo">
+      
+  <img src="../../assets/logo.svg" alt="logo">
+
+    </a>
+    DumbMonit
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/noekan/dumbmonit" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    noekan/dumbmonit
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Install
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install/first-device/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add your first device
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Devices
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Devices
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/snmp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SNMP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/pbs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox Backup Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/synology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synology DSM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Linux and Windows agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Services (HTTP, TCP, DNS, ping, TLS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../devices/demo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Demo device
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Alerting
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Alerting
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../alerting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How alerting works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../alerting/rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../alerting/maintenance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Maintenance windows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../alerting/notifications/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notification policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notifications/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notification channels
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Using DumbMonit
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Using DumbMonit
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview page
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using/devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Devices page
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using/settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using/assistant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connect an assistant (MCP)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../using/status-pages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status pages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP API
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Errors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#device-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Device types
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#targets-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Targets (devices)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Discovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metrics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alerts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Alerts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#silences-maintenance-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Silences (maintenance windows)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notification-channels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notification channels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-tokens-and-ingest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent tokens and ingest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-files-outside-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent files (outside /api)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../metrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Errors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#device-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Device types
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#targets-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Targets (devices)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Discovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metrics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alerts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alerts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Alerts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#silences-maintenance-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Silences (maintenance windows)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notification-channels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notification channels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-tokens-and-ingest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent tokens and ingest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-files-outside-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent files (outside /api)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="http-api">HTTP API<a class="headerlink" href="#http-api" title="Permanent link">&para;</a></h1>
+<p>Everything the web UI does goes through <code>/api/*</code>; there is nothing else. The
+route table is <code>crates/server/src/api/mod.rs</code>; the response shapes are
+mirrored in <code>web/src/lib/api/types.ts</code>.</p>
+<h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
+<p>The instance has one password and uses an HttpOnly session cookie named
+<code>dumbmonit_session</code> (SameSite Lax; <code>Secure</code> when <code>DUMBMONIT_COOKIE_SECURE=1</code>).
+Sessions last 30 days.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Log in: 204 and a Set-Cookie header</span>
+curl<span class="w"> </span>-c<span class="w"> </span>cookies.txt<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8080/api/auth/login<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;password&quot;:&quot;…&quot;}&#39;</span>
+
+<span class="c1"># Then send the cookie with every call</span>
+curl<span class="w"> </span>-b<span class="w"> </span>cookies.txt<span class="w"> </span>http://localhost:8080/api/targets
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">No API token yet</p>
+<p>The only way to call the protected routes is the session cookie obtained
+with the password. Agent enrollment tokens (<code>dmon_…</code>) are accepted on
+<code>POST /api/ingest</code> only.</p>
+</div>
+<p>Login is rate-limited: after five failed attempts, each further attempt is
+refused with <code>429</code> and a <code>Retry-After</code> delay that doubles from 30 s up to
+5 minutes. Never guess passwords in a loop.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Auth</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/auth/status</code></td>
+<td>public</td>
+<td><code>{"configured": bool, "authenticated": bool}</code>. <code>configured: false</code> means a fresh instance.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/auth/setup</code></td>
+<td>public</td>
+<td><code>{"password": "…"}</code>. Sets the password on a fresh instance (at least 12 characters). <code>204</code>; does not open a session.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/auth/login</code></td>
+<td>public</td>
+<td><code>{"password": "…"}</code>. <code>204</code> with <code>Set-Cookie</code>. <code>401</code> on a wrong password, <code>429</code> when rate-limited.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/auth/logout</code></td>
+<td>session</td>
+<td>Ends the session and clears the cookie.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/auth/password</code></td>
+<td>session</td>
+<td><code>{"current_password": "…", "new_password": "…"}</code>. Signs out every other session.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="errors">Errors<a class="headerlink" href="#errors" title="Permanent link">&para;</a></h2>
+<p>Every error is JSON: <code>{"error": "message"}</code>, with <code>400</code> for a bad request,
+<code>401</code> without a valid session, <code>404</code> when the id does not exist, <code>409</code> on a
+conflict, <code>429</code> when rate-limited and <code>500</code> otherwise.</p>
+<h2 id="health">Health<a class="headerlink" href="#health" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Auth</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/health</code></td>
+<td>public</td>
+<td>Server version and the state of its dependencies. Always <code>200</code>: a failing component is in the body.</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="s2">&quot;ok&quot;</span><span class="p">,</span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="s2">&quot;0.1.0&quot;</span><span class="p">,</span><span class="nt">&quot;database&quot;</span><span class="p">:{</span><span class="nt">&quot;ok&quot;</span><span class="p">:</span><span class="kc">true</span><span class="p">},</span><span class="nt">&quot;victoria&quot;</span><span class="p">:{</span><span class="nt">&quot;ok&quot;</span><span class="p">:</span><span class="kc">true</span><span class="p">,</span><span class="nt">&quot;embedded&quot;</span><span class="p">:</span><span class="kc">true</span><span class="p">}}</span>
+</code></pre></div>
+<p><code>status</code> is <code>degraded</code> when a component fails; that component then carries an
+<code>error</code> string. <code>victoria.embedded</code> is <code>true</code> when the server runs its own
+VictoriaMetrics, <code>false</code> when <code>DUMBMONIT_VM_URL</code> points at an external one.</p>
+<h2 id="device-types">Device types<a class="headerlink" href="#device-types" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/collectors</code></td>
+<td>Every device kind this server can monitor: <code>kind</code>, <code>label</code>, <code>summary</code>, <code>examples</code>, <code>credential_types</code>, <code>address_hint</code>, <code>default_port</code>, <code>setup</code> (<code>title</code>, <code>steps</code>, <code>warning</code>, <code>doc_url</code>) and <code>options</code> (<code>key</code>, <code>label</code>, <code>help</code>, <code>placeholder</code>, <code>default</code>, <code>required</code>, <code>input</code>, <code>choices</code>).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="targets-devices">Targets (devices)<a class="headerlink" href="#targets-devices" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/targets</code></td>
+<td>List every device.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/targets</code></td>
+<td>Create one. <code>201</code> with the device. Profile detection starts in the background for SNMP.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/targets/{id}</code></td>
+<td>One device.</td>
+</tr>
+<tr>
+<td><code>PUT</code></td>
+<td><code>/api/targets/{id}</code></td>
+<td>Replace it. Omitting <code>credential</code> keeps the stored one.</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/targets/{id}</code></td>
+<td><code>204</code>.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/targets/{id}/probe</code></td>
+<td>Probe now: <code>{"sample_count": 42, "series": ["dumbmonit_if_octets_in", …]}</code>.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/targets/{id}/discover</code></td>
+<td>Re-run profile detection: <code>{"profile_id": "host-resources"}</code> or <code>null</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>A device as returned:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Lab switch&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;address&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;snmp-lab&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;kind&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;snmp&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;profile_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;host-resources&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;parent_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;interval_secs&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;enabled&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;tags&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;role&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;lab&quot;</span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;credential_kind&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SNMP community&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;last_probe_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-09-15 13:20:05&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;last_error&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The secret itself is never returned: <code>credential_kind</code> is a label. Server
+timestamps are UTC without a suffix.</p>
+<p>Creating one:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Core switch&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;address&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;192.168.1.10&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;kind&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;snmp&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;interval_secs&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;parent_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;tags&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{},</span>
+<span class="w">  </span><span class="nt">&quot;credential&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;snmp_community&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;community&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;public&quot;</span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Credential shapes (<code>type</code>): <code>none</code>; <code>snmp_community</code> (<code>community</code>); <code>snmp_v3</code>
+(<code>username</code>, optional <code>auth: {protocol, passphrase}</code> with <code>md5</code>, <code>sha1</code>,
+<code>sha224</code>, <code>sha256</code>, <code>sha384</code> or <code>sha512</code>, optional <code>privacy: {protocol,
+passphrase}</code> with <code>des</code>, <code>aes128</code>, <code>aes192</code> or <code>aes256</code>, optional <code>context</code>);
+<code>api_token</code> (<code>token</code>); <code>username_password</code> (<code>username</code>, <code>password</code>).
+<code>interval_secs</code> defaults to 60 and cannot go below 10. Type options go in
+<code>tags</code> under their key.</p>
+<h2 id="discovery">Discovery<a class="headerlink" href="#discovery" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/discovery?cidr=192.168.1.0/24&amp;community=public&amp;port=161&amp;timeout_ms=1000</code></td>
+<td>Scan a network for SNMP devices. <code>cidr</code> is required; <code>community</code> defaults to <code>public</code>; <code>timeout_ms</code> is clamped to 100–10,000. Networks larger than 4096 addresses are refused.</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;scanned&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">254</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;devices&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">&quot;address&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;192.168.1.10&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;sysname&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sw-core&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;sysdescr&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;…&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;sysobjectid&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.3.6.1.4.1.8072.3.2.10&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;suggested_profile&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;host-resources&quot;</span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<h2 id="metrics">Metrics<a class="headerlink" href="#metrics" title="Permanent link">&para;</a></h2>
+<p>Both routes proxy VictoriaMetrics and return series in the Prometheus shape:
+<code>[{"metric": {labels…}, "values": [[timestamp_seconds, "value"], …]}]</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/metrics/query?query=…</code></td>
+<td>Instant MetricsQL query.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/metrics/query_range?query=…&amp;start=…&amp;end=…&amp;step=…</code></td>
+<td>Range query. <code>start</code> and <code>end</code> are <strong>milliseconds</strong> since the epoch; <code>step</code> is in seconds and is widened so that a series never exceeds 2,000 points.</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-b<span class="w"> </span>cookies.txt<span class="w"> </span>-G<span class="w"> </span>http://localhost:8080/api/metrics/query<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s1">&#39;query=avg by (target, host) (dumbmonit_cpu_usage_percent)&#39;</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="p">[{</span><span class="nt">&quot;metric&quot;</span><span class="p">:{</span><span class="nt">&quot;host&quot;</span><span class="p">:</span><span class="s2">&quot;ThinkpadE14&quot;</span><span class="p">,</span><span class="nt">&quot;target&quot;</span><span class="p">:</span><span class="s2">&quot;3&quot;</span><span class="p">},</span><span class="nt">&quot;values&quot;</span><span class="p">:[[</span><span class="mi">1757941205</span><span class="p">,</span><span class="s2">&quot;12.5&quot;</span><span class="p">]]}]</span>
+</code></pre></div>
+<h2 id="alerts">Alerts<a class="headerlink" href="#alerts" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/alerts</code></td>
+<td>Active alerts (pending, firing, suppressed, recently resolved).</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/alerts/history?since=2026-09-01T00:00:00Z&amp;limit=200</code></td>
+<td>Phase transitions. <code>since</code> is RFC 3339, default the last seven days; <code>limit</code> must be positive.</td>
+</tr>
+</tbody>
+</table>
+<p>An active alert:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;fingerprint&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;…&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;rule_uid&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;disk_almost_full&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;rule_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Disk almost full&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;severity&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;warning&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;target_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;series_key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;…&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;labels&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;host&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Lab switch&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;mountpoint&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;target&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;4&quot;</span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;phase&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;firing&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;effective_phase&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;suppressed&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;suppressed&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;suppressed_by&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;silenced&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;learning&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">95.96</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;score&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;condition_since&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-09-15T12:00:00Z&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;firing_since&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-09-15T12:15:00Z&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;last_eval_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-09-15T13:20:00Z&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;last_notified_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;notify_count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>A history entry has <code>id</code>, <code>fingerprint</code>, <code>rule_uid</code>, <code>target_id</code>,
+<code>from_phase</code>, <code>to_phase</code>, <code>severity</code>, <code>value</code>, <code>notified</code>, <code>reason</code> (empty, or
+why nothing was sent: <code>learning: would have fired</code>, <code>suppressed: device 2
+unreachable</code>, <code>maintenance window</code>) and <code>at</code>.</p>
+<h3 id="rules">Rules<a class="headerlink" href="#rules" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/alerts/rules</code></td>
+<td>Every rule.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/alerts/rules</code></td>
+<td>Create. <code>201</code>.</td>
+</tr>
+<tr>
+<td><code>PUT</code></td>
+<td><code>/api/alerts/rules/{id}</code></td>
+<td>Update. A built-in rule keeps its query.</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/alerts/rules/{id}</code></td>
+<td><code>204</code>. Built-in rules cannot be deleted.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/alerts/rules/{id}/enable</code></td>
+<td><code>{"enabled": false}</code>. Returns the rule.</td>
+</tr>
+</tbody>
+</table>
+<p>A rule:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;uid&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;cpu_high&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;High CPU&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;CPU load sustained above 90%.&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;kind&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;threshold&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;avg by (target, host) (dumbmonit_cpu_load_percent or dumbmonit_proxmox_node_cpu_percent or dumbmonit_cpu_usage_percent)&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;operator&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&gt;&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;threshold&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">90</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;for_secs&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">600</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;severity&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;warning&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;selector&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;kind&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;all&quot;</span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;channels&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<span class="w">  </span><span class="nt">&quot;params&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;k&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">3.5</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;alpha&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.05</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;mad_floor_abs&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1e-6</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;mad_floor_rel&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.01</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;min_samples&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;unit&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;%&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;repeat_secs&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">21600</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;escalate_after_secs&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3600</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;enabled&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;builtin&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Creating one needs at least <code>name</code> and <code>query</code>; <code>kind</code> (<code>threshold</code>,
+<code>anomaly</code>, <code>predict</code>), <code>operator</code>, <code>threshold</code>, <code>for_secs</code>, <code>severity</code>
+(<code>info</code>, <code>warning</code>, <code>critical</code>), <code>selector</code> (<code>{"kind":"all"}</code>,
+<code>{"kind":"ids","ids":[…]}</code> or <code>{"kind":"labels","labels":{…}}</code>), <code>channels</code>
+(channel ids; empty means every enabled channel), <code>unit</code>, <code>repeat_secs</code>,
+<code>escalate_after_secs</code> and <code>enabled</code> are optional.</p>
+<h3 id="silences-maintenance-windows">Silences (maintenance windows)<a class="headerlink" href="#silences-maintenance-windows" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/alerts/silences</code></td>
+<td>Every window, with <code>active_now</code>.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/alerts/silences</code></td>
+<td>Create. <code>201</code>.</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/alerts/silences/{id}</code></td>
+<td><code>204</code>.</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Sunday backups&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;comment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;NAS is busy&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;target_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;matchers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{},</span>
+<span class="w">  </span><span class="nt">&quot;schedule&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;kind&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;weekly&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;days&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">6</span><span class="p">],</span><span class="w"> </span><span class="nt">&quot;start_minute&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">120</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;end_minute&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">240</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;utc_offset_minutes&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">120</span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;enabled&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>A one-off schedule is <code>{"kind": "once", "starts_at": "2026-09-20T22:00:00Z",
+"ends_at": "2026-09-21T02:00:00Z"}</code>. Days are 0 = Monday … 6 = Sunday;
+minutes are since local midnight (0–1439).</p>
+<h2 id="notification-channels">Notification channels<a class="headerlink" href="#notification-channels" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/notify/kinds</code></td>
+<td>Every channel type with its <code>settings</code> and <code>secrets</code> fields (<code>key</code>, <code>label</code>, <code>required</code>, <code>input</code>, <code>help</code>, <code>placeholder</code>, <code>options</code>, <code>shape</code>, <code>default</code>) and a <code>doc_url</code> such as <code>https://dumbmonit.readthedocs.io/en/latest/notifications/#discord</code>.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/notify/channels</code></td>
+<td>Every channel: <code>id</code>, <code>name</code>, <code>kind</code>, <code>enabled</code>, <code>settings</code>, <code>has_secret</code>, <code>last_error</code>, <code>last_sent_at</code>. Secrets are never returned.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/notify/channels</code></td>
+<td>Create. <code>201</code>.</td>
+</tr>
+<tr>
+<td><code>PUT</code></td>
+<td><code>/api/notify/channels/{id}</code></td>
+<td>Update. Omitting <code>secrets</code> keeps the stored ones; <code>"secrets": {}</code> clears them.</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/notify/channels/{id}</code></td>
+<td><code>204</code>.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/notify/channels/{id}/test</code></td>
+<td>Send a test message: <code>{"ok": true, "message": "…"}</code>.</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Ops Discord&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;kind&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;discord&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;enabled&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;settings&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;username&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;DumbMonit&quot;</span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;secrets&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;webhook_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://discord.com/api/webhooks/…&quot;</span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The exact keys per kind come from <code>/api/notify/kinds</code> and are documented in
+<a href="../../notifications/">Notification channels</a>.</p>
+<h2 id="agent-tokens-and-ingest">Agent tokens and ingest<a class="headerlink" href="#agent-tokens-and-ingest" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Auth</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/agent/tokens</code></td>
+<td>session</td>
+<td>Every token: <code>id</code>, <code>name</code>, <code>prefix</code>, <code>created_at</code>, <code>last_used_at</code>, <code>revoked_at</code>.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/agent/tokens</code></td>
+<td>session</td>
+<td><code>{"name": "Home fleet", "base_url": "http://server:8080"}</code>. <code>201</code> with the token fields plus <code>secret</code> (shown once), <code>install_linux</code> and <code>install_windows</code>. <code>base_url</code> is the URL agents will use; it defaults to the listen address.</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/agent/tokens/{id}</code></td>
+<td>session</td>
+<td>Revoke. <code>204</code>.</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/ingest</code></td>
+<td><code>Authorization: Bearer dmon_…</code></td>
+<td>Receives a batch of samples from an agent (bodies up to 16 MB). Not meant to be called by hand.</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Home fleet&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;prefix&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dmon_ab12&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;created_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-09-15 13:00:00&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;last_used_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;revoked_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;secret&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dmon_…&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;install_linux&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;curl -sSL http://server:8080/install.sh | sh -s -- --token=dmon_… --url=http://server:8080&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;install_windows&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&amp; ([scriptblock]::Create((irm http://server:8080/install.ps1))) -Token dmon_… -Url http://server:8080&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<h2 id="agent-files-outside-api">Agent files (outside <code>/api</code>)<a class="headerlink" href="#agent-files-outside-api" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/install.sh</code></td>
+<td>The Linux installer. Public.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/install.ps1</code></td>
+<td>The Windows installer. Public.</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/download/{name}</code></td>
+<td><code>dumbmonit-agent-linux-x86_64</code>, <code>dumbmonit-agent-linux-aarch64</code>, <code>dumbmonit-agent-windows-x86_64.exe</code>, served from <code>DUMBMONIT_AGENT_DIR</code>. <code>404</code> if the file is absent.</td>
+</tr>
+</tbody>
+</table>
+<p>Every other path is served by the web UI, which asks for the password itself.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Apache 2.0 — DumbMonit
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,3354 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Simple monitoring for homelabs and small teams. One container, one IP address, useful alerts in a minute.">
+      
+      
+      
+        <link rel="canonical" href="https://dumbmonit.readthedocs.io/notifications/">
+      
+      
+        <link rel="prev" href="../alerting/notifications/">
+      
+      
+        <link rel="next" href="../using/overview/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Notification channels - DumbMonit</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#dumbmonit-notifications" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="DumbMonit" class="md-header__button md-logo" aria-label="DumbMonit" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DumbMonit
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Notification channels
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/noekan/dumbmonit" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    noekan/dumbmonit
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../install/docker/" class="md-tabs__link">
+          
+  
+  
+  Install
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../devices/" class="md-tabs__link">
+          
+  
+  
+  Devices
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../alerting/" class="md-tabs__link">
+          
+  
+  
+  Alerting
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../using/overview/" class="md-tabs__link">
+          
+  
+  
+  Using DumbMonit
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../reference/api/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../development/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Development
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../faq/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  FAQ
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="DumbMonit" class="md-nav__button md-logo" aria-label="DumbMonit" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    DumbMonit
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/noekan/dumbmonit" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    noekan/dumbmonit
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Install
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/first-device/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add your first device
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Devices
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Devices
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../devices/snmp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SNMP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../devices/proxmox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox VE
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../devices/pbs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proxmox Backup Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../devices/synology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Synology DSM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../devices/agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Linux and Windows agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../devices/services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Services (HTTP, TCP, DNS, ping, TLS)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../devices/demo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Demo device
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Alerting
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Alerting
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../alerting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How alerting works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../alerting/rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../alerting/maintenance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Maintenance windows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../alerting/notifications/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notification policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notification channels
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notification channels
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#creating-and-testing-a-channel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Creating and testing a channel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#settings-or-secrets-the-difference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings or secrets: the difference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-custom-channel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The custom channel
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The custom channel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#custom-channel-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom channel settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#available-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-1--an-internal-json-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 1 — an internal JSON API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-2--a-service-that-expects-a-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 2 — a service that expects a form
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-3--a-plain-text-sms-through-a-carrier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 3 — a plain-text SMS through a carrier
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-4--a-get-request-without-a-body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 4 — a GET request without a body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#common-template-mistakes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common template mistakes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#supported-channels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported channels
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Supported channels">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#discord" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Discord
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Slack
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#telegram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Telegram
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Telegram">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-create-the-bot-and-get-its-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Create the bot and get its token
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-find-the-chat_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Find the chat_id
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-check-before-saving" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Check before saving
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#microsoft-teams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Microsoft Teams
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mattermost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mattermost
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rocketchat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rocket.Chat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#google-chat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Google Chat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zulip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Zulip
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ntfy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ntfy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gotify" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gotify
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pushover" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pushover
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pushbullet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pushbullet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bark-ios" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bark (iOS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#apprise" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Apprise
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#home-assistant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Home Assistant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#email-smtp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Email (SMTP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sms-via-twilio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SMS via Twilio
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pagerduty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PagerDuty
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#opsgenie" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opsgenie
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-webhook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom webhook
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Using DumbMonit
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Using DumbMonit
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../using/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview page
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../using/devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Devices page
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../using/settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../using/assistant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connect an assistant (MCP)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../using/status-pages/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status pages
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/metrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#creating-and-testing-a-channel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Creating and testing a channel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#settings-or-secrets-the-difference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings or secrets: the difference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-custom-channel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The custom channel
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The custom channel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#custom-channel-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom channel settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#available-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available variables
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-1--an-internal-json-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 1 — an internal JSON API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-2--a-service-that-expects-a-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 2 — a service that expects a form
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-3--a-plain-text-sms-through-a-carrier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 3 — a plain-text SMS through a carrier
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-4--a-get-request-without-a-body" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example 4 — a GET request without a body
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#common-template-mistakes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common template mistakes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#supported-channels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported channels
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Supported channels">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#discord" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Discord
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Slack
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#telegram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Telegram
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Telegram">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-create-the-bot-and-get-its-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Create the bot and get its token
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-find-the-chat_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Find the chat_id
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-check-before-saving" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Check before saving
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#microsoft-teams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Microsoft Teams
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mattermost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mattermost
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rocketchat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rocket.Chat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#google-chat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Google Chat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zulip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Zulip
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ntfy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ntfy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gotify" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gotify
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pushover" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pushover
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pushbullet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pushbullet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bark-ios" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bark (iOS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#apprise" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Apprise
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#home-assistant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Home Assistant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#email-smtp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Email (SMTP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sms-via-twilio" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SMS via Twilio
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pagerduty" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PagerDuty
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#opsgenie" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opsgenie
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-webhook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom webhook
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="dumbmonit-notifications">DumbMonit notifications<a class="headerlink" href="#dumbmonit-notifications" title="Permanent link">&para;</a></h1>
+<p>This guide explains how to receive DumbMonit alerts on the service of your choice.
+It requires no programming skills: each section says where to find the address or
+token to copy, and what to type into the form.</p>
+<hr />
+<h2 id="contents">Contents<a class="headerlink" href="#contents" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="#how-it-works">How it works</a></li>
+<li><a href="#creating-and-testing-a-channel">Creating and testing a channel</a></li>
+<li><a href="#settings-or-secrets-the-difference">Settings or secrets: the difference</a></li>
+<li><a href="#the-custom-channel">The custom channel</a></li>
+<li><a href="#available-variables">Available variables</a></li>
+<li><a href="#example-1--an-internal-json-api">Example 1 — an internal JSON API</a></li>
+<li><a href="#example-2--a-service-that-expects-a-form">Example 2 — a service that expects a form</a></li>
+<li><a href="#example-3--a-plain-text-sms-through-a-carrier">Example 3 — a plain-text SMS through a carrier</a></li>
+<li><a href="#example-4--a-get-request-without-a-body">Example 4 — a GET request without a body</a></li>
+<li><a href="#common-template-mistakes">Common template mistakes</a></li>
+<li><a href="#supported-channels">Supported channels</a></li>
+<li><a href="#troubleshooting">Troubleshooting</a></li>
+</ul>
+<hr />
+<h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
+<p>A <strong>channel</strong> is a destination: a Discord channel, a phone number, a mailbox. You
+create as many as you want, and your alert rules choose which ones to notify.</p>
+<p>Three principles apply to every channel:</p>
+<ol>
+<li><strong>Alerts are grouped.</strong> One message per device and per cycle, even if five disks
+   fill up at the same time. Without this, you would mute notifications within a
+   week.</li>
+<li><strong>A broken channel never blocks another one.</strong> The failure is recorded in the
+   channel's "last error" column, and delivery continues to the others.</li>
+<li><strong>A service that does not answer is abandoned after 15 seconds.</strong> A notification
+   that arrives a minute late is no longer useful, and the monitoring loop must not
+   wait behind an unreachable server.</li>
+</ol>
+<hr />
+<h2 id="creating-and-testing-a-channel">Creating and testing a channel<a class="headerlink" href="#creating-and-testing-a-channel" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Open <strong>Notifications → Channels → New channel</strong>.</li>
+<li>Give it a meaningful name ("Discord — family", "SMS — on-call"). This is the
+   name you will pick later in your alert rules.</li>
+<li>Choose the channel type, then fill in the fields described below.</li>
+<li>Save, then click <strong>Send a test message</strong>.</li>
+</ol>
+<p>The test message takes <strong>exactly the same path</strong> as a real alert: same request,
+same token, same formatting. If it arrives, the channel works. If it fails, the
+error message names the setting to fix.</p>
+<blockquote>
+<p><strong>A token is never shown again.</strong> Once saved, it is encrypted in the database and
+the interface only says "configured". To edit a channel without retyping its
+token, simply leave the field empty.</p>
+</blockquote>
+<hr />
+<h2 id="settings-or-secrets-the-difference">Settings or secrets: the difference<a class="headerlink" href="#settings-or-secrets-the-difference" title="Permanent link">&para;</a></h2>
+<p>Every channel has two groups of fields.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><strong>Settings</strong></th>
+<th><strong>Secrets</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Content</td>
+<td>server address, channel name, topic</td>
+<td>tokens, passwords, webhook URLs</td>
+</tr>
+<tr>
+<td>Storage</td>
+<td>plain text</td>
+<td>encrypted</td>
+</tr>
+<tr>
+<td>Read back by the interface</td>
+<td>yes</td>
+<td>never</td>
+</tr>
+</tbody>
+</table>
+<p>The interface <strong>refuses</strong> to save a sensitive field among the settings, and tells
+you so. This is not a formality: settings are returned as-is by the API, so a token
+stored there would be published every time the page is opened.</p>
+<p>The tables in the <a href="#supported-channels">Supported channels</a> section say, for each
+channel, what goes where.</p>
+<hr />
+<h2 id="the-custom-channel">The custom channel<a class="headerlink" href="#the-custom-channel" title="Permanent link">&para;</a></h2>
+<p>The <strong><code>webhook</code></strong> channel is DumbMonit's escape hatch. You describe the whole HTTP
+request — method, address, headers, content type and body —, which lets you plug in
+almost any service, including an internal API DumbMonit will never know about.</p>
+<p><strong>Without any particular configuration</strong>, it already sends a structured JSON
+payload that a script can use:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dumbmonit&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;target&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nas&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;rule&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Disk full&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;severity&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;warning&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;firing&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nas — Disk full&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;text&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;⚠️ Disk full — 95 % (threshold &gt; 90 %)&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">95.0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;threshold&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">90.0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;unit&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;%&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;fingerprint&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nas/disk-full&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-09-01T14:12:05+00:00&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;link&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="custom-channel-settings">Custom channel settings<a class="headerlink" href="#custom-channel-settings" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Required</th>
+<th>Default</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>url</code></td>
+<td>yes (here or as a secret)</td>
+<td>—</td>
+<td>Address to call. May contain variables.</td>
+</tr>
+<tr>
+<td><code>method</code></td>
+<td>no</td>
+<td><code>POST</code></td>
+<td><code>POST</code>, <code>PUT</code> or <code>GET</code>.</td>
+</tr>
+<tr>
+<td><code>content_type</code></td>
+<td>no</td>
+<td><code>json</code></td>
+<td><code>json</code>, <code>form</code> or <code>text</code>. Also determines how variables are escaped.</td>
+</tr>
+<tr>
+<td><code>body_template</code></td>
+<td>no</td>
+<td>—</td>
+<td>Body template. When absent, the payload above is sent.</td>
+</tr>
+<tr>
+<td><code>headers</code></td>
+<td>no</td>
+<td>—</td>
+<td>Extra headers, as an object <code>{"X-Key": "value"}</code>.</td>
+</tr>
+<tr>
+<td><code>base_url</code></td>
+<td>no</td>
+<td>—</td>
+<td>Public address of your DumbMonit, so that <code>{{link}}</code> gives a clickable link.</td>
+</tr>
+<tr>
+<td><code>username</code></td>
+<td>no</td>
+<td>—</td>
+<td>Username for HTTP "Basic" authentication. Requires the <code>password</code> secret.</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Secret</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>url</code></td>
+<td>Use it instead of the <code>url</code> setting if the address already contains a token.</td>
+</tr>
+<tr>
+<td><code>token</code></td>
+<td>Sent as an <code>Authorization: Bearer …</code> header, unless your template uses <code>{{token}}</code>.</td>
+</tr>
+<tr>
+<td><code>password</code></td>
+<td>Password for "Basic" authentication.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="available-variables">Available variables<a class="headerlink" href="#available-variables" title="Permanent link">&para;</a></h3>
+<p>A variable is written between <strong>double braces</strong>: <code>{{title}}</code>. Spaces around the name
+are tolerated (<code>{{ title }}</code>). Single braces in a JSON body stay literal, so you can
+write your JSON normally.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>What it contains</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{{title}}</code></td>
+<td>Full message title</td>
+<td><code>nas — Disk full</code></td>
+</tr>
+<tr>
+<td><code>{{message}}</code></td>
+<td>Plain-text body, one line per alert</td>
+<td><code>⚠️ Disk full — 95 % (threshold &gt; 90 %)</code></td>
+</tr>
+<tr>
+<td><code>{{message_markdown}}</code></td>
+<td>The same body in Markdown</td>
+<td><code>**nas — Disk full**\n• ⚠️ …</code></td>
+</tr>
+<tr>
+<td><code>{{rule}}</code></td>
+<td>Name of the alert rule</td>
+<td><code>Disk full</code></td>
+</tr>
+<tr>
+<td><code>{{target}}</code></td>
+<td>Name of the monitored device</td>
+<td><code>nas</code></td>
+</tr>
+<tr>
+<td><code>{{target_id}}</code></td>
+<td>Numeric identifier of the device</td>
+<td><code>42</code></td>
+</tr>
+<tr>
+<td><code>{{severity}}</code></td>
+<td>Technical severity</td>
+<td><code>info</code>, <code>warning</code> or <code>critical</code></td>
+</tr>
+<tr>
+<td><code>{{severity_fr}}</code></td>
+<td>Severity as a readable word</td>
+<td><code>information</code>, <code>avertissement</code>, <code>critique</code></td>
+</tr>
+<tr>
+<td><code>{{status}}</code></td>
+<td>Technical status</td>
+<td><code>firing</code> or <code>resolved</code></td>
+</tr>
+<tr>
+<td><code>{{status_fr}}</code></td>
+<td>Status as a readable word</td>
+<td><code>en cours</code> or <code>résolu</code></td>
+</tr>
+<tr>
+<td><code>{{value}}</code></td>
+<td>Measured value, unit included</td>
+<td><code>95 %</code></td>
+</tr>
+<tr>
+<td><code>{{value_raw}}</code></td>
+<td>Bare value, usable as a JSON <strong>number</strong></td>
+<td><code>95</code></td>
+</tr>
+<tr>
+<td><code>{{threshold}}</code></td>
+<td>Crossed threshold, unit included</td>
+<td><code>90 %</code></td>
+</tr>
+<tr>
+<td><code>{{threshold_raw}}</code></td>
+<td>Bare threshold, usable as a JSON <strong>number</strong></td>
+<td><code>90</code></td>
+</tr>
+<tr>
+<td><code>{{unit}}</code></td>
+<td>Unit of the value</td>
+<td><code>%</code></td>
+</tr>
+<tr>
+<td><code>{{operator}}</code></td>
+<td>Threshold comparison</td>
+<td><code>&gt;</code></td>
+</tr>
+<tr>
+<td><code>{{count}}</code></td>
+<td>Number of alerts grouped in this message</td>
+<td><code>3</code></td>
+</tr>
+<tr>
+<td><code>{{fingerprint}}</code></td>
+<td>Stable identifier of the alert</td>
+<td><code>nas/disk-full</code></td>
+</tr>
+<tr>
+<td><code>{{timestamp}}</code></td>
+<td>ISO 8601 timestamp</td>
+<td><code>2026-09-01T14:12:05+00:00</code></td>
+</tr>
+<tr>
+<td><code>{{timestamp_unix}}</code></td>
+<td>Timestamp in seconds since 1970</td>
+<td><code>1788358325</code></td>
+</tr>
+<tr>
+<td><code>{{date}}</code></td>
+<td>Readable timestamp, in UTC</td>
+<td><code>2026-09-01 14:12 UTC</code></td>
+</tr>
+<tr>
+<td><code>{{priority}}</code></td>
+<td>Priority from 1 (low) to 5 (high)</td>
+<td><code>4</code></td>
+</tr>
+<tr>
+<td><code>{{color}}</code></td>
+<td>Accent colour, without hash</td>
+<td><code>D98A00</code></td>
+</tr>
+<tr>
+<td><code>{{color_hex}}</code></td>
+<td>Accent colour, with hash</td>
+<td><code>#D98A00</code></td>
+</tr>
+<tr>
+<td><code>{{emoji}}</code></td>
+<td>Status pictogram</td>
+<td><code>🔴</code>, <code>⚠️</code>, <code>ℹ️</code> or <code>✅</code></td>
+</tr>
+<tr>
+<td><code>{{link}}</code></td>
+<td>Link to the device in DumbMonit</td>
+<td><code>https://dumbmonit.home/targets/42</code></td>
+</tr>
+<tr>
+<td><code>{{source}}</code></td>
+<td>Always <code>dumbmonit</code></td>
+<td><code>dumbmonit</code></td>
+</tr>
+<tr>
+<td><code>{{token}}</code></td>
+<td>The channel's <code>token</code> secret</td>
+<td><em>(your token)</em></td>
+</tr>
+</tbody>
+</table>
+<p>Two useful remarks:</p>
+<ul>
+<li><strong>Some variables can be empty.</strong> An availability alert ("host unreachable") has
+  neither a value nor a threshold: <code>{{value}}</code> and <code>{{value_raw}}</code> then render an
+  empty string, never <code>null</code> or <code>NaN</code>. If you place them as a JSON number, handle
+  that case — or use <code>"{{value}}"</code> between quotes.</li>
+<li><strong><code>{{link}}</code> stays empty</strong> until you fill in <code>base_url</code>. A wrong link would waste
+  more time than an alert without one.</li>
+</ul>
+<p><strong>You never need to escape anything yourself.</strong> Depending on the chosen
+<code>content_type</code>, DumbMonit automatically protects substituted values: quotes and line
+breaks escaped in JSON, percent-encoding in a form, no transformation in plain text.
+A rule named <code>"System" disk full</code> will not break your JSON template.</p>
+<h3 id="example-1--an-internal-json-api">Example 1 — an internal JSON API<a class="headerlink" href="#example-1--an-internal-json-api" title="Permanent link">&para;</a></h3>
+<p>A home-grown application exposes <code>POST /incidents</code> and expects a token in a custom
+header.</p>
+<p><strong>Settings</strong></p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://api.internal.example.org/incidents&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;POST&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;content_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;json&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;base_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://dumbmonit.home&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;headers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;X-Application&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dumbmonit&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;body_template&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;{\&quot;title\&quot;: \&quot;{{title}}\&quot;, \&quot;device\&quot;: \&quot;{{target}}\&quot;, \&quot;severity\&quot;: \&quot;{{severity}}\&quot;, \&quot;state\&quot;: \&quot;{{status}}\&quot;, \&quot;value\&quot;: {{value_raw}}, \&quot;threshold\&quot;: {{threshold_raw}}, \&quot;detail\&quot;: \&quot;{{message}}\&quot;, \&quot;link\&quot;: \&quot;{{link}}\&quot;, \&quot;seen_at\&quot;: \&quot;{{timestamp}}\&quot;}&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Secrets</strong></p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">&quot;token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;your-application-token&quot;</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p>The token is sent automatically as an <code>Authorization: Bearer …</code> header. Here is what
+the application receives:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nas — Disk full&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;device&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nas&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;severity&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;warning&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;state&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;firing&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">95</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;threshold&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">90</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;detail&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;⚠️ Disk full — 95 % (threshold &gt; 90 %)&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;link&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://dumbmonit.home/targets/42&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;seen_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-09-01T14:12:05+00:00&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="example-2--a-service-that-expects-a-form">Example 2 — a service that expects a form<a class="headerlink" href="#example-2--a-service-that-expects-a-form" title="Permanent link">&para;</a></h3>
+<p>Many SMS gateways and older APIs expect <code>application/x-www-form-urlencoded</code> rather
+than JSON, with the token in the body.</p>
+<p><strong>Settings</strong></p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://gateway.example.org/api/send&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;POST&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;content_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;form&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;body_template&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;key={{token}}&amp;recipient=0612345678&amp;subject={{title}}&amp;text={{emoji}} {{message}}&amp;priority={{priority}}&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Secrets</strong></p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">&quot;token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gateway-key&quot;</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p>Since the template already uses <code>{{token}}</code>, DumbMonit <strong>does not add</strong> an
+<code>Authorization</code> header: some services reject a request that carries two
+authentications. Values are encoded automatically, spaces becoming <code>+</code> and accented
+characters their percent-encoded equivalent.</p>
+<h3 id="example-3--a-plain-text-sms-through-a-carrier">Example 3 — a plain-text SMS through a carrier<a class="headerlink" href="#example-3--a-plain-text-sms-through-a-carrier" title="Permanent link">&para;</a></h3>
+<p>Some services, such as a carrier's SMS API or a home-made automation, want a single
+line of text.</p>
+<p><strong>Settings</strong></p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://automation.home/alert&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;POST&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;content_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;text&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;body_template&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;{{emoji}} {{severity}} on {{target}}: {{rule}} ({{value}}, threshold {{operator}} {{threshold}}) — {{date}}&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The message sent, without any escaping:</p>
+<div class="highlight"><pre><span></span><code>⚠️ warning on nas: Disk full (95 %, threshold &gt; 90 %) — 01/09/2026 14:12 UTC
+</code></pre></div>
+<h3 id="example-4--a-get-request-without-a-body">Example 4 — a GET request without a body<a class="headerlink" href="#example-4--a-get-request-without-a-body" title="Permanent link">&para;</a></h3>
+<p>When the service only accepts URL parameters, put the variables in <code>url</code> and choose
+the <code>GET</code> method. A <code>GET</code> request has no body: <code>body_template</code> is then rejected, so
+that nobody believes it does something.</p>
+<p><strong>Settings</strong></p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://sms.example.org/send?user=noe&amp;text={{title}} — {{value}}&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;GET&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Secrets</strong></p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">&quot;token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;api-key&quot;</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p>Only the <strong>substituted values</strong> are encoded; the rest of the address is copied
+as-is. The request actually sent looks like:</p>
+<div class="highlight"><pre><span></span><code>GET https://sms.example.org/send?user=noe&amp;text=nas%20%E2%80%94%20Disk%20full%20%E2%80%94%2095%20%25
+</code></pre></div>
+<h3 id="common-template-mistakes">Common template mistakes<a class="headerlink" href="#common-template-mistakes" title="Permanent link">&para;</a></h3>
+<p>A faulty template is <strong>rejected when saved</strong>, while you are looking at the form, not
+on the night the incident happens.</p>
+<table>
+<thead>
+<tr>
+<th>What you write</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{{severite}}</code></td>
+<td>Rejected: unknown variable "severite", followed by the list of valid names. The correct name is <code>severity</code>.</td>
+</tr>
+<tr>
+<td><code>{"t": "{{title"}</code></td>
+<td>Rejected: "unclosed braces". The <code>}}</code> is missing.</td>
+</tr>
+<tr>
+<td><code>{{}}</code> or <code>{{  }}</code></td>
+<td>Rejected: a variable without a name means nothing.</td>
+</tr>
+<tr>
+<td><code>{"a": {"b": 1}}</code></td>
+<td><strong>Accepted.</strong> Single braces are literal: write your JSON normally.</td>
+</tr>
+<tr>
+<td><code>{{token}}</code> without a <code>token</code> secret</td>
+<td>Rejected: the template asks for a token the channel does not have.</td>
+</tr>
+<tr>
+<td><code>method: GET</code> with <code>body_template</code></td>
+<td>Rejected, with the alternative: put the variables in <code>url</code>.</td>
+</tr>
+<tr>
+<td><code>method: DELETE</code></td>
+<td>Rejected: only <code>POST</code>, <code>PUT</code> and <code>GET</code> are accepted.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="supported-channels">Supported channels<a class="headerlink" href="#supported-channels" title="Permanent link">&para;</a></h2>
+<h3 id="discord">Discord<a class="headerlink" href="#discord" title="Permanent link">&para;</a></h3>
+<p>In Discord: <strong>Channel settings → Integrations → Webhooks → New webhook</strong>, then
+<strong>Copy webhook URL</strong>. This URL contains the token: it goes into the secrets.</p>
+<ul>
+<li><strong>Secrets</strong> — <code>webhook_url</code></li>
+</ul>
+<h3 id="slack">Slack<a class="headerlink" href="#slack" title="Permanent link">&para;</a></h3>
+<p>On <a href="https://api.slack.com/apps">https://api.slack.com/apps</a>, create an app, enable <strong>Incoming Webhooks</strong>, then
+<strong>Add New Webhook to Workspace</strong> and pick the channel. Copy the
+<code>https://hooks.slack.com/services/…</code> URL.</p>
+<ul>
+<li><strong>Secrets</strong> — <code>webhook_url</code></li>
+</ul>
+<h3 id="telegram">Telegram<a class="headerlink" href="#telegram" title="Permanent link">&para;</a></h3>
+<p>You need two things: the <strong>bot token</strong> (secret) and the <strong>chat ID</strong> (<code>chat_id</code>)
+where it must write. The first takes a minute to get; the second depends on where
+you want to receive the alerts.</p>
+<h4 id="1-create-the-bot-and-get-its-token">1. Create the bot and get its token<a class="headerlink" href="#1-create-the-bot-and-get-its-token" title="Permanent link">&para;</a></h4>
+<ol>
+<li>In Telegram, search for <strong>@BotFather</strong> and click <em>Start</em>.</li>
+<li>Send <code>/newbot</code>, then answer the questions (a name, then a username that must end
+   with <code>bot</code>).</li>
+<li>BotFather ends with a message like this:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>Done! Congratulations on your new bot. You will find it at t.me/my_homelab_bot.
+Use this token to access the HTTP API:
+63xxxxxx71:AAFoxxxxn0hwA-2TVSxxxNf4c
+</code></pre></div>
+<p>The line <code>63xxxxxx71:AAFoxxxxn0hwA-2TVSxxxNf4c</code> is the <strong>bot token</strong>. Do not
+   share it: it gives full control of the bot.</p>
+<p>In the examples below, replace <code>&lt;TOKEN&gt;</code> with this token. Note the <code>bot</code> prefix
+glued in front of it in URLs: <code>https://api.telegram.org/bot&lt;TOKEN&gt;/…</code>.</p>
+<h4 id="2-find-the-chat_id">2. Find the <code>chat_id</code><a class="headerlink" href="#2-find-the-chat_id" title="Permanent link">&para;</a></h4>
+<p><strong>Private chat</strong> (the bot writes to you directly)</p>
+<ol>
+<li>Open your bot (<code>t.me/my_homelab_bot</code>) and click <em>Start</em>, or send it any message.
+   Without this, it will never be able to write to you.</li>
+<li>Open in a browser: <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code></li>
+<li>You get a JSON document; look for <code>"chat"</code>:</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;ok&quot;</span><span class="p">:</span><span class="kc">true</span><span class="p">,</span><span class="nt">&quot;result&quot;</span><span class="p">:[{</span><span class="nt">&quot;update_id&quot;</span><span class="p">:</span><span class="mi">83</span><span class="err">xxxxx</span><span class="mi">35</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:{</span><span class="nt">&quot;message_id&quot;</span><span class="p">:</span><span class="mi">2643</span><span class="p">,</span><span class="nt">&quot;from&quot;</span><span class="p">:{</span><span class="err">…</span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;chat&quot;</span><span class="p">:{</span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="mi">21</span><span class="err">xxxxx</span><span class="mi">38</span><span class="p">,</span><span class="nt">&quot;first_name&quot;</span><span class="p">:</span><span class="s2">&quot;…&quot;</span><span class="p">,</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="s2">&quot;private&quot;</span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;date&quot;</span><span class="p">:</span><span class="mi">1703062972</span><span class="p">,</span><span class="nt">&quot;text&quot;</span><span class="p">:</span><span class="s2">&quot;/start&quot;</span><span class="p">}}]}</span>
+</code></pre></div>
+<p>The <code>chat_id</code> is the value of <code>chat.id</code>: here <code>21xxxxx38</code> (a positive number).</p>
+<p>If <code>result</code> is empty (<code>"result":[]</code>), send the bot another message and reload
+   the page.</p>
+<p><strong>Channel</strong></p>
+<ol>
+<li>Add the bot as an administrator of the channel (Manage channel →
+   Administrators → Add).</li>
+<li>Post a message in the channel.</li>
+<li>Open <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>: the response contains a
+   <code>channel_post</code> block with <code>"chat":{"id":-1001xxxxxx062,"type":"channel"}</code>.</li>
+</ol>
+<p>The <code>chat_id</code> is that negative number, <code>-100</code> included: <code>-1001xxxxxx062</code>.</p>
+<p><strong>Group</strong></p>
+<p>The easiest way goes through the desktop app:</p>
+<ol>
+<li>Add the bot to the group.</li>
+<li>Send a message in the group, right-click it → <em>Copy message link</em>. You get
+   <code>https://t.me/c/194xxxx987/13</code> (or <code>https://t.me/c/194xxxx987/11/13</code> if the
+   group has topics).</li>
+<li>The number right after <code>/c/</code> is the group's internal identifier: <code>194xxxx987</code>.
+   The <code>chat_id</code> to enter is that number <strong>prefixed with <code>-100</code></strong>: <code>-100194xxxx987</code>.</li>
+</ol>
+<p>Without the desktop app, the <code>getUpdates</code> method above works too: <code>message.chat.id</code>
+is directly the right number (already negative). If the bot does not see the group's
+messages, ask BotFather for <code>/setprivacy</code> → <em>Disable</em>, then remove the bot from the
+group and add it again.</p>
+<p><strong>Group topic</strong> (groups in "Topics" mode)</p>
+<p>The <code>chat_id</code> is the group's. In addition, fill in <strong>Group topic</strong>
+(<code>message_thread_id</code>) with the middle number of the copied link: in
+<code>https://t.me/c/194xxxx987/11/13</code>, the topic is <code>11</code>. Without this setting, the
+message lands in the <em>General</em> thread.</p>
+<h4 id="3-check-before-saving">3. Check before saving<a class="headerlink" href="#3-check-before-saving" title="Permanent link">&para;</a></h4>
+<p>Open in the browser:</p>
+<div class="highlight"><pre><span></span><code>https://api.telegram.org/bot&lt;TOKEN&gt;/sendMessage?chat_id=&lt;CHAT_ID&gt;&amp;text=test123
+</code></pre></div>
+<p>(add <code>&amp;message_thread_id=11</code> for a topic). If <code>test123</code> arrives, the token and the
+<code>chat_id</code> are right: enter them in DumbMonit and click <em>Test</em>.</p>
+<ul>
+<li><strong>Settings</strong> — <code>chat_id</code> (required), <code>message_thread_id</code> (topic, optional),
+  <code>api_base</code> (default <code>https://api.telegram.org</code>, change it only to go through a
+  relay)</li>
+<li><strong>Secrets</strong> — <code>bot_token</code></li>
+</ul>
+<blockquote>
+<p><strong>"Telegram cannot find this chat"</strong> — for a private chat, the bot has never received a message
+from you: send it <code>/start</code>. For a group or a channel, the <code>-100</code> prefix is probably
+missing, or the bot has not been added to it.</p>
+<p><strong>"thread not found"</strong> — the <code>message_thread_id</code> does not match any topic of the
+group, or the group is not in "Topics" mode.</p>
+</blockquote>
+<h3 id="microsoft-teams">Microsoft Teams<a class="headerlink" href="#microsoft-teams" title="Permanent link">&para;</a></h3>
+<p><strong>Warning: the method has changed.</strong> The old "Office 365 connectors" were retired in
+May 2026; an <code>outlook.office.com/webhook/…</code> URL no longer works.</p>
+<p>The current procedure:</p>
+<ol>
+<li>In the Teams channel, <strong>⋯ → Workflows</strong>.</li>
+<li>Choose the <strong>"Post to a channel when a webhook request is received"</strong> template.</li>
+<li>
+<p>Confirm the steps, then <strong>copy the HTTPS POST URL</strong> shown at the end.</p>
+</li>
+<li>
+<p><strong>Secrets</strong> — <code>webhook_url</code></p>
+</li>
+</ol>
+<p>DumbMonit sends a wrapped <em>Adaptive Card</em>, the only format these flows display
+correctly. If you get an error mentioning Power Automate, the URL probably comes
+from an old connector.</p>
+<h3 id="matrix">Matrix<a class="headerlink" href="#matrix" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Create an account dedicated to DumbMonit on your homeserver, and <strong>invite it to
+   the room</strong>. An account that is not a member cannot write.</li>
+<li>Get its access token. In Element: <strong>Settings → Help &amp; About → Advanced → Access
+   token</strong>.</li>
+<li>
+<p>Get the room's <strong>internal</strong> identifier — not its display name. In Element:
+   <strong>Room settings → Advanced → Internal room ID</strong>. It starts with <code>!</code> (for example
+   <code>!aBcDeF:matrix.org</code>).</p>
+</li>
+<li>
+<p><strong>Settings</strong> — <code>server_url</code> (for example <code>https://matrix.org</code>), <code>room_id</code></p>
+</li>
+<li><strong>Secrets</strong> — <code>token</code></li>
+</ol>
+<h3 id="mattermost">Mattermost<a class="headerlink" href="#mattermost" title="Permanent link">&para;</a></h3>
+<p><strong>Integrations → Incoming Webhooks → Add</strong>. Choose the default channel, then copy
+the URL.</p>
+<ul>
+<li><strong>Settings</strong> — <code>channel</code> (optional, to write somewhere other than the default
+  channel), <code>username</code> (optional, default <code>DumbMonit</code>)</li>
+<li><strong>Secrets</strong> — <code>webhook_url</code></li>
+</ul>
+<h3 id="rocketchat">Rocket.Chat<a class="headerlink" href="#rocketchat" title="Permanent link">&para;</a></h3>
+<p><strong>Administration → Integrations → New integration → Incoming webhook</strong>. Choose the
+room, enable the integration, then copy the <em>Webhook URL</em>.</p>
+<ul>
+<li><strong>Settings</strong> — <code>channel</code> (optional), <code>alias</code> (optional, default <code>DumbMonit</code>)</li>
+<li><strong>Secrets</strong> — <code>webhook_url</code></li>
+</ul>
+<h3 id="google-chat">Google Chat<a class="headerlink" href="#google-chat" title="Permanent link">&para;</a></h3>
+<p>In the Google Chat space: <strong>space name → Apps &amp; integrations → Webhooks → Add
+webhook</strong>. Copy the URL, which already contains the key and the token.</p>
+<ul>
+<li><strong>Secrets</strong> — <code>webhook_url</code></li>
+</ul>
+<h3 id="zulip">Zulip<a class="headerlink" href="#zulip" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Create a <strong>bot</strong>: <strong>Personal settings → Bots → Add a new bot</strong>, type "Generic".
+   Note its email address and its API key.</li>
+<li>
+<p>Subscribe the bot to the target stream, otherwise sending will be refused.</p>
+</li>
+<li>
+<p><strong>Settings</strong> — <code>server_url</code> (for example <code>https://your-org.zulipchat.com</code>),
+  <code>email</code> (the bot's address), <code>stream</code> (the stream name), <code>topic</code> (optional,
+  default <code>DumbMonit</code>)</p>
+</li>
+<li><strong>Secrets</strong> — <code>api_key</code></li>
+</ol>
+<h3 id="ntfy">ntfy<a class="headerlink" href="#ntfy" title="Permanent link">&para;</a></h3>
+<p>The simplest channel of all: pick a topic name that is hard to guess, then subscribe
+to it from the ntfy app.</p>
+<ul>
+<li><strong>Settings</strong> — <code>topic</code>, <code>server_url</code> (optional, default <code>https://ntfy.sh</code>)</li>
+<li><strong>Secrets</strong> — <code>token</code> (only if your server requires authentication)</li>
+</ul>
+<blockquote>
+<p>On the public instance, <strong>anyone who knows a topic's name can read it</strong>. Pick a
+long, random name, or host your own server.</p>
+</blockquote>
+<h3 id="gotify">Gotify<a class="headerlink" href="#gotify" title="Permanent link">&para;</a></h3>
+<p>In the Gotify interface: <strong>Apps → Create Application</strong>. Copy the token shown.</p>
+<ul>
+<li><strong>Settings</strong> — <code>server_url</code> (for example <code>https://gotify.home</code>)</li>
+<li><strong>Secrets</strong> — <code>token</code></li>
+</ul>
+<h3 id="pushover">Pushover<a class="headerlink" href="#pushover" title="Permanent link">&para;</a></h3>
+<ol>
+<li>On <a href="https://pushover.net">https://pushover.net</a>, your <strong>User Key</strong> is shown right on the home page.</li>
+<li>
+<p>Then create an application: <strong>Create an Application/API Token</strong>. You get an
+   <strong>application token</strong>.</p>
+</li>
+<li>
+<p><strong>Settings</strong> — <code>priority</code> (optional, from -2 to 2), <code>sound</code> (optional), <code>retry</code>
+  and <code>expire</code> (only for <code>priority: 2</code>)</p>
+</li>
+<li><strong>Secrets</strong> — <code>token</code> (application token), <code>user_key</code> (user key)</li>
+</ol>
+<p>Without a <code>priority</code> setting, DumbMonit chooses according to severity: <code>-1</code> for an
+advisory or a resolution, <code>0</code> for a warning, <code>1</code> for a critical alert. An advisory
+therefore does not make the phone ring.</p>
+<blockquote>
+<p>Priority <code>2</code> ("emergency") repeats the notification until it is acknowledged.
+DumbMonit then adds <code>retry</code> and <code>expire</code> automatically, without which Pushover
+would reject the message.</p>
+</blockquote>
+<h3 id="pushbullet">Pushbullet<a class="headerlink" href="#pushbullet" title="Permanent link">&para;</a></h3>
+<p>On <a href="https://www.pushbullet.com/#settings/account">https://www.pushbullet.com/#settings/account</a>, click <strong>Create Access Token</strong>.</p>
+<ul>
+<li><strong>Settings</strong> — <code>device_iden</code> (optional; without it, all your devices are
+  notified)</li>
+<li><strong>Secrets</strong> — <code>token</code></li>
+</ul>
+<h3 id="bark-ios">Bark (iOS)<a class="headerlink" href="#bark-ios" title="Permanent link">&para;</a></h3>
+<p>Open the Bark app on your iPhone: it shows a URL containing your <strong>device key</strong>, the
+long string of characters after the domain name.</p>
+<ul>
+<li><strong>Settings</strong> — <code>server_url</code> (optional, default <code>https://api.day.app</code>), <code>group</code>
+  (optional), <code>level</code> (optional), <code>sound</code> (optional)</li>
+<li><strong>Secrets</strong> — <code>token</code> (the device key)</li>
+</ul>
+<p>Without a <code>level</code> setting, DumbMonit chooses: <code>passive</code> for an advisory, <code>active</code>
+for a warning, <code>timeSensitive</code> for a critical alert. The <code>critical</code> level, which
+breaks through "Do Not Disturb", is never chosen automatically — set it explicitly if
+you want it.</p>
+<h3 id="apprise">Apprise<a class="headerlink" href="#apprise" title="Permanent link">&para;</a></h3>
+<p>Apprise is a <strong>gateway</strong>: with a single configuration it gives access to dozens of
+services DumbMonit does not implement itself. Deploy the <code>caronc/apprise</code> container,
+then choose one of the two modes.</p>
+<p><strong>Recommended mode — configuration stored in Apprise.</strong> Create a configuration in
+the Apprise interface, note its key, and put nothing else here.</p>
+<ul>
+<li><strong>Settings</strong> — <code>server_url</code>, <code>config_key</code></li>
+</ul>
+<p><strong>Direct mode — DumbMonit provides the destinations.</strong> Apprise URLs often contain a
+password (<code>mailto://user:password@…</code>): they therefore go into the secrets.</p>
+<ul>
+<li><strong>Settings</strong> — <code>server_url</code></li>
+<li><strong>Secrets</strong> — <code>urls</code> (one or more Apprise URLs, separated by commas)</li>
+</ul>
+<p>Optional common settings: <code>tag</code> (to target only part of a configuration's
+destinations) and <code>format</code> (<code>text</code> by default, or <code>markdown</code>).</p>
+<blockquote>
+<p>If the test answers "Apprise has no configuration under this config_key", the key matches
+nothing. DumbMonit reports it instead of pretending the message was sent.</p>
+</blockquote>
+<h3 id="home-assistant">Home Assistant<a class="headerlink" href="#home-assistant" title="Permanent link">&para;</a></h3>
+<ol>
+<li>In Home Assistant: <strong>your profile → Security → Long-lived access tokens → Create
+   token</strong>. Copy it, it will not be shown again.</li>
+<li>
+<p>Choose the service to call. By default, DumbMonit creates a persistent
+   notification on the dashboard.</p>
+</li>
+<li>
+<p><strong>Settings</strong> — <code>server_url</code> (for example <code>http://homeassistant.local:8123</code>),
+  <code>service</code> (optional, default <code>persistent_notification.create</code>), <code>target</code>
+  (optional), <code>data</code> (optional, object merged into the call)</p>
+</li>
+<li><strong>Secrets</strong> — <code>token</code></li>
+</ol>
+<p>A few useful services:</p>
+<table>
+<thead>
+<tr>
+<th><code>service</code></th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>persistent_notification.create</code></td>
+<td>Banner in the Home Assistant interface</td>
+</tr>
+<tr>
+<td><code>notify.notify</code></td>
+<td>All configured notification targets</td>
+</tr>
+<tr>
+<td><code>notify.mobile_app_&lt;device&gt;</code></td>
+<td>The mobile app of one specific device</td>
+</tr>
+<tr>
+<td><code>light.turn_on</code></td>
+<td>Turns on a light — use <code>data</code> for the entity and the colour</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>data</code> setting is merged <strong>last</strong>: it can therefore override the title or the
+message DumbMonit prepared.</p>
+<h3 id="email-smtp">Email (SMTP)<a class="headerlink" href="#email-smtp" title="Permanent link">&para;</a></h3>
+<p>The only channel that depends on no third-party service.</p>
+<ul>
+<li><strong>Settings</strong> — <code>host</code>, <code>from</code>, <code>to</code> (list of addresses), <code>security</code> (<code>starttls</code>
+  by default, or <code>tls</code>, or <code>none</code>), <code>port</code> (derived from <code>security</code>: 587, 465 or
+  25), <code>username</code> (optional)</li>
+<li><strong>Secrets</strong> — <code>password</code></li>
+</ul>
+<blockquote>
+<p>With Gmail, an account password does not work: create an <strong>app password</strong> in the
+security settings of your Google account.</p>
+</blockquote>
+<h3 id="signal">Signal<a class="headerlink" href="#signal" title="Permanent link">&para;</a></h3>
+<p>Goes through a
+<a href="https://github.com/bbernhard/signal-cli-rest-api"><code>signal-cli-rest-api</code></a> instance
+that you host and where you first register your number.</p>
+<ul>
+<li><strong>Settings</strong> — <code>server_url</code> (for example <code>http://signal.home:8080</code>), <code>number</code>
+  (the registered sender number), <code>recipients</code> (list of numbers or group
+  identifiers), <code>username</code> (optional)</li>
+<li><strong>Secrets</strong> — <code>password</code> (optional, if your instance is protected)</li>
+</ul>
+<p>All numbers are written in <strong>international format</strong>, <code>+33612345678</code>.</p>
+<h3 id="sms-via-twilio">SMS via Twilio<a class="headerlink" href="#sms-via-twilio" title="Permanent link">&para;</a></h3>
+<p>On the Twilio console, the home page shows your <strong>Account SID</strong> and your <strong>Auth
+Token</strong>. Then buy a number that can send SMS.</p>
+<ul>
+<li><strong>Settings</strong> — <code>account_sid</code>, <code>from</code> (your Twilio number) <strong>or</strong>
+  <code>messaging_service_sid</code>, <code>to</code> (list of recipients)</li>
+<li><strong>Secrets</strong> — <code>token</code> (the <em>Auth Token</em>)</li>
+</ul>
+<p>The SMS body is truncated at 300 characters: beyond that, Twilio splits it into
+segments billed separately.</p>
+<blockquote>
+<p>On a trial account, Twilio only sends to numbers you have verified.</p>
+</blockquote>
+<h3 id="pagerduty">PagerDuty<a class="headerlink" href="#pagerduty" title="Permanent link">&para;</a></h3>
+<p>In PagerDuty: <strong>Services → your service → Integrations → Add integration</strong>, and
+choose <strong>Events API v2</strong>. Copy the <em>Integration Key</em>.</p>
+<ul>
+<li><strong>Settings</strong> — <code>region</code> (<code>eu</code> if your account is hosted in Europe), <code>source</code>
+  (optional, default <code>dumbmonit</code>)</li>
+<li><strong>Secrets</strong> — <code>token</code> (the <em>Integration Key</em>)</li>
+</ul>
+<p>An alert opens an incident; its resolution <strong>closes it automatically</strong>. Matching is
+done on the alert's fingerprint, prefixed with <code>dumbmonit-</code>, so a reminder never opens
+a second incident.</p>
+<blockquote>
+<p>A key of another type ("Events API v1", "REST API") gets a terse refusal. Check
+that the integration is indeed of type <em>Events API v2</em>.</p>
+</blockquote>
+<h3 id="opsgenie">Opsgenie<a class="headerlink" href="#opsgenie" title="Permanent link">&para;</a></h3>
+<p><strong>Teams → your team → Integrations → Add integration → API</strong>. Copy the API key.</p>
+<ul>
+<li><strong>Settings</strong> — <code>region</code> (<code>eu</code> for a European account), <code>responders</code> (list of team
+  names, optional), <code>tags</code> (list, optional)</li>
+<li><strong>Secrets</strong> — <code>api_key</code></li>
+</ul>
+<p>As with PagerDuty, a resolution closes the alert, identified by its alias.</p>
+<blockquote>
+<p>Atlassian has set the <strong>end of service for Opsgenie on 5 April 2027</strong>. This
+channel stays for existing installations; for a new one, prefer PagerDuty or a
+custom channel pointing to Jira Service Management.</p>
+</blockquote>
+<h3 id="custom-webhook">Custom webhook<a class="headerlink" href="#custom-webhook" title="Permanent link">&para;</a></h3>
+<p>See <a href="#the-custom-channel">The custom channel</a> above.</p>
+<hr />
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<p><strong>The test fails immediately, with "missing setting …".</strong>
+A required field is empty. The message names the exact setting.</p>
+<p><strong>The test fails with "no answer within 15 s".</strong>
+The target server is unreachable from DumbMonit. If it is a service on your local
+network, check that the DumbMonit container can reach it — this is frequently a
+Docker networking problem, not a channel configuration problem.</p>
+<p><strong>The test succeeds, but I receive nothing.</strong>
+The service accepted the message and sent it elsewhere: wrong channel, wrong ntfy
+topic, wrong Pushbullet device. Check the destination setting.</p>
+<p><strong>The error message contains <code>***</code>.</strong>
+This is intended: your token was removed from the message before it was recorded.
+No secret ever appears in the logs, in the "last error" column, or in an API
+response.</p>
+<p><strong>Where can I see a channel's last error?</strong>
+In the channel list: each row shows the date of the last successful delivery and,
+if any, the error of the last failure.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Apache 2.0 — DumbMonit
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.suggest", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

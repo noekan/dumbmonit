@@ -50,8 +50,8 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
-      # Same slugs as the web app's renderer and GitHub, so the anchors the
-      # server catalogue points to (/docs/notifications#email-smtp, …) match.
+      # Same slugs as GitHub, so the anchors the server catalogue points to
+      # (notifications/#email-smtp, …) match.
       slugify: !!python/object/apply:pymdownx.slugs.slugify
         kwds:
           case: lower

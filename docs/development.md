@@ -23,7 +23,7 @@ crates/server    the binary
 crates/agent     Linux/Windows agent; install/ holds install.sh/.ps1 served by the server
 web/             SvelteKit (Svelte 5 runes, Tailwind 4, uPlot), adapter-static SPA fallback, ssr=false
 profiles/        SNMP collection profiles, auto-applied by sysObjectID
-docs/            this documentation (MkDocs); notifications.md is also served by the UI at /docs/notifications
+docs/            this documentation (MkDocs, published on Read the Docs)
 ```
 
 ## Building without a Rust toolchain
@@ -131,8 +131,8 @@ timestamp_ms)` with `.with_label(k, v)`; identity labels (`target`, `host`,
    placeholder, options, shape, default). The UI renders the form from this
    description, so no UI release is needed.
 4. Document it in `docs/notifications.md` under *Supported channels*, with a
-   heading whose slug matches the `doc_url` anchor: the UI serves that file
-   at `/docs/notifications` and links straight to the anchor.
+   heading whose slug matches the `doc_url` anchor: the UI links straight to
+   that anchor on Read the Docs.
 
 ## Headless screenshots
 

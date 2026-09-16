@@ -61,7 +61,7 @@
 		{ id: 'page:/alerts', group: 'Pages', label: 'Alerts', keywords: 'needs you warnings advisories', icon: BellRing, run: go('/alerts') },
 		{ id: 'page:/settings', group: 'Pages', label: 'Settings', keywords: 'preferences agents notifications', icon: Settings2, run: go('/settings') },
 		{ id: 'page:/wall', group: 'Pages', label: 'Wall mode', detail: 'Full-screen bulletin for a wall display', keywords: 'kiosk tv screen', icon: Tv, run: go('/wall') },
-		{ id: 'page:/docs', group: 'Pages', label: 'Documentation', keywords: 'docs help notifications channels', icon: BookOpen, run: go('/docs/notifications') },
+		{ id: 'page:docs', group: 'Pages', label: 'Documentation', keywords: 'docs help manual notifications channels', icon: BookOpen, run: () => window.open('https://dumbmonit.readthedocs.io/en/latest/', '_blank', 'noopener') },
 		{ id: 'action:add', group: 'Actions', label: 'Add a device', keywords: 'new target create host', icon: Plus, run: go('/targets/new') },
 		{ id: 'action:scan', group: 'Actions', label: 'Scan my network', keywords: 'discover cidr snmp', icon: Radar, run: go('/targets/new') },
 		{ id: 'action:maintenance', group: 'Actions', label: 'Schedule maintenance', keywords: 'silence window quiet', icon: CalendarClock, run: go('/alerts#scheduled') },

@@ -573,7 +573,7 @@ export interface ChannelKindInfo {
 	kind: string;
 	label: string;
 	summary: string;
-	/** Documentation anchor, for example `/docs/notifications#discord`. */
+	/** Documentation link, for example `https://dumbmonit.readthedocs.io/en/latest/notifications/#discord`. */
 	doc_url: string;
 	settings: ChannelField[];
 	secrets: ChannelField[];
