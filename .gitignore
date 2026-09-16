@@ -17,3 +17,4 @@ web/tools/*.png
 
 # AI tooling vendored by `npx skills` (reinstall from skills-lock.json)
 .agents/
+site/
