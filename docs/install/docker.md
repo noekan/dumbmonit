@@ -6,6 +6,11 @@ binary ships in the image. Configuration and state live in an embedded SQLite
 database. One volume, `/data`, holds the database, the instance secret and the
 time series.
 
+!!! note "No public image yet"
+    Until the first release the image is not published: `docker compose up -d
+    --build` builds it locally from the checkout (about ten minutes the first
+    time; only Docker is needed). The same command updates it after a `git pull`.
+
 ## Prerequisites
 
 - Docker Engine with the Compose plugin (`docker compose version` works).
@@ -70,10 +75,10 @@ volumes:
     name: dumbmonit-data
 ```
 
-Then start it:
+Then start it (`--build` is required while there is no public image):
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
 !!! tip "Building the image yourself"

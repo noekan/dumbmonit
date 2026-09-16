@@ -13,10 +13,17 @@ The UI reads like a weather bulletin for your network. The mascot is a pigeon.
 [![Documentation](https://readthedocs.org/projects/dumbmonit/badge/?version=latest)](https://dumbmonit.readthedocs.io/en/latest/)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Made for homelabs](https://img.shields.io/badge/made%20for-homelabs-6f83a3.svg)](#quick-start)
+[![Status: work in progress](https://img.shields.io/badge/status-work%20in%20progress-orange.svg)](#status)
 
 <img src=".github/assets/screenshots/overview-dark.png" alt="DumbMonit overview: the bulletin sentence, counters, the weather window and the list of things that need you" width="900">
 
 </div>
+
+> **Work in progress.** DumbMonit is under active development and has no release
+> yet. It runs daily on the author's homelab, but expect rough edges, breaking
+> changes and no public Docker image for now: build it from the repository (two
+> commands, see [Quick start](#quick-start)). Feedback and bug reports are very
+> welcome; see [Status](#status) for what is known to be missing.
 
 ## Why
 
@@ -56,10 +63,16 @@ back for a paid edition.
   factor, per-machine snapshot age and verification result, failed tasks (backup,
   verify, GC, sync), age of the last garbage collection.
 - **Synology DSM** — volumes, disks and SMART health, temperature, load and
-  services, through the NAS web API.
+  services, through the NAS web API; **Active Backup for Business** tasks, their
+  last result and the age of the last success.
 - **Linux and Windows agent** — CPU, memory, disks, network, services and uptime
   for machines that do not speak SNMP. One-line install, binaries served by the
   server (Linux x86_64 / aarch64, Windows x86_64).
+- **Docker, through the agent** — container state, health, restarts, image age
+  and available updates; opt-in per container: restart when down, update
+  automatically (pull, recreate, health check, rollback) inside a maintenance
+  window, prune the old image. **Plakar** backups: age and result of the last
+  snapshot per kloset.
 - **Service monitors**, Uptime Kuma style — HTTP(S) (status code, keyword, JSON
   path, certificate), TCP port, DNS resolution, ping and TLS certificate expiry,
   each with its history bar, response time and availability percentage.
@@ -74,6 +87,9 @@ back for a paid edition.
   parent goes down, its descendants' alerts are suppressed instead of sent.
 - **Grouping by host**, deduplication, periodic reminders and escalation.
 - **Maintenance windows**, one-off or weekly.
+- **Notification policy** — hysteresis (trigger/clear thresholds), flap hold,
+  per-channel cooldown, quiet hours, batching and an hourly cap, so a bad night
+  does not turn into two hundred pushes.
 - **Seasonal baseline** — anomaly detection with no threshold to tune: 168 buckets
   (hour × day of week) learn the usual behaviour; silent for its first 14 days,
   showing only what it *would* have fired.
@@ -94,14 +110,23 @@ back for a paid edition.
 - Every device is a 1U faceplate: LED, name, kind, address, last seen, sparkline;
   children stack under their parent and dim when it is unreachable.
 - Mobile works for reading state, silencing an alert and scheduling maintenance.
+- **Public status pages** (`/s/<slug>`) — groups of monitors, incidents, RSS
+  feed and a status badge, Uptime Kuma / Kener style.
+- **Accounts** — admin and viewer roles, plus **OIDC / SSO** (Authentik,
+  Authelia, Keycloak, Pocket ID…) with group-to-role mapping.
+- **Built-in MCP server** — connect Claude, ChatGPT or any MCP client with a
+  scoped token and ask "is everything fine?" or "silence the NAS for an hour".
 
 ## Quick start
 
 ```bash
 git clone https://github.com/noekan/dumbmonit.git
 cd dumbmonit
-docker compose up -d
+docker compose up -d --build
 ```
+
+There is no public image yet: the first start builds it locally (about ten
+minutes; Docker is the only requirement).
 
 Then open http://localhost:8080. The first visit lands on `/setup`, where you
 choose the instance password. Add a device with its IP address and SNMP
@@ -109,8 +134,7 @@ community: the collection profile is detected automatically.
 
 - **Another port**: `DUMBMONIT_PORT=8099 docker compose up -d` (8080 is busy on
   most homelab machines).
-- **Build locally instead of pulling the image**: `docker compose up -d --build`
-  (about 10 minutes cold; needs nothing but Docker).
+- **Update**: `git pull && docker compose up -d --build`.
 - **Lost password**: `DUMBMONIT_RESET_PASSWORD=1 docker compose up -d` clears the
   password and all sessions at startup; the UI asks for a new one at `/setup`.
   Then run `docker compose up -d` again without the variable.
@@ -149,9 +173,9 @@ More screenshots, in both themes, in [`.github/assets/screenshots/`](.github/ass
 One container, one volume. The image ships the VictoriaMetrics binary and the
 server runs it as a child process; set `DUMBMONIT_VM_URL` to use an instance
 you already have instead. Configuration and state live in an embedded SQLite
-database: there is no database container. The published image is
-`ghcr.io/noekan/dumbmonit` (`latest` = last release, `edge` = last commit on
-`main`).
+database: there is no database container. The image will be published as
+`ghcr.io/noekan/dumbmonit` once there is a first release; until then
+`docker compose up -d --build` builds it locally.
 
 ## Configuration
 
@@ -235,10 +259,16 @@ This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
 
 ## Status
 
-Early, actively developed, and used daily on the author's own homelab. The HTTP
-API is not frozen yet: expect changes between releases until 1.0. Crates,
-environment variables and image names still say `dumbmonit` (the former name);
-they will keep working.
+**Work in progress — no release yet.** DumbMonit is developed in the open and
+used daily on the author's own homelab, but it is not ready for anyone who needs
+it to be boring: the HTTP API is not frozen, the database schema still moves,
+and some parts have only been exercised against the Docker lab in this
+repository. Known gaps and open bugs are tracked in the
+[issues](https://github.com/noekan/dumbmonit/issues); the biggest ones today are
+a push/heartbeat monitor, API tokens for the whole REST API (they only cover the
+MCP endpoint for now), config export/import and 2FA. The project was called
+EzyMonit until September 2026: `EZYMONIT_*` variables and the old agent
+installation are still accepted and migrated.
 
 ## License
 

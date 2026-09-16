@@ -3,6 +3,11 @@
 Simple monitoring for homelabs and small teams. One container, one IP address
 to type in, useful graphs and alerts in under a minute.
 
+!!! warning "Work in progress"
+    DumbMonit is under active development and has no release yet. There is no
+    public Docker image: you build it from the repository (two commands). Expect
+    breaking changes until the first release.
+
 DumbMonit reads the network like a **weather bulletin**: the home page states
 the sky in one sentence ("Clear skies." or "2 advisories, 1 unreachable.") and
 lists what needs you, before anything else. Severities follow the meteorological
