@@ -146,7 +146,7 @@
 					{#each pages as page (page.id)}
 						<li class="px-4 py-3">
 							<div class="flex flex-wrap items-center gap-x-3 gap-y-2">
-								<div class="min-w-0 flex-1">
+								<div class="min-w-0 flex-[1_1_14rem]">
 									<div class="flex flex-wrap items-center gap-2">
 										<span class="font-semibold text-ink">{page.title}</span>
 										<code class="rounded-md border border-line bg-canvas-deep px-1.5 py-0.5 font-mono text-[0.75rem] text-ink-2">/s/{page.slug}</code>

@@ -6,10 +6,12 @@
  */
 import type { TargetId } from '$lib/api';
 import {
+	getAgentHost,
 	isPending,
 	listCommands,
 	listContainers,
 	setContainerPolicy,
+	type AgentHost,
 	type CommandView,
 	type ContainerPolicy,
 	type ContainerView
@@ -18,12 +20,16 @@ import {
 export class ContainerFleet {
 	containers = $state<ContainerView[]>([]);
 	commands = $state<CommandView[]>([]);
+	/** The agent as it last described itself; `null` until it has reported (or on an older server). */
+	agent = $state<AgentHost | null>(null);
 	loading = $state(true);
 	error = $state<unknown>(null);
 	/** Container names whose policy is being saved right now. */
 	saving = $state<Record<string, boolean>>({});
 
 	readonly busy = $derived(this.containers.some((c) => isPending(c.last_command)));
+	/** False for an agent too old for the command channel, or with `commands: false`: no Restart/Update then. */
+	readonly commandsSupported = $derived(this.agent?.commands_supported === true);
 	readonly running = $derived(this.containers.filter((c) => c.up).length);
 	readonly updates = $derived(this.containers.filter((c) => c.update_available === true).length);
 	readonly autoRestart = $derived(this.containers.filter((c) => c.policy.auto_restart).length);
@@ -46,12 +52,14 @@ export class ContainerFleet {
 	async load(signal?: AbortSignal) {
 		this.error = null;
 		try {
-			const [list, history] = await Promise.all([
+			const [list, history, agent] = await Promise.all([
 				listContainers(this.#id, signal),
-				listCommands(this.#id, signal)
+				listCommands(this.#id, signal),
+				getAgentHost(this.#id, signal)
 			]);
 			this.containers = list;
 			this.commands = history;
+			this.agent = agent;
 		} catch (cause) {
 			if (cause instanceof DOMException && cause.name === 'AbortError') return;
 			this.error = cause;
@@ -107,6 +115,7 @@ export class ContainerFleet {
 		this.loading = true;
 		this.containers = [];
 		this.commands = [];
+		this.agent = null;
 	}
 }
 

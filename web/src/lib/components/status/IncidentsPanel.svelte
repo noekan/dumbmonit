@@ -179,7 +179,7 @@
 	{@const closed = isClosed(incident.status)}
 	<li class={`px-4 py-3 ${closed ? 'bg-canvas-deep/40' : ''}`}>
 		<div class="flex flex-wrap items-start gap-x-3 gap-y-2">
-			<div class="min-w-0 flex-1">
+			<div class="min-w-0 flex-[1_1_14rem]">
 				<div class="flex flex-wrap items-center gap-2">
 					<Plate tone={incident.kind === 'maintenance' ? 'info' : closed ? 'ghost' : incident.severity === 'major' ? 'warning' : 'advisory'} label={KIND_LABEL[incident.kind]} bare />
 					<Plate tone={status.tone} label={status.label} />

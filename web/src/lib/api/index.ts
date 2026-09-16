@@ -8,6 +8,7 @@
 import { request, ApiError } from './client';
 import { normalizeCollector } from './types';
 import type {
+	AgentHost,
 	AgentToken,
 	ApiToken,
 	ApiTokenScope,
@@ -257,11 +258,13 @@ function optionalText(value: unknown): string | null {
 }
 
 /**
- * Scans a CIDR looking for SNMP devices (`GET /api/discovery`).
+ * Scans a CIDR looking for SNMP devices (`POST /api/discovery`, admin only).
  *
- * The server answers `{ devices, scanned }`; this folds each device into the
- * UI shape and marks the ones already monitored (by host, ignoring the port).
- * Throws an `ApiError` with `missing = true` if the route does not exist.
+ * The parameters travel in the body, not the query string: the community is a
+ * credential and must not land in server or proxy logs. The server answers
+ * `{ devices, scanned }`; this folds each device into the UI shape and marks
+ * the ones already monitored (by host, ignoring the port). Throws an
+ * `ApiError` with `missing = true` if the route does not exist.
  */
 export async function discover(
 	cidr: string,
@@ -269,7 +272,8 @@ export async function discover(
 ): Promise<DiscoveryResult> {
 	const [raw, targets] = await Promise.all([
 		request<unknown>('/discovery', {
-			query: { cidr: cidr.trim(), community: options.community?.trim() || undefined },
+			method: 'POST',
+			body: { cidr: cidr.trim(), community: options.community?.trim() || undefined },
 			signal: options.signal,
 			anticipated: true
 		}),
@@ -478,6 +482,19 @@ export function createAgentToken(name: string, baseUrl: string): Promise<Created
 
 export function revokeAgentToken(id: number): Promise<void> {
 	return request<void>(`/agent/tokens/${id}`, { method: 'DELETE' });
+}
+
+/**
+ * The agent of a device. `null` when no agent has reported yet, or on an older
+ * server without the route: the caller then treats commands as unsupported.
+ */
+export async function getAgentHost(id: TargetId, signal?: AbortSignal): Promise<AgentHost | null> {
+	try {
+		return await request<AgentHost>(`/targets/${id}/agent`, { signal, anticipated: true });
+	} catch (cause) {
+		if (cause instanceof ApiError && cause.missing) return null;
+		throw cause;
+	}
 }
 
 // --- API tokens (assistants, MCP) -------------------------------------------

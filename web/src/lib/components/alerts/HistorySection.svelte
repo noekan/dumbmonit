@@ -15,7 +15,7 @@
 	import Segmented from '$lib/components/devices/Segmented.svelte';
 	import { History, Download } from 'lucide-svelte';
 	import { formatDateTime, parseServerDate } from '$lib/format';
-	import { severityTone, severityWord } from './helpers';
+	import { formatAlertValue, severityTone, severityWord } from './helpers';
 
 	interface Props {
 		entries: AlertHistoryEntry[];
@@ -43,9 +43,10 @@
 	function ruleName(uid: string): string {
 		return rules.get(uid)?.name || uid;
 	}
+	/** A device that no longer exists keeps its rows, labelled as such. */
 	function deviceName(id: number | null): string {
 		if (id === null) return 'All devices';
-		return targets.get(id)?.name ?? `Device ${id}`;
+		return targets.get(id)?.name ?? '(deleted device)';
 	}
 
 	// --- Load more ---------------------------------------------------------
@@ -265,7 +266,7 @@
 									{#if entry.value !== null && Number.isFinite(entry.value)}
 										<span class="text-ink-3" aria-hidden="true"> · </span>
 										<span class="tnum text-[0.8125rem] text-ink-2">
-											{Math.round(entry.value * 100) / 100}{rules.get(entry.rule_uid)?.unit ?? ''}
+											{formatAlertValue(entry.value, rules.get(entry.rule_uid)?.unit)}
 										</span>
 									{/if}
 								</div>

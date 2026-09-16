@@ -95,6 +95,13 @@ pub fn spawn_policy_scheduler(state: AppState) {
         info!(interval = ?TICK, "container policy scheduler started");
         loop {
             ticker.tick().await;
+            // Avant de décider quoi que ce soit : une commande que personne
+            // n'est venu chercher ne doit plus compter comme « en attente ».
+            match commands::expire_stale(&state.pool, None).await {
+                Ok(0) => {}
+                Ok(expired) => info!(expired, "commands expired: no agent picked them up"),
+                Err(error) => warn!(?error, "cannot expire stale commands"),
+            }
             if let Err(error) = run_once(&state).await {
                 warn!(?error, "container policy cycle failed");
             }
@@ -120,6 +127,12 @@ pub async fn run_once(state: &AppState) -> anyhow::Result<usize> {
             // tait. Dans les deux cas, rien à faire de sûr.
             continue;
         };
+        if !super::host(&state.pool, target_id).await?.is_some_and(|h| h.commands_supported()) {
+            // L'agent ne viendra pas chercher la commande : elle ne ferait
+            // qu'expirer, dix minutes plus tard, sans rien changer.
+            debug!(target = target_id, container, "agent cannot run commands, policy skipped");
+            continue;
+        }
         let labels: BTreeMap<String, String> =
             [("container".to_string(), container.clone())].into_iter().collect();
         let in_maintenance =

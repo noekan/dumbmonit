@@ -18,10 +18,24 @@ async fn a_fresh_instance_announces_itself_as_unconfigured() {
     assert_eq!(reply.body["configured"], json!(false));
     assert_eq!(reply.body["authenticated"], json!(false));
 
-    // Tant qu'aucun mot de passe n'existe, l'API reste ouverte : il n'y a rien à
-    // protéger, et l'interface doit pouvoir joindre le serveur pour proposer la
-    // création du mot de passe.
-    assert_eq!(app.get("/api/targets", None).await.status, StatusCode::OK);
+    // Tant qu'aucun compte n'existe, seules les routes de mise en route répondent :
+    // rien de ce qui survivrait à la création du compte — jetons, équipements,
+    // canaux — ne doit pouvoir être préparé par quelqu'un d'autre que son
+    // propriétaire.
+    let refused = app.get("/api/targets", None).await;
+    assert_eq!(refused.status, StatusCode::UNAUTHORIZED);
+    assert!(refused.body["error"].as_str().is_some_and(|m| m.contains("first admin")));
+    for (method, uri, body) in [
+        ("POST", "/api/tokens", json!({ "name": "x", "scope": "write" })),
+        ("POST", "/api/agent/tokens", json!({ "name": "x" })),
+        ("POST", "/api/targets", json!({ "name": "x", "address": "127.0.0.1", "kind": "dummy" })),
+        ("GET", "/api/users", Value::Null),
+    ] {
+        let body = (body != Value::Null).then_some(body);
+        let reply = app.request(method, uri, body, None).await;
+        assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{method} {uri}");
+    }
+    assert_eq!(app.get("/api/health", None).await.status, StatusCode::OK);
 }
 
 #[tokio::test]
@@ -207,6 +221,72 @@ async fn the_web_interface_is_served_without_a_session() {
     let response =
         app.router.clone().oneshot(Request::builder().uri("/").body(Body::empty()).unwrap()).await;
     assert_ne!(response.expect("réponse").status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn responses_carry_the_protection_headers_except_on_status_pages() {
+    let app = TestApp::configured().await;
+    let header = |response: &axum::http::Response<Body>, name: &str| {
+        response.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_string)
+    };
+
+    for uri in ["/", "/settings", "/api/auth/status", "/api/targets"] {
+        let response = app
+            .router
+            .clone()
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .expect("réponse");
+        assert_eq!(
+            header(&response, "x-content-type-options").as_deref(),
+            Some("nosniff"),
+            "{uri}"
+        );
+        assert_eq!(header(&response, "x-frame-options").as_deref(), Some("DENY"), "{uri}");
+        assert_eq!(
+            header(&response, "content-security-policy").as_deref(),
+            Some("frame-ancestors 'none'"),
+            "{uri}"
+        );
+        assert_eq!(header(&response, "referrer-policy").as_deref(), Some("same-origin"), "{uri}");
+    }
+
+    // Une page de statut publique est faite pour être intégrée ailleurs.
+    let response = app
+        .router
+        .clone()
+        .oneshot(Request::builder().uri("/s/homelab").body(Body::empty()).unwrap())
+        .await
+        .expect("réponse");
+    assert_eq!(header(&response, "x-content-type-options").as_deref(), Some("nosniff"));
+    assert!(header(&response, "x-frame-options").is_none());
+    assert!(header(&response, "content-security-policy").is_none());
+}
+
+#[tokio::test]
+async fn a_network_scan_is_an_admin_action_sent_in_the_body() {
+    let app = TestApp::configured().await;
+    let admin = app.admin_cookie().await;
+    let viewer = app.viewer_cookie(&admin).await;
+    let scan = json!({ "cidr": "192.168.1.0/24", "community": "s3cr3t-community" });
+
+    // Un balayage n'est pas une lecture : ni en GET, ni sans session, ni en lecteur.
+    assert_eq!(
+        app.get("/api/discovery?cidr=192.168.1.0/24", Some(&admin)).await.status,
+        StatusCode::METHOD_NOT_ALLOWED
+    );
+    assert_eq!(
+        app.post("/api/discovery", scan.clone(), None).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(app.post("/api/discovery", scan, Some(&viewer)).await.status, StatusCode::FORBIDDEN);
+
+    // L'administrateur passe le garde ; la validation du réseau suit.
+    let bad = app.post("/api/discovery", json!({ "cidr": "pas-un-réseau" }), Some(&admin)).await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST, "{}", bad.body);
+    let wide = app.post("/api/discovery", json!({ "cidr": "10.0.0.0/8" }), Some(&admin)).await;
+    assert_eq!(wide.status, StatusCode::BAD_REQUEST, "{}", wide.body);
+    assert!(wide.body["error"].as_str().is_some_and(|m| m.contains("too large")));
 }
 
 #[tokio::test]

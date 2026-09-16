@@ -3,7 +3,7 @@
  * settings section so both say the same thing about the same state.
  */
 import type { Tone } from '$lib/ui/Plate.svelte';
-import type { IncidentKind, IncidentStatus, PublicItemState, PublicOverall } from '$lib/api';
+import type { IncidentKind, IncidentStatus, PublicItemState, PublicOverall, PublicStatus } from '$lib/api';
 
 export const OVERALL: Record<PublicOverall, { label: string; tone: Tone }> = {
 	operational: { label: 'All systems operational', tone: 'signal' },
@@ -11,6 +11,36 @@ export const OVERALL: Record<PublicOverall, { label: string; tone: Tone }> = {
 	major: { label: 'Major outage', tone: 'warning' },
 	maintenance: { label: 'Scheduled maintenance', tone: 'info' }
 };
+
+/** What the top banner of a public page says: the plate word, the headline, the tone. */
+export interface Banner {
+	plate: string;
+	label: string;
+	tone: Tone;
+}
+
+/**
+ * The banner is read from the services first, then from the announcements.
+ *
+ * The server's `overall` folds an open major incident into "major", which
+ * would announce a "Major outage" above a column of Operational services. Here
+ * the services decide the outage words; an open incident that has not taken
+ * any service down reads "Incident in progress", toned by its impact.
+ */
+export function overallBanner(status: PublicStatus): Banner {
+	if (status.overall === 'maintenance') return { plate: 'Maintenance', ...OVERALL.maintenance };
+	const items = status.groups.flatMap((group) => group.items);
+	const down = items.filter((item) => item.state === 'down').length;
+	const degraded = items.filter((item) => item.state === 'degraded').length;
+	if (down > 0 && down === items.length) return { plate: 'Outage', ...OVERALL.major };
+	if (down > 0 || degraded > 0) return { plate: 'Degraded', ...OVERALL.degraded };
+	const open = status.incidents.filter((incident) => !isClosed(incident.status));
+	if (open.length > 0) {
+		const major = open.some((incident) => incident.severity === 'major');
+		return { plate: 'Incident', label: 'Incident in progress', tone: major ? 'warning' : 'advisory' };
+	}
+	return { plate: 'Operational', ...OVERALL.operational };
+}
 
 export const ITEM_STATE: Record<PublicItemState, { label: string; tone: Tone }> = {
 	up: { label: 'Operational', tone: 'signal' },

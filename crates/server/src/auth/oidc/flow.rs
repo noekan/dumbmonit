@@ -205,6 +205,9 @@ pub async fn finish(
     let claims = validate_with_jwks(auth, config, &document, &id_token, &pending.nonce).await?;
 
     let user = map_identity(pool, config, &claims).await?;
+    // Un compte existe désormais, que la connexion l'ait créé ou retrouvé : le
+    // garde de session ne doit plus tenir l'instance pour vierge.
+    auth.remember_configured(true);
     if user.disabled {
         return Err(FlowError::Disabled);
     }
@@ -276,7 +279,7 @@ async fn validate_with_jwks(
     })
 }
 
-/// Retrouve le compte : par identité (`sub`), sinon par identifiant ou courriel
+/// Retrouve le compte : par identité (`sub`), sinon par courriel vérifié
 /// correspondant à un compte local, sinon création si elle est permise.
 async fn map_identity(
     pool: &SqlitePool,
@@ -289,7 +292,7 @@ async fn map_identity(
 
     let mut user = match users::by_oidc(pool, issuer, &claims.sub).await? {
         Some(user) => user,
-        None => match find_by_name(pool, claims).await? {
+        None => match find_linkable(pool, claims).await? {
             Some(user) => {
                 users::link_oidc(pool, user.id, issuer, &claims.sub).await?;
                 info!(user = %user.username, "OIDC identity linked to an existing account");
@@ -321,17 +324,37 @@ async fn map_identity(
     Ok(user)
 }
 
-async fn find_by_name(pool: &SqlitePool, claims: &IdTokenClaims) -> anyhow::Result<Option<User>> {
-    for candidate in
-        [claims.preferred_username.as_deref(), claims.email.as_deref()].into_iter().flatten()
-    {
-        if let Some(user) = users::by_username(pool, candidate).await?
-            && user.oidc_subject.is_none()
-        {
-            return Ok(Some(user));
-        }
+/// Le compte local auquel cette identité peut être rattachée, s'il y en a un.
+///
+/// Le rattachement automatique est ce qui permet à un fournisseur de « prendre »
+/// un compte existant : il n'a lieu que sur un courriel que le fournisseur
+/// déclare vérifié (`email_verified: true`), jamais sur `preferred_username`,
+/// qu'un utilisateur choisit souvent lui-même. Et un administrateur qui a un mot
+/// de passe n'est jamais repris par une première connexion SSO : il garde la
+/// main, et le SSO crée un compte distinct.
+async fn find_linkable(pool: &SqlitePool, claims: &IdTokenClaims) -> anyhow::Result<Option<User>> {
+    let Some(email) = verified_email(claims) else { return Ok(None) };
+    let Some(user) = users::by_username(pool, email).await? else { return Ok(None) };
+    if user.oidc_subject.is_some() {
+        return Ok(None);
     }
-    Ok(None)
+    if user.role.is_admin() && user.password_hash.is_some() {
+        warn!(
+            user = %user.username,
+            "OIDC login matches a local admin by verified email; not linked — a distinct \
+             account is created instead"
+        );
+        return Ok(None);
+    }
+    Ok(Some(user))
+}
+
+/// Le courriel, seulement si le fournisseur le garantit.
+fn verified_email(claims: &IdTokenClaims) -> Option<&str> {
+    if claims.email_verified != Some(true) {
+        return None;
+    }
+    claims.email.as_deref().map(str::trim).filter(|email| !email.is_empty())
 }
 
 async fn create_account(
@@ -386,6 +409,27 @@ mod tests {
             redirect: None,
             started_at,
         }
+    }
+
+    fn claims(email: Option<&str>, verified: Option<bool>) -> IdTokenClaims {
+        IdTokenClaims {
+            sub: "u".into(),
+            preferred_username: Some("admin".into()),
+            email: email.map(str::to_string),
+            email_verified: verified,
+            name: None,
+            nonce: None,
+            extra: Default::default(),
+        }
+    }
+
+    #[test]
+    fn only_a_verified_email_can_serve_to_link_an_account() {
+        assert_eq!(verified_email(&claims(Some("a@x"), Some(true))), Some("a@x"));
+        assert_eq!(verified_email(&claims(Some("a@x"), Some(false))), None);
+        assert_eq!(verified_email(&claims(Some("a@x"), None)), None);
+        assert_eq!(verified_email(&claims(Some("  "), Some(true))), None);
+        assert_eq!(verified_email(&claims(None, Some(true))), None);
     }
 
     #[test]

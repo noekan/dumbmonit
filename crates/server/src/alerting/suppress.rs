@@ -117,6 +117,7 @@ mod tests {
             address: format!("10.0.0.{id}"),
             parent_id: parent,
             tags: BTreeMap::new(),
+            enabled: true,
         }
     }
 

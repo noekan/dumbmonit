@@ -19,7 +19,7 @@
 	import { Button, EmptyState, ErrorNotice, Plate, Skeleton } from '$lib/ui';
 	import { ShieldCheck } from 'lucide-svelte';
 	import { formatDateTime, formatRelative } from '$lib/format';
-	import { alertDetail, severityTone, severityWord } from '$lib/components/alerts/helpers';
+	import { alertDetail, formatAlertValue, severityTone, severityWord } from '$lib/components/alerts/helpers';
 
 	interface Props {
 		targetId: number;
@@ -87,8 +87,7 @@
 
 	function valueOf(uid: string, value: number | null): string | null {
 		if (value === null || !Number.isFinite(value)) return null;
-		const unit = rules.get(uid)?.unit ?? '';
-		return `${Math.round(value * 100) / 100}${unit}`;
+		return formatAlertValue(value, rules.get(uid)?.unit);
 	}
 
 	const DOT: Record<Tone, string> = {

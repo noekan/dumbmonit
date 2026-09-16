@@ -21,6 +21,11 @@ pub struct IdTokenClaims {
     pub preferred_username: Option<String>,
     #[serde(default)]
     pub email: Option<String>,
+    /// Le fournisseur garantit-il que `email` appartient bien à cette personne ?
+    /// Sans cette assertion, le courriel ne vaut pas mieux qu'un identifiant
+    /// choisi par l'utilisateur.
+    #[serde(default)]
+    pub email_verified: Option<bool>,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]

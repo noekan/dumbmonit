@@ -57,6 +57,11 @@ pub struct AgentIdentity {
     pub arch: Option<String>,
     /// Version du binaire agent, pour repérer un parc à mettre à jour.
     pub agent_version: String,
+    /// Vrai si l'agent vient chercher les commandes du serveur (`commands: true`
+    /// dans sa configuration). Absent chez un agent antérieur au canal de
+    /// commandes : le serveur en déduit qu'il ne les exécutera pas.
+    #[serde(default)]
+    pub commands_enabled: Option<bool>,
     /// Identifiant stable de la machine, indépendant du nom d'hôte.
     ///
     /// Renommer une machine ne doit pas créer une seconde cible et couper ses
@@ -134,6 +139,7 @@ mod tests {
             kernel_version: Some("6.1.0".into()),
             arch: Some("x86_64".into()),
             agent_version: "0.1.0".into(),
+            commands_enabled: Some(true),
             machine_id: Some("9f4c…".into()),
             tags: BTreeMap::from([("salle".to_string(), "cave".to_string())]),
         }
@@ -166,6 +172,8 @@ mod tests {
         assert_eq!(batch.identity.hostname, "pi");
         assert!(batch.identity.machine_id.is_none());
         assert!(batch.identity.tags.is_empty());
+        // Un agent d'avant le canal de commandes ne dit rien de ses capacités.
+        assert_eq!(batch.identity.commands_enabled, None);
     }
 
     #[test]

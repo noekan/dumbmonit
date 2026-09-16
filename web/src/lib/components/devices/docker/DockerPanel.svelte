@@ -12,18 +12,20 @@
 	 */
 	import type { Target } from '$lib/api';
 	import { formatDuration, formatRelative } from '$lib/format';
-	import { Button, Confirm, ErrorNotice, Led, Plate, Skeleton, Toggle, type Tone } from '$lib/ui';
+	import { Button, Confirm, CopyBlock, ErrorNotice, Led, Plate, Skeleton, Toggle, type Tone } from '$lib/ui';
 	import Chart from '$lib/components/Chart.svelte';
 	import FoldSection from '../FoldSection.svelte';
 	import FoldRow from '../FoldRow.svelte';
 	import type { DeviceMetricGroup } from '../metrics';
 	import {
+		cancelCommand,
 		commandContainer,
 		commandLabel,
 		isPending,
 		restartContainer,
 		updateContainer,
 		type CommandStatus,
+		type CommandView,
 		type ContainerPolicy,
 		type ContainerView
 	} from './api';
@@ -85,15 +87,32 @@
 		running: 'info',
 		done: 'signal',
 		failed: 'warning',
-		cancelled: 'muted'
+		cancelled: 'muted',
+		expired: 'advisory'
 	};
 	const STATUS_WORD: Record<CommandStatus, string> = {
 		queued: 'Queued',
 		running: 'Running…',
 		done: 'Done',
 		failed: 'Failed',
-		cancelled: 'Cancelled'
+		cancelled: 'Cancelled',
+		expired: 'Expired'
 	};
+
+	/**
+	 * The agent must have said it runs commands. An older binary says nothing,
+	 * `commands: false` says no: either way a queued action would only expire.
+	 */
+	const canAct = $derived(fleet.commandsSupported);
+	/** Why not, in one clause: an agent that said "no", or one that said nothing. */
+	const whyNot = $derived(
+		fleet.agent?.commands_supported === false && fleet.agent.agent_version
+			? `agent ${fleet.agent.agent_version} reports actions disabled (commands: false) or predates the command channel`
+			: 'no agent has reported its capabilities yet'
+	);
+	// The token is not known here: the placeholder points at Settings → Agents.
+	const origin = typeof window === 'undefined' ? 'http://server:8080' : window.location.origin;
+	const installHint = `curl -sSL ${origin}/install.sh | sh -s -- --token=<token> --url=${origin}`;
 
 	// --- Loading ------------------------------------------------------------------
 
@@ -110,6 +129,22 @@
 		rowError = { ...rowError, [c.name]: null };
 		const failure = await fleet.setPolicy(c, patch);
 		if (failure) rowError = { ...rowError, [c.name]: failure };
+	}
+
+	/** Per command id: a cancel in flight. */
+	let cancelling = $state<Record<number, boolean>>({});
+
+	async function cancel(command: CommandView, container?: ContainerView) {
+		cancelling = { ...cancelling, [command.id]: true };
+		if (container) rowError = { ...rowError, [container.name]: null };
+		try {
+			await cancelCommand(target.id, command.id);
+			await fleet.load();
+		} catch (cause) {
+			if (container) rowError = { ...rowError, [container.name]: cause };
+		} finally {
+			cancelling = { ...cancelling, [command.id]: false };
+		}
 	}
 
 	async function act(c: ContainerView, kind: 'restart' | 'update') {
@@ -143,6 +178,19 @@
 	{:else if fleet.containers.length === 0}
 		<p class="px-5 py-4 text-sm text-ink-2">No Docker on this machine, or the agent cannot reach its socket (add the agent to the docker group or run it as root).</p>
 	{:else}
+		{#if !canAct}
+			<div class="mx-5 mt-4 rounded-lg border border-advisory/35 bg-advisory-soft px-3 py-2.5" role="status">
+				<Plate tone="advisory" label="Actions unavailable" />
+				<p class="mt-1.5 text-sm leading-relaxed text-ink">
+					This agent cannot run commands — {whyNot}. Reinstall it with the current installer
+					(token from Settings → Agents, <code class="font-mono text-[0.8125rem]">commands: true</code>);
+					restart, update and the policies below stay off until it reports back.
+				</p>
+				<div class="mt-2">
+					<CopyBlock value={installHint} label="Copy the install command" />
+				</div>
+			</div>
+		{/if}
 		<ul class="divide-y divide-line">
 			{#each fleet.containers as c, i (c.name)}
 				{@const s = stateOf(c)}
@@ -173,11 +221,11 @@
 					<div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
 						<div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-x-5">
 							<div class="flex items-center gap-2">
-								<Toggle id={`restart-${target.id}-${c.name}`} checked={c.policy.auto_restart} disabled={saving} label="Restart if down" onchange={(v) => void savePolicy(c, { auto_restart: v })} />
+								<Toggle id={`restart-${target.id}-${c.name}`} checked={c.policy.auto_restart} disabled={saving || !canAct} label="Restart if down" onchange={(v) => void savePolicy(c, { auto_restart: v })} />
 								<label for={`restart-${target.id}-${c.name}`} class="text-sm text-ink">Restart if down</label>
 							</div>
 							<div class="flex items-center gap-2">
-								<Toggle id={`update-${target.id}-${c.name}`} checked={c.policy.auto_update} disabled={saving} label="Auto-update in maintenance windows" onchange={(v) => void savePolicy(c, { auto_update: v })} />
+								<Toggle id={`update-${target.id}-${c.name}`} checked={c.policy.auto_update} disabled={saving || !canAct} label="Auto-update in maintenance windows" onchange={(v) => void savePolicy(c, { auto_update: v })} />
 								<label for={`update-${target.id}-${c.name}`} class="text-sm text-ink">Auto-update in maintenance windows</label>
 							</div>
 						</div>
@@ -190,8 +238,16 @@
 									</Button>
 								{/if}
 							{/if}
-							<Confirm size="sm" variant="secondary" confirmLabel="Restart now?" onconfirm={() => act(c, 'restart')} loading={acting[c.name] ?? false} disabled={working}>Restart</Confirm>
-							<Confirm size="sm" variant="secondary" confirmLabel="Pull and replace?" onconfirm={() => act(c, 'update')} loading={acting[c.name] ?? false} disabled={working}>Update now</Confirm>
+							{#if c.last_command?.status === 'queued'}
+								{@const queued = c.last_command}
+								<Button size="sm" variant="ghost" onclick={() => void cancel(queued, c)} loading={cancelling[queued.id] ?? false} title="Pull the command back before the agent picks it up">Cancel</Button>
+							{/if}
+							{#if canAct}
+								<Confirm size="sm" variant="secondary" confirmLabel="Restart now?" onconfirm={() => act(c, 'restart')} loading={acting[c.name] ?? false} disabled={working}>Restart</Confirm>
+								<Confirm size="sm" variant="secondary" confirmLabel="Pull and replace?" onconfirm={() => act(c, 'update')} loading={acting[c.name] ?? false} disabled={working}>Update now</Confirm>
+							{:else}
+								<span class="text-sm text-ink-2">Restart and update need an agent that runs commands.</span>
+							{/if}
 						</div>
 					</div>
 
@@ -238,6 +294,9 @@
 							<span class="text-ink-2">by {command.requested_by ?? 'unknown'}</span>
 							<span class="text-ink-3" aria-hidden="true">·</span>
 							<span class="tnum text-ink-2" title={command.created_at}>{formatRelative(command.created_at)}</span>
+							{#if command.status === 'queued'}
+								<Button size="sm" variant="ghost" onclick={() => void cancel(command)} loading={cancelling[command.id] ?? false}>Cancel</Button>
+							{/if}
 							{#if command.result && !isPending(command)}
 								<span class="min-w-0 basis-full truncate text-ink-2" title={command.result}>{command.result.split('\n').at(-1)}</span>
 							{/if}

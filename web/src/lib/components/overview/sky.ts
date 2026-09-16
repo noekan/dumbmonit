@@ -27,7 +27,7 @@ export type SkyRow =
 			/** Reading order: 0 warning, 1 advisory, 2 info, 3 building up, 4 suppressed. */
 			rank: number;
 			tone: Tone;
-			/** The word on the plate: Unreachable / Down. */
+			/** The word on the plate: Unreachable / Down / Misconfigured. */
 			plate: string;
 			target: Target;
 			state: TargetState;
@@ -72,6 +72,8 @@ export interface Sky {
 		devices: number;
 		reporting: number;
 		unreachable: number;
+		/** Devices whose last probe failed on our side (credentials, address, option). */
+		misconfigured: number;
 		waiting: number;
 		warnings: number;
 		advisories: number;
@@ -93,12 +95,14 @@ export type SkyCondition = 'clear' | 'cloudy' | 'overcast' | 'storm' | 'waiting'
  * sky by number; a single pending alert is a cloud building up.
  */
 export function skyCondition(sky: Sky): SkyCondition {
-	const { devices, reporting, unreachable, warnings, advisories, buildingUp } = sky.counts;
+	const { devices, reporting, unreachable, misconfigured, warnings, advisories, buildingUp } =
+		sky.counts;
 	if (devices === 0) return 'empty';
 	if (unreachable > 0 || warnings > 0) return 'storm';
 	if (reporting === 0) return 'waiting';
-	if (advisories >= 3) return 'overcast';
-	if (advisories > 0 || buildingUp > 0) return 'cloudy';
+	// A misconfigured device clouds the sky like an advisory: ours to fix, not a storm.
+	if (advisories + misconfigured >= 3) return 'overcast';
+	if (advisories > 0 || misconfigured > 0 || buildingUp > 0) return 'cloudy';
 	return 'clear';
 }
 
@@ -133,17 +137,22 @@ export function readSky({ targets, probes, alerts, rules }: SkyInput): Sky {
 
 	const rows: SkyRow[] = [];
 	let unreachableRows = 0;
+	let misconfiguredRows = 0;
 	for (const target of targets) {
 		const state = states.get(target.id);
-		if (state !== 'offline' && state !== 'down') continue;
+		if (state !== 'offline' && state !== 'down' && state !== 'misconfigured') continue;
 		if (firingByTarget.has(target.id)) continue;
-		unreachableRows += 1;
+		// A configuration error is ours to fix, not an outage: an advisory, in
+		// the advisory colour, so it never reads as a device down.
+		const misconfigured = state === 'misconfigured';
+		if (misconfigured) misconfiguredRows += 1;
+		else unreachableRows += 1;
 		rows.push({
 			kind: 'device',
 			key: `device:${target.id}`,
-			rank: 0,
-			tone: 'warning',
-			plate: state === 'down' ? 'Down' : 'Unreachable',
+			rank: misconfigured ? 1 : 0,
+			tone: misconfigured ? 'advisory' : 'warning',
+			plate: misconfigured ? 'Misconfigured' : state === 'down' ? 'Down' : 'Unreachable',
 			target,
 			state,
 			detail:
@@ -190,6 +199,7 @@ export function readSky({ targets, probes, alerts, rules }: SkyInput): Sky {
 		devices: targets.length,
 		reporting: stateCount('online'),
 		unreachable: stateCount('offline', 'down'),
+		misconfigured: stateCount('misconfigured'),
 		waiting: stateCount('pending'),
 		warnings: firing.filter((alert) => alert.severity === 'critical').length,
 		advisories: firing.filter((alert) => alert.severity === 'warning').length,
@@ -211,8 +221,9 @@ export function readSky({ targets, probes, alerts, rules }: SkyInput): Sky {
 		const parts: string[] = [];
 		if (counts.warnings > 0) parts.push(count(counts.warnings, 'warning'));
 		if (counts.advisories > 0) parts.push(count(counts.advisories, 'advisory', 'advisories'));
-		if (counts.notices > 0) parts.push(count(counts.notices, 'notice'));
+		if (counts.notices > 0) parts.push(count(counts.notices, 'info', 'info'));
 		if (unreachableRows > 0) parts.push(`${unreachableRows} unreachable`);
+		if (misconfiguredRows > 0) parts.push(`${misconfiguredRows} misconfigured`);
 		if (counts.buildingUp > 0) parts.push(`${counts.buildingUp} building up`);
 		if (parts.length > 0) sentence = `${parts.join(', ')}.`;
 		else if (counts.reporting === 0 && counts.waiting > 0) sentence = 'Waiting for the first reports.';
@@ -221,6 +232,9 @@ export function readSky({ targets, probes, alerts, rules }: SkyInput): Sky {
 
 	const plates: SkyPlate[] = [{ tone: 'signal', label: `${counts.reporting} reporting`, bare: true }];
 	if (counts.unreachable > 0) plates.push({ tone: 'warning', label: `${counts.unreachable} unreachable` });
+	if (counts.misconfigured > 0) {
+		plates.push({ tone: 'advisory', label: `${counts.misconfigured} misconfigured` });
+	}
 	if (counts.waiting > 0) plates.push({ tone: 'ghost', label: `${counts.waiting} waiting` });
 	if (counts.suppressed > 0) {
 		plates.push({ tone: 'muted', label: `${counts.suppressed} suppressed by parent` });
@@ -230,7 +244,8 @@ export function readSky({ targets, probes, alerts, rules }: SkyInput): Sky {
 		sentence,
 		plates,
 		needsYou: rows,
-		attention: counts.warnings + counts.advisories + counts.notices + unreachableRows,
+		attention:
+			counts.warnings + counts.advisories + counts.notices + unreachableRows + misconfiguredRows,
 		forecasts,
 		quiet: rows.length === 0,
 		counts

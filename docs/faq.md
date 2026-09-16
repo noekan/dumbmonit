@@ -22,9 +22,9 @@ default) and writes reach VictoriaMetrics every 5 seconds
 
 1. Open the device page and click **Probe now**. It reports how many samples
    and series one probe produced, or the exact error.
-2. A red error under the address is a configuration problem: wrong community
-   or password, refused certificate (enable "Accept an unverifiable
-   certificate"), missing capability. It is shown, not alerted.
+2. *Misconfigured* with an error under the address is a configuration
+   problem: wrong community or password, refused certificate (enable "Accept
+   an unverifiable certificate"), missing capability. It is shown, not alerted.
 3. *Unreachable* with no error means the device did not answer at all. For
    SNMP, a wrong community looks exactly like a device that is off, because
    the device never answers it. Check the community, that SNMP is enabled, and

@@ -32,8 +32,10 @@ Save, and the link is ready to copy. The page refreshes itself every minute.
 
 ## 2. What visitors see
 
-- A banner with the one-second answer: **All systems operational**, **Partial
-  outage**, **Major outage** or **Scheduled maintenance**.
+- A banner with the one-second answer, read from the services: **All systems
+  operational**, **Partial outage** (some down or degraded), **Major outage**
+  (all down) or **Scheduled maintenance**. An open incident while every
+  service still answers reads **Incident in progress**, toned by its impact.
 - The open announcements, newest update first, with the timeline of updates
   under a fold.
 - Each service with its state plate (Operational, Degraded, Down, Maintenance,

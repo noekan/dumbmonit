@@ -52,7 +52,7 @@ impl AgentCommand {
     }
 }
 
-/// État d'une commande. Les trois derniers sont finaux.
+/// État d'une commande. Les quatre derniers sont finaux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CommandStatus {
@@ -60,7 +60,11 @@ pub enum CommandStatus {
     Running,
     Done,
     Failed,
+    /// Retirée de la file par un utilisateur avant que l'agent ne la prenne.
     Cancelled,
+    /// Restée en attente plus de [`COMMAND_MAX_AGE_SECS`] : l'agent n'est jamais
+    /// venu la chercher (arrêté, trop ancien, ou actions désactivées).
+    Expired,
 }
 
 impl CommandStatus {
@@ -71,6 +75,7 @@ impl CommandStatus {
             Self::Done => "done",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
+            Self::Expired => "expired",
         }
     }
 
@@ -81,13 +86,14 @@ impl CommandStatus {
             "done" => Some(Self::Done),
             "failed" => Some(Self::Failed),
             "cancelled" => Some(Self::Cancelled),
+            "expired" => Some(Self::Expired),
             _ => None,
         }
     }
 
     /// Vrai si plus rien ne changera.
     pub fn is_final(self) -> bool {
-        matches!(self, Self::Done | Self::Failed | Self::Cancelled)
+        matches!(self, Self::Done | Self::Failed | Self::Cancelled | Self::Expired)
     }
 }
 
@@ -140,12 +146,14 @@ mod tests {
             CommandStatus::Done,
             CommandStatus::Failed,
             CommandStatus::Cancelled,
+            CommandStatus::Expired,
         ] {
             assert_eq!(CommandStatus::parse(status.as_str()), Some(status));
             let json = serde_json::to_string(&status).unwrap();
             assert_eq!(json, format!("\"{}\"", status.as_str()));
         }
         assert!(CommandStatus::Done.is_final());
+        assert!(CommandStatus::Expired.is_final());
         assert!(!CommandStatus::Running.is_final());
         assert_eq!(CommandStatus::parse("bogus"), None);
     }

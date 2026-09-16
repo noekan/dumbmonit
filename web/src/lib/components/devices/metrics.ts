@@ -24,9 +24,18 @@ export interface DeviceMetricGroup {
 	series: DeviceSerie[];
 }
 
-/** Families that only ever grow: charted as a per-second rate. */
-const COUNTER = /_(octets|packets|errors)_(in|out)$|^dumbmonit_disk_(read|written)_bytes$|_total$/;
-const COUNTER_SELECTOR = 'dumbmonit_(.+_(octets|packets|errors)_(in|out)|disk_(read|written)_bytes|.+_total)';
+/**
+ * Families that only ever grow: charted as a per-second rate.
+ *
+ * The query API does not carry the sample kind, so the counters are named
+ * here explicitly — the ones the agent and the SNMP profiles emit as such. A
+ * `_total` suffix is not a hint: Proxmox and PBS totals ("backup guests
+ * total") are plain gauges.
+ */
+const COUNTER =
+	/_(octets|packets|errors|discards)_(in|out)$|^dumbmonit_(disk_(read|written)_bytes|printer_pages_printed|ups_input_line_bads|agent_dropped_samples)$/;
+const COUNTER_SELECTOR =
+	'dumbmonit_(.+_(octets|packets|errors|discards)_(in|out)|disk_(read|written)_bytes|printer_pages_printed|ups_input_line_bads|agent_dropped_samples)';
 
 /** About 300 points per chart, as in `$lib/metrics`. */
 function stepFor(seconds: number): number {
@@ -38,6 +47,8 @@ function unitFor(name: string): string {
 		if (/_octets_|_bytes$/.test(name)) return 'B/s';
 		if (/_packets_/.test(name)) return 'pkt/s';
 		if (/_errors_/.test(name)) return 'err/s';
+		if (/_discards_/.test(name)) return 'pkt/s';
+		if (/_pages_/.test(name)) return 'pages/s';
 		return '/s';
 	}
 	if (name.endsWith('_percent')) return '%';

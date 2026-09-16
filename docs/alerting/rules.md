@@ -76,6 +76,9 @@ Click **New rule**. The form needs:
 Every series returned by the query becomes one potential alert, attached to the
 device named by its `target` label. Aggregate with `avg by (target, host) (…)`
 when you want one alert per device rather than one per core or per interface.
+The alert's identity ignores the `host` and `tag_*` labels whenever `target` is
+present, so renaming a device keeps its alerts; a series whose `target` does
+not match an existing, enabled device is ignored.
 
 ## The query language
 

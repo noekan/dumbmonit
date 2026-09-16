@@ -50,15 +50,19 @@ export function formatRelative(value: string | Date | null | undefined): string 
 	return formatDateTime(date);
 }
 
-/** Readable duration from a number of seconds: "1 min", "2 h". */
+/** Readable duration from a number of seconds: "1 min", "2 h", "45 d". */
 export function formatDuration(seconds: number): string {
-	if (seconds < 60) return `${seconds} s`;
+	if (seconds < 60) return `${Math.round(seconds * 100) / 100} s`;
 	if (seconds < 3600) {
 		const minutes = Math.round(seconds / 60);
 		return `${minutes} min`;
 	}
-	const hours = Math.round((seconds / 3600) * 10) / 10;
-	return `${hours} h`;
+	if (seconds < 2 * 86400) {
+		const hours = Math.round((seconds / 3600) * 10) / 10;
+		return `${hours} h`;
+	}
+	const days = Math.round((seconds / 86400) * 10) / 10;
+	return `${days} d`;
 }
 
 /**
@@ -69,7 +73,14 @@ export function formatDuration(seconds: number): string {
  * probe: the probe runs, but the service does not answer — or has not been
  * measured yet.
  */
-export type TargetState = 'online' | 'offline' | 'pending' | 'disabled' | 'down' | 'unknown';
+export type TargetState =
+	| 'online'
+	| 'offline'
+	| 'misconfigured'
+	| 'pending'
+	| 'disabled'
+	| 'down'
+	| 'unknown';
 
 // --- Services (uptime probes) -----------------------------------------------
 
@@ -105,7 +116,7 @@ export interface ProbeStatus {
 export function displayState(target: Target, probe: ProbeStatus | undefined): TargetState {
 	if (!isUptimeKind(target.kind)) return targetState(target);
 	if (!target.enabled) return 'disabled';
-	if (target.last_error) return 'offline';
+	if (target.last_error) return errorState(target);
 	if (!probe) return 'unknown';
 	return probe.up ? 'online' : 'down';
 }
@@ -154,7 +165,7 @@ export function formatLatency(seconds: number | null | undefined): string {
  */
 export function targetState(target: Target): TargetState {
 	if (!target.enabled) return 'disabled';
-	if (target.last_error) return 'offline';
+	if (target.last_error) return errorState(target);
 	const last = parseServerDate(target.last_probe_at);
 	if (!last) return 'pending';
 
@@ -162,9 +173,19 @@ export function targetState(target: Target): TargetState {
 	return Date.now() - last.getTime() > toleranceMs ? 'offline' : 'online';
 }
 
+/**
+ * A failed probe is either the device's fault or ours. A configuration error
+ * (bad credentials, bad address, bad option) is shown as such: nobody should
+ * go check the cables for a typo.
+ */
+function errorState(target: Target): TargetState {
+	return target.error_kind === 'config' ? 'misconfigured' : 'offline';
+}
+
 export const STATE_LABEL: Record<TargetState, string> = {
 	online: 'Reporting',
 	offline: 'Unreachable',
+	misconfigured: 'Misconfigured',
 	pending: 'Waiting',
 	disabled: 'Disabled',
 	down: 'Down',
@@ -176,6 +197,7 @@ export const STATE_TONE: Record<TargetState, 'signal' | 'warning' | 'advisory' |
 	online: 'signal',
 	offline: 'warning',
 	down: 'warning',
+	misconfigured: 'advisory',
 	pending: 'advisory',
 	disabled: 'ghost',
 	unknown: 'ghost'

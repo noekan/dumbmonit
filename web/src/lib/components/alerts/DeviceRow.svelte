@@ -20,7 +20,7 @@
 
 <div class="rounded-[var(--radius-card)] border border-line bg-surface px-4 py-3 shadow-lift transition">
 	<div class="flex flex-wrap items-start gap-x-4 gap-y-2">
-		<div class="min-w-0 flex-1">
+		<div class="min-w-0 flex-[1_1_16rem]">
 			<div class="flex flex-wrap items-center gap-2">
 				<Plate tone={row.tone} label={row.plate} pulse />
 				<span class="min-w-0 max-w-full truncate font-semibold text-ink">{target.name}</span>
@@ -29,12 +29,12 @@
 				<span class="min-w-0 max-w-full truncate" title={target.address}>{target.address}</span>
 				{#if row.detail}
 					<span class="text-ink-3" aria-hidden="true">·</span>
-					<span class="min-w-0 max-w-full break-words text-warning-ink" title={row.detail}>{row.detail}</span>
+					<span class={`min-w-0 max-w-full break-words ${row.state === 'misconfigured' ? 'text-advisory-ink' : 'text-warning-ink'}`} title={row.detail}>{row.detail}</span>
 				{/if}
 			</div>
 		</div>
 
-		<div class="flex shrink-0 flex-col items-end gap-2">
+		<div class="flex flex-[1_1_12rem] flex-wrap items-center justify-between gap-2 sm:flex-initial sm:shrink-0 sm:flex-col sm:items-end sm:justify-start">
 			<span class="tnum text-[0.8125rem] text-ink-2" title={row.since ? formatDateTime(row.since) : undefined}>
 				{#if row.since}
 					last report {formatRelative(row.since)}

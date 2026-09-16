@@ -75,6 +75,8 @@ export interface Target {
 	credential_kind: string;
 	last_probe_at: string | null;
 	last_error: string | null;
+	/** What `last_error` means: the device is `down`, or our `config` is wrong. */
+	error_kind: 'down' | 'config' | null;
 }
 
 /** Body sent to `POST /api/targets` and `PUT /api/targets/{id}`. */
@@ -630,6 +632,25 @@ export interface CreatedAgentToken extends AgentToken {
 	secret: string;
 	install_linux: string;
 	install_windows: string;
+}
+
+/**
+ * `GET /api/targets/{id}/agent`: the machine as its agent last described it.
+ * Mirrors `AgentHostView` in `crates/server/src/api/agent_commands.rs`.
+ */
+export interface AgentHost {
+	hostname: string;
+	os: string;
+	os_version: string | null;
+	arch: string | null;
+	agent_version: string;
+	/**
+	 * True only when the agent said it runs commands. An agent older than the
+	 * command channel, or configured with `commands: false`, never picks up a
+	 * Restart/Update — the UI must not offer them.
+	 */
+	commands_supported: boolean;
+	last_seen_at: string | null;
 }
 
 // --- API tokens (assistants, MCP) -------------------------------------------

@@ -32,7 +32,7 @@ use sqlx::SqlitePool;
 
 pub use policy::spawn_policy_scheduler;
 pub use receive::{IngestError, ingest};
-pub use store::{TokenRecord, create_token, list_tokens, revoke_token};
+pub use store::{HostInfo, TokenRecord, create_token, host, list_tokens, revoke_token};
 
 /// Vérifie un en-tête `Authorization` d'agent et renvoie l'identifiant du jeton.
 ///
@@ -160,6 +160,7 @@ mod tests {
             kernel_version: None,
             arch: None,
             agent_version: "0.1.0".into(),
+            commands_enabled: Some(true),
             machine_id: Some("id-nas".into()),
             tags: Default::default(),
         };

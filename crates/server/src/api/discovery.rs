@@ -3,16 +3,21 @@
 //! C'est le raccourci qui évite de saisir les équipements un par un : on donne un
 //! réseau, on obtient la liste de ce qui répond, avec le profil que
 //! l'auto-détection appliquerait.
+//!
+//! Un balayage est une action, pas une lecture : il part en `POST`, avec ses
+//! paramètres dans le corps. Le garde de session en fait de ce fait une opération
+//! d'administrateur, et la community SNMP ne traîne ni dans les journaux du
+//! serveur ni dans ceux d'un mandataire, contrairement à une chaîne de requête.
 
 use axum::Json;
-use axum::extract::Query;
 use dumbmonit_proto::Credential;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{ApiError, ApiResult};
+use crate::auth::middleware::AdminUser;
 use crate::collectors::snmp::{DiscoveredDevice, ScanOptions, scan_network};
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ScanRequest {
     /// Réseau à balayer, en notation CIDR : `192.168.1.0/24`.
     pub cidr: String,
@@ -27,6 +32,18 @@ pub struct ScanRequest {
     pub timeout_ms: Option<u64>,
 }
 
+/// `Debug` écrit à la main : la community est un secret, elle ne doit pas finir
+/// dans une trace de requête.
+impl std::fmt::Debug for ScanRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ScanRequest {{ cidr: {:?}, community: <redacted>, port: {:?}, timeout_ms: {:?} }}",
+            self.cidr, self.port, self.timeout_ms
+        )
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ScanResponse {
     pub devices: Vec<DiscoveredDevice>,
@@ -35,11 +52,13 @@ pub struct ScanResponse {
     pub scanned: usize,
 }
 
-/// Balaie un réseau à la recherche d'équipements SNMP.
+/// `POST /api/discovery` — balaie un réseau à la recherche d'équipements SNMP.
+/// Réservé aux administrateurs : c'est le serveur qui sonde, vers n'importe quel
+/// réseau qu'il peut joindre.
 ///
 /// L'opération est bornée par les garde-fous de [`ScanOptions`] : un `/16` saisi par
 /// mégarde est refusé plutôt que de lancer soixante-cinq mille sondes.
-pub async fn scan(Query(request): Query<ScanRequest>) -> ApiResult<Json<ScanResponse>> {
+pub async fn scan(_: AdminUser, Json(request): Json<ScanRequest>) -> ApiResult<Json<ScanResponse>> {
     let network: ipnet::IpNet = request
         .cidr
         .trim()
@@ -73,4 +92,22 @@ pub async fn scan(Query(request): Query<ScanRequest>) -> ApiResult<Json<ScanResp
         .map_err(|error| ApiError::BadRequest(error.to_string()))?;
 
     Ok(Json(ScanResponse { devices, scanned }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_never_leaks_the_community() {
+        let request = ScanRequest {
+            cidr: "192.168.1.0/24".into(),
+            community: Some("s3cr3t-community".into()),
+            port: None,
+            timeout_ms: None,
+        };
+        let rendered = format!("{request:?}");
+        assert!(!rendered.contains("s3cr3t"), "{rendered}");
+        assert!(rendered.contains("<redacted>"), "{rendered}");
+    }
 }

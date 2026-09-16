@@ -113,6 +113,26 @@ clears them.
 
 Delivery failures keep the lines queued; the next cycle retries.
 
+## What a line says
+
+Each alert is one line, the same in mail, ntfy, chat and the `{{message}}`
+variable of a custom webhook:
+
+```
+🔴 Critical · Disk full — /data — 95 % (threshold > 90 %), for 12 min
+⚠️ Warning · VM or container stopped — win11-desktop (101), for 59 s
+✅ Resolved · Service down — https://example.lan/
+```
+
+- The glyph is followed by the state word (Critical / Warning / Info,
+  Resolved, Flapping), so the severity is readable without colour or emoji.
+- A rule that watches several series names the one that fired: the VM and
+  its id, the mount point, the interface, the backup group, the URL of the
+  probe. Device-wide rules (unreachable) name nothing more than the device.
+- The value and threshold are shown for measured rules; an all-or-nothing
+  rule on a 0/1 metric (on battery, guest stopped) does not repeat "1
+  (threshold > 0)".
+
 ## Deep links
 
 Every message ends with a link to the device (`{public_url}/targets/{id}`)

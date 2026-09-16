@@ -22,6 +22,7 @@ pub fn detect(config: &Config) -> AgentIdentity {
         kernel_version: System::kernel_version(),
         arch: Some(std::env::consts::ARCH.to_string()),
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
+        commands_enabled: Some(config.commands),
         machine_id: machine_id(),
         tags: config.tags.clone(),
     }
@@ -92,5 +93,15 @@ mod tests {
         assert!(!identity.os.is_empty());
         assert_eq!(identity.agent_version, env!("CARGO_PKG_VERSION"));
         assert_eq!(identity.tags.get("role").map(String::as_str), Some("nas"));
+    }
+
+    #[test]
+    fn the_identity_declares_whether_commands_are_accepted() {
+        // C'est ce qui permet au serveur de ne pas proposer « Redémarrer » pour
+        // une machine dont l'agent ne viendra jamais chercher la commande.
+        let mut config = config_with_hostname(None);
+        assert_eq!(detect(&config).commands_enabled, Some(false));
+        config.commands = true;
+        assert_eq!(detect(&config).commands_enabled, Some(true));
     }
 }

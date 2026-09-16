@@ -99,10 +99,23 @@ fn header_value(value: &str) -> header::HeaderValue {
     header::HeaderValue::from_str(value).unwrap_or_else(|_| header::HeaderValue::from_static("/"))
 }
 
-/// Un chemin interne, et rien d'autre : ni URL absolue, ni `//` que les
-/// navigateurs lisent comme une adresse externe.
+/// Un chemin interne, et rien d'autre : ni URL absolue, ni `//` ou `/\` que les
+/// navigateurs lisent comme une adresse externe, ni caractère de contrôle.
+///
+/// La règle de forme est doublée d'une résolution contre une origine factice :
+/// si le résultat en sort, ce n'était pas un chemin interne, quelle que soit
+/// l'astuce d'écriture.
 fn is_internal_path(path: &str) -> bool {
-    path.starts_with('/') && !path.starts_with("//") && !path.contains(['\r', '\n'])
+    let mut chars = path.chars();
+    if chars.next() != Some('/') || matches!(chars.next(), Some('/' | '\\')) {
+        return false;
+    }
+    if path.chars().any(|c| c.is_control() || c == '\\') {
+        return false;
+    }
+    reqwest::Url::parse("http://internal.invalid/")
+        .and_then(|base| base.join(path))
+        .is_ok_and(|url| url.host_str() == Some("internal.invalid"))
 }
 
 /// Origine par laquelle le navigateur nous joint, pour construire l'URL de
@@ -329,9 +342,18 @@ mod tests {
 
     #[test]
     fn only_internal_paths_are_accepted_as_destinations() {
+        assert!(is_internal_path("/"));
         assert!(is_internal_path("/targets/3"));
+        assert!(is_internal_path("/alerts?severity=warning&x=%2F#top"));
+        assert!(!is_internal_path(""));
+        assert!(!is_internal_path("targets"));
         assert!(!is_internal_path("//evil.example.org"));
+        assert!(!is_internal_path("/\\evil.example.org"));
+        assert!(!is_internal_path("/\\/evil.example.org"));
+        assert!(!is_internal_path("/targets\\@evil.example.org"));
         assert!(!is_internal_path("https://evil.example.org"));
+        assert!(!is_internal_path("javascript:alert(1)"));
         assert!(!is_internal_path("/x\r\nSet-Cookie: a=b"));
+        assert!(!is_internal_path("/x\tSet-Cookie: a=b"));
     }
 }

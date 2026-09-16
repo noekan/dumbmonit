@@ -7,10 +7,15 @@
  */
 import { ApiError, request } from '$lib/api/client';
 import type { TargetId } from '$lib/api';
+export { getAgentHost, type AgentHost } from '$lib/api';
 
 export type ContainerHealth = 'none' | 'healthy' | 'unhealthy' | 'starting';
 
-export type CommandStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+/**
+ * `cancelled` is a person pulling a queued command back; `expired` is the
+ * server giving up after ten minutes because no agent came to fetch it.
+ */
+export type CommandStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'expired';
 
 export type CommandKind = 'container.restart' | 'container.update';
 
@@ -101,6 +106,11 @@ export function updateContainer(id: TargetId, name: string, prune: boolean): Pro
 		method: 'POST',
 		body: { prune }
 	});
+}
+
+/** Pulls a queued command back before the agent picks it up. `409` once it is running or done. */
+export function cancelCommand(id: TargetId, commandId: number): Promise<void> {
+	return request<void>(`/targets/${id}/commands/${commandId}`, { method: 'DELETE' });
 }
 
 /** True while the agent still has to act on it. */

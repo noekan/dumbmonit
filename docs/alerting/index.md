@@ -104,8 +104,12 @@ gets spammed. The full path of one alert, in order:
 1. **Evaluate** — threshold, anomaly score or forecast, with the rule's
    hold (`for`) and, when set, its **clear threshold** (hysteresis: fire
    above 90 %, clear only under 85 %) and any **per-device override**.
-2. **Deduplicate** — one fingerprint per (rule, series); a series that
-   resolves to the same key twice yields one alert.
+2. **Deduplicate** — one fingerprint per (rule, series), keyed on the
+   device id (`target`) rather than its name: renaming a device or editing
+   its tags does not create a second alert, and a series that resolves to
+   the same key twice yields one alert. Series of a device that was deleted
+   or paused are dropped: their alerts clear at once, without any
+   notification, and the history records `device removed or disabled`.
 3. **Suppress by dependency** — descendants of an unreachable device stay
    quiet.
 4. **Silence** — maintenance windows mute what they cover.

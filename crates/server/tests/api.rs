@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use dumbmonit_server::config::Config;
 use dumbmonit_server::state::{AppState, Inner};
 use dumbmonit_server::{api, collectors, db, tsdb};
@@ -21,9 +21,12 @@ const UNREACHABLE_VICTORIA: &str = "http://127.0.0.1:1";
 
 struct TestApp {
     router: Router,
+    /// Session d'administrateur : sans elle, l'API ne répond que 401.
+    cookie: String,
     _dir: tempfile::TempDir,
 }
 
+/// Instance montée, premier administrateur créé et connecté.
 async fn setup() -> TestApp {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
 
@@ -44,12 +47,36 @@ async fn setup() -> TestApp {
 
     let state = AppState::new(Inner { config, pool, cipher, victoria, sink, collectors: registry });
 
-    TestApp { router: api::router(state), _dir: dir }
+    let mut app = TestApp { router: api::router(state), cookie: String::new(), _dir: dir };
+    app.cookie = app.open_admin_session().await;
+    app
 }
 
+const PASSWORD: &str = "mot-de-passe-du-homelab";
+
 impl TestApp {
+    /// Crée le compte `admin` puis ouvre sa session ; rend la valeur du cookie.
+    async fn open_admin_session(&self) -> String {
+        let (status, body) =
+            self.request("POST", "/api/auth/setup", Some(json!({ "password": PASSWORD }))).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "création de l'admin : {body}");
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/auth/login")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({ "password": PASSWORD }).to_string()))
+            .unwrap();
+        let response = self.router.clone().oneshot(request).await.expect("réponse");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let raw = response.headers().get(header::SET_COOKIE).expect("cookie de session");
+        raw.to_str().unwrap().split(';').next().unwrap().to_string()
+    }
+
     async fn request(&self, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
-        let builder = Request::builder().method(method).uri(uri);
+        let mut builder = Request::builder().method(method).uri(uri);
+        if !self.cookie.is_empty() {
+            builder = builder.header(header::COOKIE, &self.cookie);
+        }
         let request = match body {
             Some(value) => builder
                 .header("content-type", "application/json")
@@ -232,6 +259,109 @@ async fn invalid_input_is_rejected_with_an_explanation() {
         let message = body["error"].as_str().unwrap_or_default();
         assert!(message.contains(expected), "message inattendu « {message} » pour {payload}");
     }
+}
+
+#[tokio::test]
+async fn overlong_names_and_addresses_are_rejected_with_the_limit() {
+    let app = setup().await;
+
+    let (status, body) = app
+        .request(
+            "POST",
+            "/api/targets",
+            Some(json!({ "name": "n".repeat(201), "address": "10.0.0.12", "kind": "dummy" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("200 characters"), "{body}");
+
+    let (status, body) = app
+        .request(
+            "POST",
+            "/api/targets",
+            Some(json!({ "name": "X", "address": "a".repeat(254), "kind": "dummy" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("253 characters"), "{body}");
+
+    // Juste sous la limite : accepté.
+    let (status, _) = app
+        .request(
+            "POST",
+            "/api/targets",
+            Some(json!({ "name": "n".repeat(200), "address": "10.0.0.13", "kind": "dummy" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn updating_without_a_profile_keeps_the_detected_one() {
+    let app = setup().await;
+    let (status, created) = app
+        .request(
+            "POST",
+            "/api/targets",
+            Some(json!({
+                "name": "Switch", "address": "10.0.0.14", "kind": "dummy",
+                "profile_id": "host-resources"
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_i64().unwrap();
+
+    let (status, body) = app
+        .request(
+            "PUT",
+            &format!("/api/targets/{id}"),
+            Some(json!({ "name": "Switch renamed", "address": "10.0.0.14", "kind": "dummy" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["profile_id"], json!("host-resources"), "the profile is kept when omitted");
+
+    // Une chaîne vide efface explicitement le profil.
+    let (status, body) = app
+        .request(
+            "PUT",
+            &format!("/api/targets/{id}"),
+            Some(json!({
+                "name": "Switch renamed", "address": "10.0.0.14", "kind": "dummy",
+                "profile_id": ""
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["profile_id"].is_null(), "{body}");
+}
+
+#[tokio::test]
+async fn a_missing_parent_is_a_bad_request_not_a_server_error() {
+    let app = setup().await;
+
+    let (status, body) = app
+        .request(
+            "POST",
+            "/api/targets",
+            Some(json!({ "name": "Orphan", "address": "10.0.0.15", "kind": "dummy", "parent_id": 999 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"], json!("Parent device 999 not found."));
+
+    let created = app.create_snmp_target("Child", "10.0.0.16").await;
+    let id = created["id"].as_i64().unwrap();
+    let (status, body) = app
+        .request(
+            "PUT",
+            &format!("/api/targets/{id}"),
+            Some(json!({ "name": "Child", "address": "10.0.0.16", "kind": "dummy", "parent_id": 999 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"], json!("Parent device 999 not found."));
 }
 
 #[tokio::test]

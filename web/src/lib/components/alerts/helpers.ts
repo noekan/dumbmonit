@@ -8,7 +8,7 @@
  */
 import type { Alert, AlertRule, AlertSeverity, Silence, SilenceSchedule, Target } from '$lib/api';
 import type { Tone } from '$lib/ui';
-import { formatDateTime } from '$lib/format';
+import { formatDateTime, formatDuration } from '$lib/format';
 
 /** Plate tone for an alert's severity: the meteorological shift down one rung. */
 export function severityTone(severity: AlertSeverity): Tone {
@@ -59,11 +59,20 @@ export function alertDetail(alert: Alert, rule: AlertRule | undefined): string {
 		parts.push(value);
 	}
 	if (alert.value !== null && Number.isFinite(alert.value)) {
-		const unit = rule?.unit?.trim();
-		const rounded = Math.round(alert.value * 100) / 100;
-		parts.push(unit ? `${rounded}${unit}` : String(rounded));
+		parts.push(formatAlertValue(alert.value, rule?.unit));
 	}
 	return parts.join(' · ');
+}
+
+/**
+ * A measured value with its rule's unit, the way every alert list shows it.
+ * Seconds read as a duration past a minute: "45 d", not "3887999s".
+ */
+export function formatAlertValue(value: number, unit: string | null | undefined): string {
+	const suffix = unit?.trim() ?? '';
+	if (suffix === 's' && value >= 60) return formatDuration(value);
+	const rounded = Math.round(value * 100) / 100;
+	return `${rounded}${suffix}`;
 }
 
 /** Builds the map from rule uid to its definition, for quick lookups. */

@@ -882,10 +882,23 @@ pub async fn list_active(State(state): State<AppState>) -> ApiResult<Json<Vec<Ac
         .into_iter()
         .map(|rule| (rule.uid.clone(), rule))
         .collect();
+    // Une alerte dont l'équipement a été supprimé ou mis en pause est déjà
+    // éteinte pour l'utilisateur, même si le moteur ne l'a pas encore purgée :
+    // l'interface ne doit jamais afficher une carte sans nom.
+    let live: HashSet<i64> = db::alerts::list_target_nodes(&state.pool)
+        .await?
+        .into_iter()
+        .filter(|node| node.enabled)
+        .map(|node| node.id)
+        .collect();
 
     Ok(Json(
         alerts
             .into_iter()
+            .filter(|alert| match alert.target_id {
+                Some(id) => live.contains(&id),
+                None => !crate::alerting::model::carries_target_id(&alert.labels),
+            })
             .map(|alert| {
                 let rule = rules.get(&alert.rule_uid);
                 ActiveAlertView {

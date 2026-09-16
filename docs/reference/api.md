@@ -31,11 +31,16 @@ refused with `429` and a `Retry-After` delay that doubles from 30 s up to
 
 | Method | Route | Auth | Purpose |
 |---|---|---|---|
-| `GET` | `/api/auth/status` | public | `{"configured": bool, "authenticated": bool}`. `configured: false` means a fresh instance. |
+| `GET` | `/api/auth/status` | public | `{"configured": bool, "authenticated": bool}`. `configured: false` means a fresh instance: until the first admin exists, every route marked *session* answers `401` — only `status`, `setup`, `login` and `health` are reachable. |
 | `POST` | `/api/auth/setup` | public | `{"password": "…"}`. Sets the password on a fresh instance (at least 12 characters). `204`; does not open a session. |
 | `POST` | `/api/auth/login` | public | `{"password": "…"}`. `204` with `Set-Cookie`. `401` on a wrong password, `429` when rate-limited. |
 | `POST` | `/api/auth/logout` | session | Ends the session and clears the cookie. |
 | `POST` | `/api/auth/password` | session | `{"current_password": "…", "new_password": "…"}`. Signs out every other session. |
+
+Every response carries `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: same-origin` and, except for the public status pages under
+`/s/…` (made to be embedded), `X-Frame-Options: DENY` and
+`Content-Security-Policy: frame-ancestors 'none'`.
 
 ## Errors
 
@@ -70,8 +75,8 @@ VictoriaMetrics, `false` when `DUMBMONIT_VM_URL` points at an external one.
 | `GET` | `/api/targets` | List every device. |
 | `POST` | `/api/targets` | Create one. `201` with the device. Profile detection starts in the background for SNMP. |
 | `GET` | `/api/targets/{id}` | One device. |
-| `PUT` | `/api/targets/{id}` | Replace it. Omitting `credential` keeps the stored one. |
-| `DELETE` | `/api/targets/{id}` | `204`. |
+| `PUT` | `/api/targets/{id}` | Replace it. Omitting `credential` keeps the stored one; omitting `profile_id` keeps the detected profile (`""` clears it). Setting `enabled: false` clears the device's alerts without notifying. |
+| `DELETE` | `/api/targets/{id}` | `204`. Clears the device's alerts without notifying and deletes its time series from VictoriaMetrics (best effort). |
 | `POST` | `/api/targets/{id}/probe` | Probe now: `{"sample_count": 42, "series": ["dumbmonit_if_octets_in", …]}`. |
 | `POST` | `/api/targets/{id}/discover` | Re-run profile detection: `{"profile_id": "host-resources"}` or `null`. |
 
@@ -116,14 +121,16 @@ Credential shapes (`type`): `none`; `snmp_community` (`community`); `snmp_v3`
 `sha224`, `sha256`, `sha384` or `sha512`, optional `privacy: {protocol,
 passphrase}` with `des`, `aes128`, `aes192` or `aes256`, optional `context`);
 `api_token` (`token`); `username_password` (`username`, `password`).
-`interval_secs` defaults to 60 and cannot go below 10. Type options go in
-`tags` under their key.
+`interval_secs` defaults to 60 and cannot go below 10. `name` is at most 200
+characters and `address` at most 253 (`400` beyond). `parent_id` must name an
+existing device (`400 Parent device N not found.`). Type options go in `tags`
+under their key.
 
 ## Discovery
 
-| Method | Route | Purpose |
-|---|---|---|
-| `GET` | `/api/discovery?cidr=192.168.1.0/24&community=public&port=161&timeout_ms=1000` | Scan a network for SNMP devices. `cidr` is required; `community` defaults to `public`; `timeout_ms` is clamped to 100–10,000. Networks larger than 4096 addresses are refused. |
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/api/discovery` | admin | `{"cidr": "192.168.1.0/24", "community": "public", "port": 161, "timeout_ms": 1000}`. Scan a network for SNMP devices. `cidr` is required; `community` defaults to `public`; `timeout_ms` is clamped to 100–10,000. Networks larger than 4096 addresses are refused. The scan is a `POST` with a JSON body so that the community never appears in a URL or a log line. |
 
 ```json
 {
@@ -157,7 +164,7 @@ curl -b cookies.txt -G http://localhost:8080/api/metrics/query \
 
 | Method | Route | Purpose |
 |---|---|---|
-| `GET` | `/api/alerts` | Active alerts (pending, firing, suppressed, recently resolved). |
+| `GET` | `/api/alerts` | Active alerts (pending, firing, suppressed, recently resolved). Alerts of deleted or paused devices are never listed. |
 | `GET` | `/api/alerts/history?since=2026-09-01T00:00:00Z&limit=200` | Phase transitions. `since` is RFC 3339, default the last seven days; `limit` must be positive. |
 
 An active alert:
@@ -190,7 +197,8 @@ An active alert:
 A history entry has `id`, `fingerprint`, `rule_uid`, `target_id`,
 `from_phase`, `to_phase`, `severity`, `value`, `notified`, `reason` (empty, or
 why nothing was sent: `learning: would have fired`, `suppressed: device 2
-unreachable`, `maintenance window`) and `at`.
+unreachable`, `maintenance window`, `device removed or disabled`) and `at`.
+A `target_id` that no longer exists is shown as "(deleted device)" by the UI.
 
 ### Rules
 
@@ -292,6 +300,28 @@ The exact keys per kind come from `/api/notify/kinds` and are documented in
   "install_windows": "& ([scriptblock]::Create((irm http://server:8080/install.ps1))) -Token dmon_… -Url http://server:8080"
 }
 ```
+
+## Containers and commands (agent devices)
+
+Actions on the containers of a machine that runs the agent. Every route
+answers `404` when the device is not an `agent` target.
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/targets/{id}/agent` | The machine as its agent last described it: `hostname`, `os`, `os_version`, `arch`, `agent_version`, `commands_supported`, `last_seen_at`. `404` until an agent has reported. `commands_supported` is `true` only when the agent declared that it fetches commands (`commands: true`, the default of current agents); an older agent or one with `commands: false` gives `false`. |
+| `GET` | `/api/targets/{id}/containers` | Every container from the last batch: `name`, `image`, `up`, `health`, `restart_count`, `uptime_seconds`, `image_age_seconds`, `update_available`, `policy`, `last_command`. |
+| `PUT` | `/api/targets/{id}/containers/{name}/policy` | `{"auto_restart": bool, "auto_update": bool, "prune_old_image": bool, "only_in_maintenance": bool}`. Every field is optional: an omitted field keeps its stored value. Returns the full policy. |
+| `POST` | `/api/targets/{id}/containers/{name}/restart` | Queue a restart. `201` with the command. `404` when `name` is not in the agent's inventory; `409` when the same command is already queued or running, or when the agent cannot run commands (see `commands_supported`). |
+| `POST` | `/api/targets/{id}/containers/{name}/update` | Queue an update; optional `{"prune": bool}` (defaults to the policy). Same status codes as restart. |
+| `GET` | `/api/targets/{id}/commands` | The last 20 commands, newest first: `id`, `kind` (`container.restart`, `container.update`), `args`, `status`, `requested_by` (a user, or `policy`), `created_at`, `started_at`, `finished_at`, `result`. |
+| `DELETE` | `/api/targets/{id}/commands/{command_id}` | Cancel a queued command. `204`; `409` once the agent has picked it up or when it is already closed; `404` when it does not belong to this device. |
+
+`status` goes `queued → running → done | failed`. Two other final states exist:
+`cancelled` (a person pulled the command back) and `expired` (the server gave
+up after ten minutes because no agent came to fetch it — agent stopped, too
+old for the command channel, or installed with `commands: false`). The server
+expires stale commands every minute on its own; a queued command never blocks
+a new one for longer than that.
 
 ## Agent files (outside `/api`)
 

@@ -110,11 +110,9 @@
 				rule.operator === '>' ? 'above' : rule.operator === '>=' ? 'at least' : rule.operator === '<' ? 'below' : 'at most';
 			// Seconds read better as a duration: "above 7 d", not "above 604800 s".
 			const amount =
-				rule.unit === 's' && rule.threshold >= 86400
-					? `${Math.round((rule.threshold / 86400) * 10) / 10} d`
-					: rule.unit === 's' && rule.threshold >= 60
-						? formatDuration(rule.threshold)
-						: `${rule.threshold}${rule.unit ? ` ${rule.unit}` : ''}`;
+				rule.unit === 's' && rule.threshold >= 60
+					? formatDuration(rule.threshold)
+					: `${rule.threshold}${rule.unit ? ` ${rule.unit}` : ''}`;
 			parts.push(`${op} ${amount}`);
 		}
 		parts.push(rule.for_secs > 0 ? `for ${formatDuration(rule.for_secs)}` : 'immediately');
@@ -288,7 +286,7 @@
 				style={`--rise-delay: ${Math.min(i, 10) * 30}ms`}
 			>
 				<div class="flex flex-wrap items-start gap-x-4 gap-y-3">
-					<div class="min-w-0 flex-1">
+					<div class="min-w-0 flex-[1_1_16rem]">
 						<div class="flex flex-wrap items-center gap-2">
 							<Plate tone={severityTone(rule.severity)} label={severityWord(rule.severity)} bare />
 							<span class="truncate font-semibold text-ink">{rule.name}</span>

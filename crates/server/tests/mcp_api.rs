@@ -22,8 +22,14 @@ use tower::ServiceExt;
 /// Adresse volontairement inexploitable : VictoriaMetrics n'est pas nécessaire ici.
 const UNREACHABLE_VICTORIA: &str = "http://127.0.0.1:1";
 
+/// Mot de passe du premier administrateur, créé au montage.
+const PASSWORD: &str = "mot-de-passe-du-homelab";
+
 struct TestApp {
     router: Router,
+    /// Session d'administrateur, envoyée avec chaque requête : sans elle, les
+    /// routes de gestion des jetons ne répondent que 401.
+    cookie: String,
     _dir: tempfile::TempDir,
 }
 
@@ -53,10 +59,30 @@ async fn setup() -> TestApp {
 
     let state = AppState::new(Inner { config, pool, cipher, victoria, sink, collectors: registry });
 
-    TestApp { router: api::router(state), _dir: dir }
+    let mut app = TestApp { router: api::router(state), cookie: String::new(), _dir: dir };
+    app.cookie = app.open_admin_session().await;
+    app
 }
 
 impl TestApp {
+    /// Crée le compte `admin` puis ouvre sa session ; rend la valeur du cookie.
+    async fn open_admin_session(&self) -> String {
+        let reply = self
+            .request("POST", "/api/auth/setup", Some(json!({ "password": PASSWORD })), None)
+            .await;
+        assert_eq!(reply.status, StatusCode::NO_CONTENT, "création de l'admin : {}", reply.body);
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/auth/login")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json!({ "password": PASSWORD }).to_string()))
+            .unwrap();
+        let response = self.router.clone().oneshot(request).await.expect("réponse");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let raw = response.headers().get(header::SET_COOKIE).expect("cookie de session");
+        raw.to_str().unwrap().split(';').next().unwrap().to_string()
+    }
+
     async fn request(
         &self,
         method: &str,
@@ -65,6 +91,9 @@ impl TestApp {
         bearer: Option<&str>,
     ) -> Reply {
         let mut builder = Request::builder().method(method).uri(uri);
+        if !self.cookie.is_empty() {
+            builder = builder.header(header::COOKIE, &self.cookie);
+        }
         if let Some(token) = bearer {
             builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
         }
@@ -159,17 +188,10 @@ async fn a_token_is_listed_without_its_secret_and_can_be_revoked() {
 }
 
 #[tokio::test]
-async fn token_management_needs_a_session_once_the_instance_is_configured() {
-    let app = setup().await;
-    let reply = app
-        .request(
-            "POST",
-            "/api/auth/setup",
-            Some(json!({ "password": "mot-de-passe-du-homelab" })),
-            None,
-        )
-        .await;
-    assert_eq!(reply.status, StatusCode::NO_CONTENT, "{}", reply.body);
+async fn token_management_needs_a_session() {
+    let mut app = setup().await;
+    // Même instance, sans le cookie : l'administrateur n'est plus là.
+    app.cookie.clear();
 
     let reply = app
         .request("POST", "/api/tokens", Some(json!({ "name": "x", "scope": "read" })), None)

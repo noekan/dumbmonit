@@ -36,7 +36,10 @@ class AlertsStore {
 		const unreachable = this.targets.filter(
 			(target) => {
 				const state = displayState(target, this.probes.get(target.id));
-				return (state === 'offline' || state === 'down') && !covered.has(target.id);
+				return (
+					(state === 'offline' || state === 'down' || state === 'misconfigured') &&
+					!covered.has(target.id)
+				);
 			}
 		).length;
 		return firing.length + unreachable;

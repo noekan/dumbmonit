@@ -125,7 +125,7 @@ pub async fn status(
     let user = if configured {
         current_session(&state.pool, &headers).await?.map(|(_, user)| UserView::from(user))
     } else {
-        // Instance vierge : l'API est ouverte, mais personne n'est « connecté ».
+        // Instance vierge : il n'y a pas encore de compte, donc pas de session.
         None
     };
     let resolved = oidc::resolve(&state.pool, &state.cipher, &state.config.oidc).await?;

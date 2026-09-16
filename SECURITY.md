@@ -44,8 +44,11 @@ This is a volunteer-maintained project; there is no bug bounty.
 In scope, roughly in order of how much we care:
 
 - **Authentication and sessions** — the instance password, `/setup`, the login
-  rate limit, the session cookie, `DUMBMONIT_RESET_PASSWORD`, and any way to
-  reach `/api/*` without a session.
+  rate limit, the session cookie, `DUMBMONIT_RESET_PASSWORD`, the OpenID
+  Connect flow (state, nonce, PKCE, which local account an identity is linked
+  to), the post-login redirect, and any way to reach `/api/*` without a
+  session — including on a fresh instance, where only `/api/auth/status`,
+  `/api/auth/setup`, `/api/auth/login` and `/api/health` must answer.
 - **Secrets at rest** — the AES-256-GCM encryption of SNMP communities, API
   tokens and passwords, the derivation of the key from `/data/secret.key` or
   `DUMBMONIT_SECRET`, and any path by which a secret is returned by the API
@@ -70,6 +73,13 @@ without a demonstrated impact.
 
 - Put DumbMonit behind a reverse proxy with TLS if it is reachable from outside
   the network it monitors; the built-in server speaks plain HTTP.
+- Create the first admin right after the first start (or after
+  `DUMBMONIT_RESET_PASSWORD=1`): until then the API refuses everything but
+  the setup routes, but whoever reaches the port first can create the account.
+- With single sign-on, an identity is linked to an existing local account only
+  on a provider-verified email matching that account's username, and never to
+  a password-holding admin: if you want an SSO admin, put its group in *Admin
+  groups* rather than reusing the local admin's name.
 - Back up `/data/secret.key` with the database, and keep it out of your
   screenshots.
 - Prefer SNMP v3 on shared networks: a v2c community travels in clear text.

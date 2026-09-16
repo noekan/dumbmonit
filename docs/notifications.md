@@ -95,7 +95,7 @@ payload that a script can use:
   "severity": "warning",
   "status": "firing",
   "title": "nas — Disk full",
-  "text": "⚠️ Disk full — 95 % (threshold > 90 %)",
+  "text": "⚠️ Warning · Disk full — /data — 95 % (threshold > 90 %)",
   "value": 95.0,
   "threshold": 90.0,
   "unit": "%",
@@ -133,7 +133,7 @@ write your JSON normally.
 | Variable | What it contains | Example |
 |---|---|---|
 | `{{title}}` | Full message title | `nas — Disk full` |
-| `{{message}}` | Plain-text body, one line per alert | `⚠️ Disk full — 95 % (threshold > 90 %)` |
+| `{{message}}` | Plain-text body, one line per alert | `⚠️ Warning · Disk full — /data — 95 % (threshold > 90 %)` |
 | `{{message_markdown}}` | The same body in Markdown | `**nas — Disk full**\n• ⚠️ …` |
 | `{{rule}}` | Name of the alert rule | `Disk full` |
 | `{{target}}` | Name of the monitored device | `nas` |
@@ -212,7 +212,7 @@ the application receives:
   "state": "firing",
   "value": 95,
   "threshold": 90,
-  "detail": "⚠️ Disk full — 95 % (threshold > 90 %)",
+  "detail": "⚠️ Warning · Disk full — /data — 95 % (threshold > 90 %)",
   "link": "https://dumbmonit.home/targets/42",
   "seen_at": "2026-09-01T14:12:05+00:00"
 }

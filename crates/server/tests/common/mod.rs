@@ -74,7 +74,10 @@ pub async fn build(dir: tempfile::TempDir, config: Config, pool: sqlx::SqlitePoo
         .await
         .expect("initialisation du chiffrement");
 
-    let victoria = tsdb::Victoria::new(UNREACHABLE_VICTORIA).expect("client");
+    // L'adresse de la configuration, pour qu'un test puisse brancher un faux
+    // VictoriaMetrics ; injoignable par défaut.
+    let victoria_url = config.victoria_url.clone().unwrap_or_else(|| UNREACHABLE_VICTORIA.into());
+    let victoria = tsdb::Victoria::new(victoria_url).expect("client");
     let sink = tsdb::spawn_writer(victoria.clone(), std::time::Duration::from_secs(60));
 
     let mut registry = collectors::Registry::new();

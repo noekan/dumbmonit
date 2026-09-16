@@ -244,20 +244,128 @@ async fn groups_decide_the_role_at_each_login() {
     assert_eq!(app.get("/api/auth/me", Some(&cookie)).await.body["role"], json!("viewer"));
 }
 
-#[tokio::test]
-async fn an_existing_local_account_is_linked_by_username() {
-    let provider = spawn_provider().await;
-    let app = app_with_sso(&provider, |_| {}).await;
+/// Crée un compte local avec un mot de passe, du rôle demandé.
+async fn create_local_user(app: &TestApp, admin: &str, username: &str, role: &str) {
+    let reply = app
+        .post(
+            "/api/users",
+            json!({ "username": username, "role": role, "password": PASSWORD }),
+            Some(admin),
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::CREATED, "{}", reply.body);
+}
 
-    // Le compte `admin` existe déjà, avec un mot de passe : le SSO s'y rattache
-    // plutôt que de créer un doublon, et son rôle est conservé.
-    provider.lock().unwrap().claims = json!({ "sub": "u-admin", "preferred_username": "admin" });
+#[tokio::test]
+async fn a_username_claim_never_takes_over_an_existing_account() {
+    let provider = spawn_provider().await;
+    let app = app_with_sso(&provider, |oidc| oidc.admin_groups = vec!["monit-admins".into()]).await;
+
+    // Chez bien des fournisseurs, `preferred_username` et `email` se choisissent
+    // soi-même : se présenter comme « admin » ne doit rien donner de plus qu'un
+    // compte neuf, quels que soient les groupes annoncés.
+    provider.lock().unwrap().claims = json!({
+        "sub": "u-mallory", "preferred_username": "admin", "email": "admin",
+        "groups": ["monit-admins"]
+    });
     let cookie = sign_in(&app, &provider, None).await.cookie();
     let me = app.get("/api/auth/me", Some(&cookie)).await.body;
-    assert_eq!(me["username"], json!("admin"));
-    assert_eq!(me["role"], json!("admin"));
+    assert_eq!(me["username"], json!("admin-1"), "{me}");
+    assert_eq!(me["auth"], json!("oidc"));
+
+    // Le vrai `admin` est intact : même mot de passe, toujours seul à porter le
+    // sien, et le SSO ne lui est pas rattaché.
+    let admin = app.admin_cookie().await;
+    let users = app.get("/api/users", Some(&admin)).await.body;
+    let users = users.as_array().expect("liste");
+    assert_eq!(users.len(), 2, "{users:?}");
+    let local = users.iter().find(|u| u["username"] == json!("admin")).expect("admin");
+    assert_eq!(local["auth"], json!("password"));
+    assert_eq!(local["role"], json!("admin"));
+}
+
+#[tokio::test]
+async fn a_verified_email_links_a_local_account_an_unverified_one_does_not() {
+    let provider = spawn_provider().await;
+    let app = app_with_sso(&provider, |_| {}).await;
+    let admin = app.admin_cookie().await;
+    create_local_user(&app, &admin, "jane@lab", "viewer").await;
+
+    // Le fournisseur ne garantit pas le courriel : compte distinct.
+    provider.lock().unwrap().claims =
+        json!({ "sub": "u-jane", "email": "jane@lab", "email_verified": false });
+    let cookie = sign_in(&app, &provider, None).await.cookie();
+    assert_eq!(app.get("/api/auth/me", Some(&cookie)).await.body["username"], json!("jane@lab-1"));
+
+    // Sans la revendication du tout : pareil.
+    provider.lock().unwrap().claims = json!({ "sub": "u-jane-2", "email": "jane@lab" });
+    let cookie = sign_in(&app, &provider, None).await.cookie();
+    assert_eq!(app.get("/api/auth/me", Some(&cookie)).await.body["username"], json!("jane@lab-2"));
+
+    // Courriel vérifié : le compte local est rattaché, mot de passe conservé, et
+    // la casse du courriel n'y change rien.
+    provider.lock().unwrap().claims =
+        json!({ "sub": "u-jane-3", "email": "Jane@Lab", "email_verified": true });
+    let cookie = sign_in(&app, &provider, None).await.cookie();
+    let me = app.get("/api/auth/me", Some(&cookie)).await.body;
+    assert_eq!(me["username"], json!("jane@lab"));
     assert_eq!(me["auth"], json!("password"), "le mot de passe reste utilisable");
-    assert_eq!(app.get("/api/users", Some(&cookie)).await.body.as_array().map(Vec::len), Some(1));
+    assert_eq!(me["role"], json!("viewer"));
+
+    // Le rattachement est acquis : la connexion suivante retrouve le compte par
+    // son identité, sans repasser par le courriel.
+    provider.lock().unwrap().claims = json!({ "sub": "u-jane-3" });
+    let cookie = sign_in(&app, &provider, None).await.cookie();
+    assert_eq!(app.get("/api/auth/me", Some(&cookie)).await.body["username"], json!("jane@lab"));
+    assert_eq!(app.get("/api/users", Some(&admin)).await.body.as_array().map(Vec::len), Some(4));
+}
+
+#[tokio::test]
+async fn a_local_admin_with_a_password_is_never_linked_by_a_first_sso_login() {
+    let provider = spawn_provider().await;
+    let app = app_with_sso(&provider, |_| {}).await;
+    let admin = app.admin_cookie().await;
+    create_local_user(&app, &admin, "boss@lab", "admin").await;
+
+    provider.lock().unwrap().claims =
+        json!({ "sub": "u-boss", "email": "boss@lab", "email_verified": true });
+    let cookie = sign_in(&app, &provider, None).await.cookie();
+    let me = app.get("/api/auth/me", Some(&cookie)).await.body;
+    assert_eq!(me["username"], json!("boss@lab-1"), "{me}");
+    assert_eq!(me["role"], json!("viewer"));
+    assert_eq!(me["auth"], json!("oidc"));
+    assert_eq!(app.login_as("boss@lab", PASSWORD).await.status, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn without_auto_create_a_verified_email_still_signs_in_to_its_local_account() {
+    let provider = spawn_provider().await;
+    let app = app_with_sso(&provider, |oidc| oidc.auto_create = false).await;
+    let admin = app.admin_cookie().await;
+    create_local_user(&app, &admin, "jane@lab", "viewer").await;
+
+    provider.lock().unwrap().claims =
+        json!({ "sub": "u-jane", "preferred_username": "jane@lab", "email": "jane@lab" });
+    let refused = sign_in(&app, &provider, None).await;
+    assert_eq!(refused.location.as_deref(), Some("/login?error=oidc&reason=no_account"));
+
+    provider.lock().unwrap().claims =
+        json!({ "sub": "u-jane", "email": "jane@lab", "email_verified": true });
+    let cookie = sign_in(&app, &provider, None).await.cookie();
+    assert_eq!(app.get("/api/auth/me", Some(&cookie)).await.body["username"], json!("jane@lab"));
+}
+
+#[tokio::test]
+async fn the_destination_after_login_stays_on_this_site() {
+    let provider = spawn_provider().await;
+    let app = app_with_sso(&provider, |_| {}).await;
+    provider.lock().unwrap().claims = json!({ "sub": "u-7", "preferred_username": "seven" });
+
+    for outside in ["//evil.example.org", "/\\evil.example.org", "https://evil.example.org"] {
+        let reply = sign_in(&app, &provider, Some(outside)).await;
+        assert_eq!(reply.status, StatusCode::SEE_OTHER);
+        assert_eq!(reply.location.as_deref(), Some("/"), "{outside}");
+    }
 }
 
 #[tokio::test]

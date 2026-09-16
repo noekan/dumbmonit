@@ -66,8 +66,13 @@ export function isPublicRoute(pathname: string): boolean {
  */
 export function safeDestination(value: string | null): string {
 	if (!value) return '/';
-	if (!value.startsWith('/') || value.startsWith('//')) return '/';
-	if (isPublicRoute(new URL(value, 'http://local').pathname)) return '/';
+	// A relative path and nothing else: `//host` and `/\host` are both read as
+	// an external address by browsers, and a control character is never legitimate.
+	if (!value.startsWith('/') || value.startsWith('//') || value.startsWith('/\\')) return '/';
+	if (/[\\\u0000-\u001f\u007f]/.test(value)) return '/';
+	const resolved = new URL(value, 'http://local');
+	if (resolved.host !== 'local') return '/';
+	if (isPublicRoute(resolved.pathname)) return '/';
 	return value;
 }
 

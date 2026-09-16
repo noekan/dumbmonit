@@ -178,8 +178,8 @@ async fn insert_host(
     sqlx::query(
         "INSERT INTO agent_hosts
              (target_id, agent_key, hostname, os, os_version, kernel_version, arch,
-              agent_version, token_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              agent_version, commands_enabled, token_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(target_id)
     .bind(key)
@@ -189,6 +189,7 @@ async fn insert_host(
     .bind(&identity.kernel_version)
     .bind(&identity.arch)
     .bind(&identity.agent_version)
+    .bind(identity.commands_enabled)
     .bind(token_id)
     .execute(pool)
     .await
@@ -207,7 +208,8 @@ async fn update_host(
 ) -> Result<()> {
     sqlx::query(
         "UPDATE agent_hosts
-         SET hostname = ?, os = ?, os_version = ?, kernel_version = ?, arch = ?, agent_version = ?
+         SET hostname = ?, os = ?, os_version = ?, kernel_version = ?, arch = ?,
+             agent_version = ?, commands_enabled = ?
          WHERE target_id = ?",
     )
     .bind(&identity.hostname)
@@ -216,6 +218,7 @@ async fn update_host(
     .bind(&identity.kernel_version)
     .bind(&identity.arch)
     .bind(&identity.agent_version)
+    .bind(identity.commands_enabled)
     .bind(target_id)
     .execute(pool)
     .await
@@ -245,6 +248,53 @@ pub async fn record_batch(
     .await
     .context("recording the batch receipt")?;
     Ok(())
+}
+
+/// La machine telle que son agent la décrit, pour l'interface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostInfo {
+    pub hostname: String,
+    pub os: String,
+    pub os_version: Option<String>,
+    pub arch: Option<String>,
+    pub agent_version: String,
+    /// `None` : l'agent n'a rien déclaré (binaire antérieur au canal de
+    /// commandes). Il ne viendra pas chercher de commande, pas plus qu'avec
+    /// `Some(false)`.
+    pub commands_enabled: Option<bool>,
+    pub last_seen_at: Option<String>,
+}
+
+impl HostInfo {
+    /// Vrai seulement si l'agent a dit qu'il exécute les commandes : dans le
+    /// doute, l'interface ne propose pas une action qui n'aboutirait jamais.
+    pub fn commands_supported(&self) -> bool {
+        self.commands_enabled == Some(true)
+    }
+}
+
+/// Description de la machine rattachée à une cible, si un agent s'y est présenté.
+pub async fn host(pool: &SqlitePool, target_id: TargetId) -> Result<Option<HostInfo>> {
+    let row = sqlx::query(
+        "SELECT hostname, os, os_version, arch, agent_version, commands_enabled, last_seen_at
+         FROM agent_hosts WHERE target_id = ?",
+    )
+    .bind(target_id)
+    .fetch_optional(pool)
+    .await
+    .context("reading the machine")?;
+    row.map(|row| {
+        Ok(HostInfo {
+            hostname: row.try_get("hostname")?,
+            os: row.try_get("os")?,
+            os_version: row.try_get("os_version")?,
+            arch: row.try_get("arch")?,
+            agent_version: row.try_get("agent_version")?,
+            commands_enabled: row.try_get::<Option<i64>, _>("commands_enabled")?.map(|v| v != 0),
+            last_seen_at: row.try_get("last_seen_at")?,
+        })
+    })
+    .transpose()
 }
 
 /// Instant du dernier lot reçu, en millisecondes depuis l'époque Unix.
@@ -299,6 +349,7 @@ mod tests {
             kernel_version: Some("6.1.0".into()),
             arch: Some("x86_64".into()),
             agent_version: "0.1.0".into(),
+            commands_enabled: Some(true),
             machine_id: machine_id.map(str::to_string),
             tags: BTreeMap::new(),
         }
@@ -441,6 +492,40 @@ mod tests {
             last_seen_ms(&db.pool, registration.target_id).await.unwrap(),
             Some(1_700_000_000_000)
         );
+    }
+
+    #[tokio::test]
+    async fn the_agent_capabilities_follow_its_last_batch() {
+        let db = setup().await;
+        let (token_record, _) = create_token(&db.pool, "parc").await.expect("création");
+        // Un agent d'avant le canal de commandes ne dit rien : il n'est pas
+        // réputé capable pour autant.
+        let mut identity = identity("nas", Some("id-nas"));
+        identity.commands_enabled = None;
+        let registration =
+            register(&db.pool, &db.cipher, &identity, token_record.id).await.unwrap();
+        let info = host(&db.pool, registration.target_id).await.unwrap().expect("machine");
+        assert_eq!(info.commands_enabled, None);
+        assert!(!info.commands_supported());
+        assert_eq!(info.agent_version, "0.1.0");
+
+        // Après mise à jour de l'agent, le lot suivant suffit.
+        identity.commands_enabled = Some(true);
+        identity.agent_version = "0.2.0".into();
+        register(&db.pool, &db.cipher, &identity, token_record.id).await.unwrap();
+        let info = host(&db.pool, registration.target_id).await.unwrap().expect("machine");
+        assert!(info.commands_supported());
+        assert_eq!(info.agent_version, "0.2.0");
+
+        // `commands: false` dans la configuration de l'agent.
+        identity.commands_enabled = Some(false);
+        register(&db.pool, &db.cipher, &identity, token_record.id).await.unwrap();
+        let info = host(&db.pool, registration.target_id).await.unwrap().expect("machine");
+        assert_eq!(info.commands_enabled, Some(false));
+        assert!(!info.commands_supported());
+
+        // Une cible sans agent n'a pas de machine.
+        assert!(host(&db.pool, 4_242).await.unwrap().is_none());
     }
 
     #[tokio::test]

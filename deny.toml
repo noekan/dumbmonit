@@ -29,5 +29,14 @@ wildcards = "deny"
 # Les crates du workspace se référencent par chemin, sans version : c'est voulu.
 allow-wildcard-paths = true
 
+# Avis de sécurité (base RustSec). La CI les vérifie : une dépendance vulnérable
+# fait échouer le build tant qu'elle n'est pas mise à jour ou, faute de
+# correctif, explicitement ignorée ici avec sa raison.
 [advisories]
 version = 2
+ignore = [
+    # Marvin (attaque temporelle sur RSA) : `rsa` est tiré par `jsonwebtoken` et ne
+    # sert qu'à vérifier des signatures RS256 avec la clé publique du fournisseur
+    # OIDC — aucune clé privée RSA n'est manipulée. Pas de version corrigée en amont.
+    { id = "RUSTSEC-2023-0071", reason = "vérification de signature seulement, pas de correctif amont" },
+]

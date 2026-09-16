@@ -2,7 +2,7 @@
 
 ![Settings: appearance, notifications, agents, security, about](../assets/screenshots/settings-light.png){ loading=lazy }
 
-One page, five sections, with a rail that follows the scroll.
+One page, one section per topic, with a rail that follows the scroll.
 
 ## Appearance
 
@@ -46,6 +46,35 @@ Login is rate-limited: after five failed attempts, each further attempt waits
 longer (30 s, doubling, up to 5 minutes). Sessions last 30 days. A forgotten
 password is reset with `DUMBMONIT_RESET_PASSWORD=1`: see the
 [FAQ](../faq.md#i-lost-the-password).
+
+## Single sign-on
+
+Sign-in through an OpenID Connect provider (Authelia, Authentik, Keycloak,
+Dex, Google Workspace…). Enter the issuer URL, the client id and secret, and
+register the callback URL shown in the form with your provider. **Test
+discovery** reads the provider's configuration without signing anyone in.
+Settings saved here take precedence over the `DUMBMONIT_OIDC_*` environment
+variables.
+
+**Roles.** *Admin groups* lists the groups whose members become admins;
+everyone else is a viewer. Roles are re-evaluated at each sign-in, except
+that the last active admin is never demoted.
+
+**Which account a sign-in lands on.** The identity is remembered by its
+provider subject after the first sign-in. On a first sign-in:
+
+- An existing account is linked only when the provider asserts
+  `email_verified: true` and that email is the account's username. A
+  `preferred_username` or an unverified email never links: on most providers
+  the user chooses those, so `admin` from the provider must not become *your*
+  `admin`.
+- A local **admin that has a password is never linked automatically**, even
+  on a verified email: the sign-in creates a distinct account instead. Keep
+  managing that admin with its password, or create a separate SSO admin
+  through the admin groups.
+- Otherwise, with *Create accounts on first sign-in* on, a new account is
+  created (username from the provider, suffixed `-1`, `-2`… when taken). With
+  it off, only the verified-email link above can sign in.
 
 ## About
 

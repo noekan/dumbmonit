@@ -488,7 +488,7 @@
 						{/if}
 						<p class="tnum min-w-0 text-sm text-ink-2" title={formatDateTime(target.last_probe_at)}>
 							{#if target.last_error}
-								<span class="break-words text-warning-ink">{target.last_error}</span>
+								<span class={`break-words ${target.error_kind === 'config' ? 'text-advisory-ink' : 'text-warning-ink'}`}>{target.last_error}</span>
 							{:else if stateNow === 'down'}
 								<span class="text-warning-ink">{formatFailureReason(summary?.status?.reason)}</span>
 								<span class="text-ink-3" aria-hidden="true">·</span>
@@ -576,7 +576,9 @@
 		<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
 			<h2 id="device-metrics" class="text-base font-semibold tracking-tight text-ink">
 				{service ? 'Availability' : 'Metrics'}
-				<span class="ml-1 font-normal text-ink-2">last {rangeLabel}</span>
+				<!-- A service's figures each name their own window (24 h, last hour, the range):
+				     the heading does not claim one for all of them. -->
+				{#if !service}<span class="ml-1 font-normal text-ink-2">last {rangeLabel}</span>{/if}
 			</h2>
 			<Segmented options={rangeOptions} value={range} onchange={setRange} label="Time range" size="sm" />
 		</div>
@@ -611,7 +613,7 @@
 				</Panel>
 
 				<Panel title="Response time" class="mt-4">
-					{#snippet aside()}<span class="label-tape">ms</span>{/snippet}
+					{#snippet aside()}<span class="label-tape label-tape-unit">ms</span>{/snippet}
 					{#if responseTimes.length > 0}
 						<Chart series={responseTimes} unit="ms" height={220} />
 					{:else}
@@ -645,7 +647,7 @@
 								<div class="rise-in" style="--rise-delay: {Math.min(i, 8) * 40}ms">
 									<div class="flex items-center justify-between gap-2 pb-1">
 										<h3 class="text-sm font-semibold text-ink">{group.title}</h3>
-										{#if group.unit}<span class="label-tape">{group.unit}</span>{/if}
+										{#if group.unit}<span class="label-tape label-tape-unit">{group.unit}</span>{/if}
 									</div>
 									<Chart series={group.series} unit={group.unit} height={200} />
 								</div>
@@ -684,7 +686,7 @@
 											<div class="rounded-lg border border-line px-3 pt-2 pb-1">
 												<div class="flex items-center justify-between gap-2">
 													<span class="text-sm font-semibold text-ink">{chart.title}</span>
-													{#if chart.unit}<span class="label-tape">{chart.unit}</span>{/if}
+													{#if chart.unit}<span class="label-tape label-tape-unit">{chart.unit}</span>{/if}
 												</div>
 												<Chart series={chart.series} unit={chart.unit} height={140} />
 											</div>
@@ -720,7 +722,7 @@
 									<div>
 										<div class="flex items-center justify-between gap-2 pb-1">
 											<h3 class="text-sm font-semibold text-ink" title={group.name}>{group.title}</h3>
-											{#if group.unit}<span class="label-tape">{group.unit}</span>{/if}
+											{#if group.unit}<span class="label-tape label-tape-unit">{group.unit}</span>{/if}
 										</div>
 										<Chart series={group.series} unit={group.unit} height={180} />
 									</div>

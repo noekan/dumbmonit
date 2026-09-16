@@ -284,6 +284,9 @@ pub struct TargetNode {
     pub address: String,
     pub parent_id: Option<TargetId>,
     pub tags: BTreeMap<String, String>,
+    /// Une cible désactivée reste dans la topologie — elle peut être le parent
+    /// d'une cible active — mais n'a plus le droit de porter une alerte.
+    pub enabled: bool,
 }
 
 /// Empreinte stable d'une alerte : règle + série.
@@ -310,11 +313,43 @@ fn fnv1a64(input: &str) -> u64 {
 /// L'étiquette `__name__` est extraite comme nom de métrique afin que la clé soit
 /// identique à celle qu'aurait produite `Sample::series_key`.
 pub fn series_key(labels: &BTreeMap<String, String>) -> String {
+    render_key(labels, |_| true)
+}
+
+/// Préfixe des étiquettes recopiées depuis les `tags` de la cible par
+/// `Target::base_labels()`.
+const TAG_LABEL_PREFIX: &str = "tag_";
+
+/// Vrai si la série porte l'identifiant de sa cible.
+pub fn carries_target_id(labels: &BTreeMap<String, String>) -> bool {
+    TARGET_ID_LABELS.iter().any(|label| labels.contains_key(*label))
+}
+
+/// Clé d'identité d'une alerte : la série, débarrassée de ce qui ne fait que
+/// décrire la cible.
+///
+/// Dès qu'une série porte l'identifiant de sa cible, son nom (`host`) et ses
+/// `tag_*` sont redondants — et changeants : renommer l'équipement ou retoucher
+/// ses étiquettes crée une nouvelle série dans VictoriaMetrics, qui ne doit pas
+/// devenir une nouvelle alerte pendant que l'ancienne, muette, passe pour une
+/// panne. Sans identifiant, la clé de série sert telle quelle.
+pub fn identity_key(labels: &BTreeMap<String, String>) -> String {
+    if !carries_target_id(labels) {
+        return series_key(labels);
+    }
+    render_key(labels, |label| {
+        !TARGET_NAME_LABELS.contains(&label) && !label.starts_with(TAG_LABEL_PREFIX)
+    })
+}
+
+fn render_key(labels: &BTreeMap<String, String>, keep: impl Fn(&str) -> bool) -> String {
     let name = labels.get("__name__").map(String::as_str).unwrap_or("");
     let mut key = String::with_capacity(name.len() + 16 * labels.len());
     key.push_str(name);
     let mut first = true;
-    for (label, value) in labels.iter().filter(|(k, _)| k.as_str() != "__name__") {
+    for (label, value) in
+        labels.iter().filter(|(k, _)| k.as_str() != "__name__" && keep(k.as_str()))
+    {
         key.push(if first { '{' } else { ',' });
         first = false;
         key.push_str(label);
@@ -339,6 +374,7 @@ mod tests {
             address: format!("10.0.0.{id}"),
             parent_id: None,
             tags: tags.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect(),
+            enabled: true,
         }
     }
 
@@ -417,6 +453,33 @@ mod tests {
                 .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
                 .collect();
         assert_eq!(series_key(&labels), "dumbmonit_cpu_usage_percent{core=\"0\",host=\"nas\"}");
+    }
+
+    #[test]
+    fn la_cle_d_identite_ignore_le_nom_et_les_tags_quand_la_cible_est_identifiee() {
+        let labels: BTreeMap<String, String> = [
+            ("__name__", "dumbmonit_up"),
+            ("host", "nas"),
+            ("tag_role", "storage"),
+            ("target", "4"),
+            ("mountpoint", "/"),
+        ]
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+        .collect();
+        assert_eq!(identity_key(&labels), "dumbmonit_up{mountpoint=\"/\",target=\"4\"}");
+
+        // Renommer l'équipement ne change pas l'identité de l'alerte.
+        let mut renamed = labels.clone();
+        renamed.insert("host".to_string(), "nas-2".to_string());
+        assert_eq!(identity_key(&renamed), identity_key(&labels));
+        assert_ne!(series_key(&renamed), series_key(&labels));
+
+        // Sans identifiant de cible, la clé de série reste l'identité.
+        let mut anonymous = labels.clone();
+        anonymous.remove("target");
+        assert_eq!(identity_key(&anonymous), series_key(&anonymous));
+        assert!(!carries_target_id(&anonymous));
     }
 
     #[test]

@@ -209,6 +209,12 @@ time,
 	color: var(--c-ink-3);
 }
 
+/* A unit on a tape reads as written — "ms", "B/s", never "MS". */
+.label-tape.label-tape-unit {
+	text-transform: none;
+	letter-spacing: 0.03em;
+}
+
 /* Faceplate: the 1U front of a device. Brushed surface, one machined edge. */
 .faceplate {
 	position: relative;

@@ -223,7 +223,7 @@
 						<input id="sso-admin-groups" type="text" class="input" bind:value={form.admin_groups} placeholder="dumbmonit-admins, ops" autocomplete="off" disabled={saving} />
 					</Field>
 					<div class="sm:col-span-2">
-						<Field label="Create accounts on first sign-in" for="sso-auto-create" inline help="Off: only users that already exist here (matched by username or email) can sign in.">
+						<Field label="Create accounts on first sign-in" for="sso-auto-create" inline help="Off: only accounts already linked, or matched by a provider-verified email that equals their username, can sign in. A local admin with a password is never linked automatically.">
 							<Toggle id="sso-auto-create" bind:checked={form.auto_create} disabled={saving} />
 						</Field>
 					</div>

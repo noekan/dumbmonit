@@ -237,6 +237,127 @@ fn glyph(item: &GroupItem) -> &'static str {
     }
 }
 
+/// Mot d'état accolé au pictogramme : un lecteur d'écran, un courriel en texte
+/// brut ou une montre monochrome ne voient pas la couleur du glyphe.
+fn state_word(item: &GroupItem) -> &'static str {
+    match item.reason {
+        NotifyReason::Resolved => "Resolved",
+        NotifyReason::Flapping => "Flapping",
+        _ => match item.severity {
+            Severity::Info => "Info",
+            Severity::Warning => "Warning",
+            Severity::Critical => "Critical",
+        },
+    }
+}
+
+/// Étiquettes qui identifient l'équipement entier, pas la série : elles ne
+/// disent rien de plus que le nom déjà en titre.
+const TARGET_LABELS: [&str; 7] =
+    ["__name__", "target", "target_id", "host", "hostname", "instance", "address"];
+
+/// Étiquettes qui nomment le mieux une série, par ordre de préférence. Une VM
+/// se reconnaît à son nom, une sauvegarde à son groupe, un port à son nom.
+const IDENTITY_LABELS: [&str; 24] = [
+    "name",
+    "container",
+    "service",
+    "task",
+    "job",
+    "group",
+    "url",
+    "node",
+    "cluster",
+    "datastore",
+    "storage",
+    "disk",
+    "device",
+    "mountpoint",
+    "filesystem",
+    "volume",
+    "pool",
+    "ifname",
+    "interface",
+    "ifalias",
+    "worktype",
+    "process",
+    "unit",
+    "core",
+];
+
+/// Nombre maximal de valeurs d'étiquettes citées pour nommer une série.
+const IDENTITY_MAX: usize = 2;
+
+/// Étiquettes d'une clé de série `metric{a="1",b="2"}`, sans le nom de métrique.
+///
+/// Les valeurs ne sont pas échappées dans la clé : une virgule n'y termine une
+/// valeur que si elle suit un guillemet fermant, ce qui laisse passer les
+/// descriptions de ports (« Workshop, rack 2 »).
+fn series_labels(series_key: &str) -> BTreeMap<&str, &str> {
+    let mut labels = BTreeMap::new();
+    let Some(start) = series_key.find('{') else { return labels };
+    let mut rest = series_key[start + 1..].strip_suffix('}').unwrap_or(&series_key[start + 1..]);
+    while !rest.is_empty() {
+        let Some((key, after_key)) = rest.split_once("=\"") else { break };
+        let Some(end) = after_key.match_indices('"').map(|(i, _)| i).find(|&i| {
+            let next = after_key[i + 1..].chars().next();
+            next.is_none() || next == Some(',')
+        }) else {
+            break;
+        };
+        labels.insert(key, &after_key[..end]);
+        rest = after_key[end + 1..].strip_prefix(',').unwrap_or("");
+    }
+    labels
+}
+
+/// Nom de la série derrière l'alerte : la VM, le port, le point de montage.
+///
+/// Sans lui, deux « Service down » sur le même équipement sont indiscernables
+/// et un « VM stopped » ne dit pas laquelle. `None` quand la série n'a que des
+/// étiquettes d'équipement (`host_down`, par exemple).
+pub fn series_identity(series_key: &str) -> Option<String> {
+    let labels = series_labels(series_key);
+    // Une VM ou un conteneur se lit « nom (identifiant) » : ce qu'affiche Proxmox.
+    if let Some(name) = labels.get("name") {
+        return Some(match labels.get("vmid") {
+            Some(vmid) => format!("{name} ({vmid})"),
+            None => (*name).to_string(),
+        });
+    }
+    let mut parts: Vec<&str> = IDENTITY_LABELS
+        .iter()
+        .filter_map(|label| labels.get(label).copied())
+        .filter(|value| !value.is_empty())
+        .take(IDENTITY_MAX)
+        .collect();
+    if parts.is_empty() {
+        parts = labels
+            .iter()
+            .filter(|(key, value)| {
+                !TARGET_LABELS.contains(key) && !key.starts_with("tag_") && !value.is_empty()
+            })
+            .map(|(_, value)| *value)
+            .take(IDENTITY_MAX)
+            .collect();
+    }
+    if parts.is_empty() { None } else { Some(parts.join(" · ")) }
+}
+
+/// Vrai pour une règle « tout ou rien » sur une métrique 0/1 : « 1 (threshold
+/// > 0) » n'apprend rien que le nom de la règle ne dise déjà.
+fn is_boolean(item: &GroupItem) -> bool {
+    let Some(value) = item.value else { return false };
+    let is_bit = |v: f64| v == 0.0 || v == 1.0;
+    is_bit(value)
+        && is_bit(item.threshold)
+        && item.unit.is_empty()
+        && matches!(
+            (item.operator.as_str(), item.threshold as u8),
+            (">", 0) | (">=", 1) | ("<", 1) | ("<=", 0)
+        )
+}
+
 /// Tronque un texte sur une frontière de caractère, en signalant la coupe.
 ///
 /// Compter en caractères et non en octets : un titre accentué coupé au milieu d'un
@@ -279,9 +400,14 @@ pub fn format_duration(delta: TimeDelta) -> String {
 }
 
 fn line(item: &GroupItem, now: DateTime<Utc>) -> String {
-    let mut line = format!("{} {}", glyph(item), item.rule_name);
+    let mut line = format!("{} {} · {}", glyph(item), state_word(item), item.rule_name);
 
-    if let Some(value) = item.value {
+    if let Some(series) = series_identity(&item.series_key) {
+        line.push_str(&format!(" — {series}"));
+    }
+    if let Some(value) = item.value
+        && !is_boolean(item)
+    {
         line.push_str(&format!(" — {}", format_value(value, &item.unit)));
         // Le seuil n'est rappelé que pour une alerte en cours : sur une résolution,
         // ce qui compte est que la valeur soit revenue, pas ce qu'elle a franchi.
@@ -451,7 +577,10 @@ pub fn render_digest(digest: &Digest, public_url: Option<&str>) -> Message {
         let names: Vec<String> = digest
             .resolved_meanwhile
             .iter()
-            .map(|(target, item)| format!("{} ({target})", item.rule_name))
+            .map(|(target, item)| match series_identity(&item.series_key) {
+                Some(series) => format!("{} — {series} ({target})", item.rule_name),
+                None => format!("{} ({target})", item.rule_name),
+            })
             .collect();
         let label = match digest.hold {
             Some(Hold::Quiet) => "Resolved during quiet hours",
@@ -615,6 +744,110 @@ mod tests {
         assert!(message.text.contains("95 %"));
         assert!(message.text.contains("threshold > 90 %"));
         assert!(message.text.contains("for 1 h"));
+    }
+
+    #[test]
+    fn la_ligne_porte_le_mot_de_severite_a_cote_du_pictogramme() {
+        let text =
+            |severity| render(&group(vec![item("Disk full", NotifyReason::Firing, severity)])).text;
+        assert!(text(Severity::Critical).starts_with("🔴 Critical · Disk full"));
+        assert!(text(Severity::Warning).starts_with("⚠️ Warning · Disk full"));
+        assert!(text(Severity::Info).starts_with("ℹ️ Info · Disk full"));
+        let resolved =
+            render(&group(vec![item("Disk full", NotifyReason::Resolved, Severity::Warning)]));
+        assert!(resolved.text.starts_with("✅ Resolved · Disk full"), "{}", resolved.text);
+    }
+
+    #[test]
+    fn la_ligne_nomme_la_serie_derriere_l_alerte() {
+        let mut vm = item("VM or container stopped", NotifyReason::Firing, Severity::Warning);
+        vm.series_key = r#"dumbmonit_pve_guest_running{host="pve",name="win11-desktop",node="pve1",target="11",type="qemu",vmid="101"}"#.to_string();
+        vm.value = Some(1.0);
+        vm.threshold = 0.0;
+        vm.unit = String::new();
+        let message = render(&group(vec![vm]));
+        assert_eq!(
+            message.text,
+            "⚠️ Warning · VM or container stopped — win11-desktop (101), for 1 h"
+        );
+
+        let mut node = item("Proxmox node offline", NotifyReason::Firing, Severity::Critical);
+        node.series_key =
+            r#"dumbmonit_pve_node_online{host="pve",node="pve2",target="11"}"#.to_string();
+        node.value = Some(1.0);
+        node.threshold = 0.0;
+        node.unit = String::new();
+        assert!(render(&group(vec![node])).text.contains("Proxmox node offline — pve2,"));
+
+        // Deux « Service down » sur le même équipement se distinguent par l'URL.
+        let mut service = item("Service down", NotifyReason::Firing, Severity::Warning);
+        service.series_key =
+            r#"dumbmonit_probe_success{host="bad",probe="http",target="25",url="http://lab/x6"}"#
+                .to_string();
+        assert!(render(&group(vec![service])).text.contains("Service down — http://lab/x6 —"));
+
+        // Une série sans autre étiquette que celles de l'équipement n'ajoute rien.
+        let mut host = item("Device unreachable", NotifyReason::Firing, Severity::Critical);
+        host.series_key = r#"dumbmonit_up{host="nas",tag_site="lab",target="1"}"#.to_string();
+        assert!(
+            render(&group(vec![host])).text.starts_with("🔴 Critical · Device unreachable — 95 %")
+        );
+    }
+
+    #[test]
+    fn l_identite_d_une_serie_prefere_les_etiquettes_parlantes() {
+        assert_eq!(
+            series_identity(r#"m{datastore="main",group="vm/101",host="pbs",target="12"}"#)
+                .as_deref(),
+            Some("vm/101 · main")
+        );
+        assert_eq!(
+            series_identity(
+                r#"m{host="nas",result="fail",target="13",task="Lab VMs",task_id="6"}"#
+            )
+            .as_deref(),
+            Some("Lab VMs")
+        );
+        assert_eq!(
+            series_identity(r#"m{host="nas",mountpoint="/data",target="1"}"#).as_deref(),
+            Some("/data")
+        );
+        // Sans étiquette connue, les valeurs restantes servent, mais jamais plus de deux.
+        assert_eq!(
+            series_identity(r#"m{host="sw",index="5",target="4",zone="a"}"#).as_deref(),
+            Some("5 · a")
+        );
+        assert_eq!(series_identity("dumbmonit_up"), None);
+        assert_eq!(series_identity(r#"m{host="nas",target="1"}"#), None);
+        // Une virgule dans une valeur ne coupe pas la clé.
+        assert_eq!(
+            series_identity(r#"m{host="sw",ifalias="Workshop, rack 2",ifname="g5",target="4"}"#)
+                .as_deref(),
+            Some("g5 · Workshop, rack 2")
+        );
+    }
+
+    #[test]
+    fn une_regle_tout_ou_rien_ne_repete_pas_sa_valeur() {
+        let boolean = |value: f64, operator: &str, threshold: f64| {
+            let mut it = item("UPS on battery", NotifyReason::Firing, Severity::Warning);
+            it.value = Some(value);
+            it.operator = operator.to_string();
+            it.threshold = threshold;
+            it.unit = String::new();
+            render(&group(vec![it])).text
+        };
+        assert_eq!(boolean(1.0, ">", 0.0), "⚠️ Warning · UPS on battery, for 1 h");
+        assert_eq!(boolean(1.0, ">=", 1.0), "⚠️ Warning · UPS on battery, for 1 h");
+        assert_eq!(boolean(0.0, "<", 1.0), "⚠️ Warning · UPS on battery, for 1 h");
+        // Un état codé sur plusieurs valeurs reste chiffré : 5 n'est pas un booléen.
+        assert!(boolean(5.0, ">", 0.0).contains("— 5 (threshold > 0)"));
+        assert!(boolean(3.0, ">=", 3.0).contains("— 3 (threshold >= 3)"));
+        // Un pourcentage à 1 % sous un seuil de 0 % n'est pas non plus un booléen.
+        let mut pct = item("Disk full", NotifyReason::Firing, Severity::Warning);
+        pct.value = Some(1.0);
+        pct.threshold = 0.0;
+        assert!(render(&group(vec![pct])).text.contains("— 1 % (threshold > 0 %)"));
     }
 
     #[test]
@@ -837,7 +1070,7 @@ mod tests {
         let mut flapping = item("Service", NotifyReason::Flapping, Severity::Warning);
         flapping.note = Some("flapping: 4 changes in 30 min".to_string());
         let message = render(&group(vec![flapping]));
-        assert!(message.text.starts_with("🔁 Service"), "{}", message.text);
+        assert!(message.text.starts_with("🔁 Flapping · Service"), "{}", message.text);
         assert!(message.text.contains("— flapping: 4 changes in 30 min"));
     }
 }

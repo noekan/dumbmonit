@@ -14,10 +14,12 @@ use serde_json::Value;
 use sqlx::{Row, SqlitePool};
 
 use crate::alerting::baseline::{Bucket, SeriesBaseline};
-use crate::alerting::cycle::{BaselineStore, HistoryEntry, StoredAlert};
+use crate::alerting::cycle::{BaselineStore, FORGOTTEN_TARGET_REASON, HistoryEntry, StoredAlert};
 use crate::alerting::group::AlertOutcome;
 use crate::alerting::machine::{AlertState, Phase};
-use crate::alerting::model::{Operator, Rule, RuleKind, Severity, TargetNode, TargetSelector};
+use crate::alerting::model::{
+    Operator, Rule, RuleKind, Severity, TargetId, TargetNode, TargetSelector,
+};
 use crate::alerting::rules;
 use crate::alerting::silence::Silence;
 use crate::crypto::Cipher;
@@ -252,7 +254,7 @@ pub async fn set_rule_enabled(pool: &SqlitePool, id: i64, enabled: bool) -> Resu
 /// Les cibles désactivées sont incluses : elles peuvent être le parent d'une cible
 /// active, et les retirer casserait la chaîne de suppression.
 pub async fn list_target_nodes(pool: &SqlitePool) -> Result<Vec<TargetNode>> {
-    let rows = sqlx::query("SELECT id, name, address, parent_id, tags FROM targets")
+    let rows = sqlx::query("SELECT id, name, address, parent_id, tags, enabled FROM targets")
         .fetch_all(pool)
         .await
         .context("lecture de la topologie des cibles")?;
@@ -266,9 +268,54 @@ pub async fn list_target_nodes(pool: &SqlitePool) -> Result<Vec<TargetNode>> {
                 address: row.try_get("address")?,
                 parent_id: row.try_get("parent_id")?,
                 tags: json_or_default(&tags),
+                enabled: row.try_get::<i64, _>("enabled")? != 0,
             })
         })
         .collect()
+}
+
+/// Oublie sur-le-champ les alertes d'une cible supprimée ou désactivée.
+///
+/// Sans notification : l'utilisateur vient de dire que cet équipement ne compte
+/// plus, un « résolu » ou un « en panne » à son sujet serait du bruit. Les
+/// alertes actives laissent tout de même une transition dans l'historique, pour
+/// que la chronologie de l'équipement reste lisible, et les lignes retenues dans
+/// la file de notification sont retirées avant de partir. Renvoie le nombre
+/// d'alertes effacées.
+pub async fn forget_target(
+    pool: &SqlitePool,
+    target_id: TargetId,
+    now: DateTime<Utc>,
+) -> Result<u64> {
+    let mut tx = pool.begin().await.context("ouverture de la transaction d'oubli")?;
+    sqlx::query(
+        "INSERT INTO alert_history
+             (fingerprint, rule_uid, target_id, from_phase, to_phase, severity, value,
+              notified, reason, at)
+         SELECT fingerprint, rule_uid, target_id, phase, 'resolved', severity, value,
+                0, ?, ?
+         FROM alert_state
+         WHERE target_id = ? AND phase IN ('pending', 'firing')",
+    )
+    .bind(FORGOTTEN_TARGET_REASON)
+    .bind(to_sql(now))
+    .bind(target_id)
+    .execute(&mut *tx)
+    .await
+    .context("journalisation des alertes oubliées")?;
+    let removed = sqlx::query("DELETE FROM alert_state WHERE target_id = ?")
+        .bind(target_id)
+        .execute(&mut *tx)
+        .await
+        .context("effacement des alertes de la cible")?
+        .rows_affected();
+    sqlx::query("DELETE FROM notify_queue WHERE target_id = ?")
+        .bind(target_id)
+        .execute(&mut *tx)
+        .await
+        .context("retrait des notifications en attente de la cible")?;
+    tx.commit().await.context("validation de l'oubli")?;
+    Ok(removed)
 }
 
 // --------------------------------------------------------------------------

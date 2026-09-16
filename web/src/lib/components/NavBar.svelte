@@ -39,17 +39,23 @@
 		pill = { x: ar.left - lr.left, w: ar.width, ready: true };
 	}
 
+	const badge = $derived(alertsStore.available && !alertsStore.loading ? alertsStore.activeCount : 0);
+
+	// The pill follows the route, and also the badge: a count appearing next to
+	// "Alerts" shifts every item after it without changing the list's own size.
 	$effect(() => {
 		page.url.pathname;
+		badge;
 		requestAnimationFrame(placePill);
 	});
 	$effect(() => {
+		if (!list) return;
 		const ro = new ResizeObserver(placePill);
-		if (list) ro.observe(list);
+		ro.observe(list);
+		// Each item too: web fonts arriving or the badge widening move the pill.
+		for (const item of list.querySelectorAll('li')) ro.observe(item);
 		return () => ro.disconnect();
 	});
-
-	const badge = $derived(alertsStore.available && !alertsStore.loading ? alertsStore.activeCount : 0);
 </script>
 
 <header class="sticky top-0 z-30 hidden border-b border-line bg-canvas/85 backdrop-blur-md sm:block">

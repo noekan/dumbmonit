@@ -78,7 +78,7 @@
 					title={target.last_error ?? undefined}
 				>
 					{#if target.last_error}
-						<span class="text-warning-ink">{target.last_error}</span>
+						<span class={target.error_kind === 'config' ? 'text-advisory-ink' : 'text-warning-ink'}>{target.last_error}</span>
 					{:else}
 						Last seen {formatRelative(target.last_probe_at)}
 					{/if}

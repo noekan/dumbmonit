@@ -212,10 +212,88 @@ pub async fn target_for_key(pool: &SqlitePool, key: &str) -> Result<Option<Targe
     row.map(|row| row.try_get("target_id")).transpose().context("target id")
 }
 
+/// Compte rendu posé sur une commande que personne n'est venu chercher.
+pub const EXPIRED_RESULT: &str = "Expired: the agent did not pick it up within 10 minutes.";
+
+/// Fait expirer les commandes restées en attente au-delà de
+/// [`COMMAND_MAX_AGE_SECS`], pour une cible ou pour toutes. Renvoie le nombre de
+/// commandes touchées.
+///
+/// Appelée à chaque passage de l'automate, indépendamment des agents : une
+/// machine dont l'agent est arrêté, trop ancien pour connaître le canal ou
+/// configuré sans actions ne viendra jamais vider sa file. Sans cela, une
+/// commande « en attente » y resterait pour toujours, et bloquerait toute
+/// nouvelle demande sur le même conteneur.
+pub async fn expire_stale(pool: &SqlitePool, target_id: Option<TargetId>) -> Result<u64> {
+    let result = sqlx::query(
+        "UPDATE agent_commands
+         SET status = 'expired',
+             finished_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+             result = ?
+         WHERE status = 'queued'
+           AND (? IS NULL OR target_id = ?)
+           AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
+    )
+    .bind(EXPIRED_RESULT)
+    .bind(target_id)
+    .bind(target_id)
+    .bind(format!("-{COMMAND_MAX_AGE_SECS} seconds"))
+    .execute(pool)
+    .await
+    .context("expiring stale commands")?;
+    Ok(result.rows_affected())
+}
+
+/// Retire une commande de la file avant que l'agent ne la prenne.
+///
+/// Seule une commande encore en attente s'annule : une commande en cours est
+/// déjà entre les mains de l'agent, et une commande close ne change plus.
+pub async fn cancel(
+    pool: &SqlitePool,
+    target_id: TargetId,
+    id: i64,
+    by: &str,
+) -> Result<(), CommandError> {
+    let row = sqlx::query("SELECT status FROM agent_commands WHERE id = ? AND target_id = ?")
+        .bind(id)
+        .bind(target_id)
+        .fetch_optional(pool)
+        .await
+        .context("reading the command")?;
+    let Some(row) = row else {
+        return Err(CommandError::NotFound);
+    };
+    let current: String = row.try_get("status")?;
+    if CommandStatus::parse(&current) != Some(CommandStatus::Queued) {
+        return Err(CommandError::Conflict(format!(
+            "Command {id} is {current}: only a queued command can be cancelled."
+        )));
+    }
+    let result = sqlx::query(
+        "UPDATE agent_commands
+         SET status = 'cancelled',
+             finished_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+             result = ?
+         WHERE id = ? AND status = 'queued'",
+    )
+    .bind(format!("Cancelled by {by} before the agent picked it up."))
+    .bind(id)
+    .execute(pool)
+    .await
+    .context("cancelling the command")?;
+    if result.rows_affected() == 0 {
+        // L'agent l'a prise entre la lecture et l'annulation.
+        return Err(CommandError::Conflict(format!(
+            "Command {id} was just picked up by the agent."
+        )));
+    }
+    Ok(())
+}
+
 /// Commandes en attente pour l'agent qui se présente avec `key`.
 ///
-/// Les commandes trop anciennes sont annulées au passage : l'agent les
-/// refuserait de toute façon, autant que l'interface le dise tout de suite.
+/// Les commandes trop anciennes expirent au passage : l'agent les refuserait de
+/// toute façon, autant que l'interface le dise tout de suite.
 pub async fn pending_for_key(
     pool: &SqlitePool,
     key: &str,
@@ -223,19 +301,7 @@ pub async fn pending_for_key(
     let Some(target_id) = target_for_key(pool, key).await? else {
         return Ok(None);
     };
-    sqlx::query(
-        "UPDATE agent_commands
-         SET status = 'cancelled',
-             finished_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-             result = 'Expired before the agent picked it up.'
-         WHERE target_id = ? AND status = 'queued'
-           AND created_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)",
-    )
-    .bind(target_id)
-    .bind(format!("-{COMMAND_MAX_AGE_SECS} seconds"))
-    .execute(pool)
-    .await
-    .context("expiring stale commands")?;
+    expire_stale(pool, Some(target_id)).await?;
 
     let rows = sqlx::query(
         "SELECT id, kind, args, created_at FROM agent_commands
@@ -279,8 +345,8 @@ pub async fn report(pool: &SqlitePool, key: &str, id: i64, report: &CommandRepor
     };
     let current: String = row.try_get("status")?;
     if CommandStatus::parse(&current).is_some_and(CommandStatus::is_final) {
-        // Un compte rendu tardif sur une commande déjà close (annulée par
-        // expiration, par exemple) ne la rouvre pas.
+        // Un compte rendu tardif sur une commande déjà close (expirée ou
+        // annulée entre-temps, par exemple) ne la rouvre pas.
         return Ok(true);
     }
 
@@ -476,6 +542,7 @@ mod tests {
             kernel_version: None,
             arch: None,
             agent_version: "0.1.0".into(),
+            commands_enabled: Some(true),
             machine_id: Some(key.into()),
             tags: BTreeMap::new(),
         };
@@ -548,29 +615,111 @@ mod tests {
             .expect("autre type");
     }
 
+    /// Vieillit une commande à la main, en minutes.
+    async fn age(pool: &SqlitePool, id: i64, minutes: u32) {
+        sqlx::query("UPDATE agent_commands SET created_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?) WHERE id = ?")
+            .bind(format!("-{minutes} minutes"))
+            .bind(id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
     #[tokio::test]
-    async fn a_stale_command_is_cancelled_instead_of_being_handed_out() {
+    async fn a_stale_command_expires_instead_of_being_handed_out() {
         let lab = lab("id-nas").await;
         let record =
             enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
                 .await
                 .expect("file");
-        // On vieillit la commande à la main : onze minutes.
-        sqlx::query("UPDATE agent_commands SET created_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-11 minutes') WHERE id = ?")
-            .bind(record.id)
-            .execute(&lab.pool)
-            .await
-            .unwrap();
+        age(&lab.pool, record.id, 11).await;
 
         let (_, pending) = pending_for_key(&lab.pool, "id-nas").await.unwrap().unwrap();
         assert!(pending.is_empty());
         let listed = list_for_target(&lab.pool, lab.target_id, 20).await.expect("liste");
-        assert_eq!(listed[0].status, CommandStatus::Cancelled);
-        assert!(listed[0].result.as_deref().unwrap_or("").contains("Expired"));
+        assert_eq!(listed[0].status, CommandStatus::Expired);
+        assert_eq!(listed[0].result.as_deref(), Some(EXPIRED_RESULT));
+        assert!(listed[0].finished_at.is_some());
         // La file est à nouveau libre pour ce conteneur.
         assert!(
             !has_pending(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, "web").await.unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn a_stale_command_expires_even_if_the_agent_never_polls() {
+        // Agent arrêté, trop ancien ou configuré sans actions : personne ne vient
+        // lire la file. C'est le serveur qui doit la libérer.
+        let lab = lab("id-nas").await;
+        let old = enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+            .await
+            .unwrap();
+        let fresh = enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_UPDATE, &restart("web"), "ui")
+            .await
+            .unwrap();
+        age(&lab.pool, old.id, 11).await;
+        age(&lab.pool, fresh.id, 9).await;
+
+        // Une nouvelle demande bute encore sur l'ancienne.
+        let again =
+            enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui").await;
+        assert!(matches!(again, Err(CommandError::Conflict(_))));
+
+        assert_eq!(expire_stale(&lab.pool, None).await.unwrap(), 1);
+        let listed = list_for_target(&lab.pool, lab.target_id, 20).await.unwrap();
+        let by_id = |id| listed.iter().find(|c| c.id == id).unwrap();
+        assert_eq!(by_id(old.id).status, CommandStatus::Expired);
+        assert_eq!(by_id(fresh.id).status, CommandStatus::Queued, "neuf minutes : encore valable");
+
+        // La file est libre : la même demande passe, et le second passage ne
+        // touche à rien.
+        enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+            .await
+            .expect("file libérée");
+        assert_eq!(expire_stale(&lab.pool, None).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_queued_command_can_be_cancelled_but_not_a_running_one() {
+        let lab = lab("id-nas").await;
+        let record =
+            enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+                .await
+                .unwrap();
+
+        // Une autre cible ne la voit pas.
+        assert!(matches!(
+            cancel(&lab.pool, lab.target_id + 1, record.id, "admin").await,
+            Err(CommandError::NotFound)
+        ));
+        cancel(&lab.pool, lab.target_id, record.id, "admin").await.expect("annulation");
+        let listed = list_for_target(&lab.pool, lab.target_id, 20).await.unwrap();
+        assert_eq!(listed[0].status, CommandStatus::Cancelled);
+        assert!(listed[0].result.as_deref().unwrap_or("").contains("admin"));
+        assert!(
+            !has_pending(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, "web").await.unwrap()
+        );
+        // Annulée, elle n'est plus proposée à l'agent, et ne s'annule pas deux fois.
+        let (_, pending) = pending_for_key(&lab.pool, "id-nas").await.unwrap().unwrap();
+        assert!(pending.is_empty());
+        assert!(matches!(
+            cancel(&lab.pool, lab.target_id, record.id, "admin").await,
+            Err(CommandError::Conflict(_))
+        ));
+
+        // En cours : trop tard, l'agent l'a déjà.
+        let running =
+            enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+                .await
+                .unwrap();
+        let report_running =
+            CommandReport { status: CommandStatus::Running, result: String::new() };
+        assert!(report(&lab.pool, "id-nas", running.id, &report_running).await.unwrap());
+        assert!(matches!(
+            cancel(&lab.pool, lab.target_id, running.id, "admin").await,
+            Err(CommandError::Conflict(_))
+        ));
+        assert!(has_pending(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, "web").await.unwrap());
     }
 
     #[tokio::test]

@@ -23,7 +23,7 @@ jobs:
       - run: cargo test --all-features
 
   licences:
-    name: Licences
+    name: Licences and advisories
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -33,6 +33,9 @@ jobs:
       # that is not in deny.toml fails the build instead of being discovered
       # after publication.
       - run: cargo deny check licenses bans
+      # RustSec advisories: a vulnerable dependency fails the build until it is
+      # updated or explicitly ignored in deny.toml with a reason.
+      - run: cargo deny check advisories
 
   web:
     name: Web UI

@@ -11,7 +11,8 @@ Children stack under their parent and dim when the parent is unreachable.
 | State | Meaning |
 |---|---|
 | Reporting | The last probe succeeded, within three periods. |
-| Unreachable | The last probe failed, or no probe for more than three periods (at least 90 s). |
+| Unreachable | The device did not answer (timeout, connection refused), or no probe for more than three periods (at least 90 s). |
+| Misconfigured | The last probe failed on our side: wrong credentials, invalid address or option, unexpected answer. Shown in the advisory colour with the error; it raises no alert. |
 | Waiting | Added, not probed yet. |
 | Disabled | Paused: not checked, raises no alert. |
 
@@ -64,5 +65,9 @@ form opens **More options** by itself if the device already uses one.
 
 ## Deleting
 
-Deleting a device removes it from the configuration. Its time series are not
-deleted: they age out with the 12-month retention.
+Deleting a device removes it from the configuration, clears its alerts on the
+spot — nothing is notified, the history keeps a `device removed or disabled`
+line — and deletes its time series from the embedded VictoriaMetrics a few
+seconds later (best effort: a failure is only logged, and the series then age
+out with the 12-month retention). Pausing a device clears its alerts the same
+way; its series stay.

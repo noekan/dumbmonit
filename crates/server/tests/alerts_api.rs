@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use chrono::Utc;
 use dumbmonit_server::alerting::cycle::HistoryEntry;
 use dumbmonit_server::alerting::group::AlertOutcome;
@@ -36,9 +36,14 @@ const JETON: &str = "tk-secret-de-test-123456";
 /// Secret d'instance des tests, redérivé au besoin pour relire ce qui est chiffré.
 const SECRET: &str = "secret-de-test-suffisamment-long";
 
+/// Mot de passe du premier administrateur, créé au montage.
+const PASSWORD: &str = "mot-de-passe-du-homelab";
+
 struct TestApp {
     router: Router,
     pool: SqlitePool,
+    /// Session d'administrateur : sans elle, l'API ne répond que 401.
+    cookie: String,
     _dir: tempfile::TempDir,
 }
 
@@ -71,12 +76,34 @@ async fn setup() -> TestApp {
         collectors: registry,
     });
 
-    TestApp { router: api::router(state), pool, _dir: dir }
+    let mut app = TestApp { router: api::router(state), pool, cookie: String::new(), _dir: dir };
+    app.cookie = app.open_admin_session().await;
+    app
 }
 
 impl TestApp {
+    /// Crée le compte `admin` puis ouvre sa session ; rend la valeur du cookie.
+    async fn open_admin_session(&self) -> String {
+        let (status, body) =
+            self.request("POST", "/api/auth/setup", Some(json!({ "password": PASSWORD }))).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "admin creation: {body}");
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/auth/login")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({ "password": PASSWORD }).to_string()))
+            .unwrap();
+        let response = self.router.clone().oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let raw = response.headers().get(header::SET_COOKIE).expect("session cookie");
+        raw.to_str().unwrap().split(';').next().unwrap().to_string()
+    }
+
     async fn request(&self, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
-        let builder = Request::builder().method(method).uri(uri);
+        let mut builder = Request::builder().method(method).uri(uri);
+        if !self.cookie.is_empty() {
+            builder = builder.header(header::COOKIE, &self.cookie);
+        }
         let request = match body {
             Some(value) => builder
                 .header("content-type", "application/json")
@@ -136,6 +163,57 @@ impl TestApp {
             .find(|rule| rule["builtin"] == json!(true))
             .cloned()
             .expect("at least one built-in rule")
+    }
+
+    /// Un équipement factice, dont l'identifiant sert à rattacher des alertes.
+    async fn create_target(&self, name: &str, address: &str) -> i64 {
+        let (status, body) = self
+            .request(
+                "POST",
+                "/api/targets",
+                Some(json!({ "name": name, "address": address, "kind": "dummy" })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "target refused: {body}");
+        body["id"].as_i64().expect("target id")
+    }
+
+    /// Une alerte `firing`, déjà notifiée, telle que le moteur l'aurait écrite.
+    fn firing_alert(fingerprint: &str, target_id: Option<i64>, target: &str) -> AlertOutcome {
+        let now = Utc::now();
+        let mut labels = BTreeMap::from([("host".to_string(), target.to_string())]);
+        if let Some(id) = target_id {
+            labels.insert("target".to_string(), id.to_string());
+        }
+        AlertOutcome {
+            fingerprint: fingerprint.to_string(),
+            rule_uid: "cpu_high".to_string(),
+            rule_name: "CPU".to_string(),
+            target_id,
+            target_name: target.to_string(),
+            series_key: format!("dumbmonit_cpu_usage_percent{{host=\"{target}\"}}"),
+            labels,
+            state: AlertState {
+                phase: Phase::Firing,
+                condition_since: Some(now),
+                firing_since: Some(now),
+                last_eval_at: Some(now),
+                last_notified_at: Some(now),
+                notify_count: 1,
+                value: Some(97.5),
+                ..AlertState::default()
+            },
+            severity: Severity::Warning,
+            value: Some(97.5),
+            score: None,
+            unit: "%".to_string(),
+            operator: ">".to_string(),
+            threshold: 90.0,
+            channels: Vec::new(),
+            repeat_interval: None,
+            escalate_after: None,
+            just_transitioned: false,
+        }
     }
 
     /// Secrets réellement enregistrés, déchiffrés hors du chemin HTTP.
@@ -326,12 +404,13 @@ async fn a_rule_can_target_an_existing_channel() {
 async fn the_active_alerts_route_exposes_the_effective_phase() {
     let app = setup().await;
     let now = Utc::now();
+    let nas = app.create_target("nas", "10.0.0.7").await;
 
     let outcome = AlertOutcome {
         fingerprint: "cpu_high@0000000000000001".to_string(),
         rule_uid: "cpu_high".to_string(),
         rule_name: "CPU".to_string(),
-        target_id: Some(7),
+        target_id: Some(nas),
         target_name: "nas".to_string(),
         series_key: "dumbmonit_cpu_usage_percent{host=\"nas\"}".to_string(),
         labels: BTreeMap::from([("host".to_string(), "nas".to_string())]),
@@ -378,6 +457,141 @@ async fn the_active_alerts_route_exposes_the_effective_phase() {
     assert_eq!(alert["notify_count"], json!(3));
     assert!(!alert["condition_since"].is_null());
     assert!(!alert["firing_since"].is_null());
+}
+
+#[tokio::test]
+async fn alerts_of_missing_or_paused_devices_are_never_listed() {
+    let app = setup().await;
+    let nas = app.create_target("nas", "10.0.0.7").await;
+    let paused = app.create_target("paused", "10.0.0.8").await;
+    let (status, body) = app
+        .request(
+            "PUT",
+            &format!("/api/targets/{paused}"),
+            Some(json!({ "name": "paused", "address": "10.0.0.8", "kind": "dummy", "enabled": false })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    db::alerts::save_states(
+        &app.pool,
+        &[
+            TestApp::firing_alert("cpu_high@0000000000000001", Some(nas), "nas"),
+            // L'équipement 999 n'existe pas ; celui-ci a été mis en pause.
+            TestApp::firing_alert("cpu_high@0000000000000002", Some(999), "ghost"),
+            TestApp::firing_alert("cpu_high@0000000000000003", Some(paused), "paused"),
+            // Série orpheline : un `target` que personne ne résout plus.
+            TestApp::firing_alert("cpu_high@0000000000000004", None, "orphan"),
+            // Série sans identifiant du tout (règle agrégée par l'utilisateur) :
+            // elle a le droit d'exister.
+            AlertOutcome {
+                labels: BTreeMap::from([("host".to_string(), "aggregate".to_string())]),
+                ..TestApp::firing_alert("cpu_high@0000000000000005", None, "aggregate")
+            },
+        ],
+    )
+    .await
+    .expect("states saved");
+    // La quatrième porte un `target` non résolu, comme le moteur l'écrivait avant.
+    sqlx::query("UPDATE alert_state SET labels = ? WHERE fingerprint = ?")
+        .bind(json!({"host": "orphan", "target": "998"}).to_string())
+        .bind("cpu_high@0000000000000004")
+        .execute(&app.pool)
+        .await
+        .expect("labels rewritten");
+
+    let (status, body) = app.request("GET", "/api/alerts", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let listed: Vec<&str> =
+        body.as_array().unwrap().iter().map(|a| a["fingerprint"].as_str().unwrap()).collect();
+    assert_eq!(listed, vec!["cpu_high@0000000000000001", "cpu_high@0000000000000005"], "{body}");
+}
+
+#[tokio::test]
+async fn deleting_a_device_clears_its_alerts_without_notifying() {
+    let app = setup().await;
+    let nas = app.create_target("nas", "10.0.0.7").await;
+    let other = app.create_target("other", "10.0.0.9").await;
+    app.create_channel("discord").await;
+    db::alerts::save_states(
+        &app.pool,
+        &[
+            TestApp::firing_alert("cpu_high@0000000000000001", Some(nas), "nas"),
+            TestApp::firing_alert("cpu_high@0000000000000002", Some(other), "other"),
+        ],
+    )
+    .await
+    .expect("states saved");
+    // Une ligne retenue dans la file de regroupement pour l'équipement supprimé :
+    // elle ne doit jamais partir.
+    sqlx::query(
+        "INSERT INTO notify_queue (channel_id, fingerprint, target_id, target_name, hold, item, queued_at)
+         VALUES (1, 'cpu_high@0000000000000001', ?, 'nas', 'batch', '{}', ?)",
+    )
+    .bind(nas)
+    .bind(Utc::now().to_rfc3339())
+    .execute(&app.pool)
+    .await
+    .expect("queued item");
+
+    let (status, _) = app.request("DELETE", &format!("/api/targets/{nas}"), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (_, body) = app.request("GET", "/api/alerts", None).await;
+    let listed: Vec<&str> =
+        body.as_array().unwrap().iter().map(|a| a["fingerprint"].as_str().unwrap()).collect();
+    assert_eq!(listed, vec!["cpu_high@0000000000000002"], "only the other device remains");
+
+    // L'état a bien disparu de la base, pas seulement de la liste.
+    let states = db::alerts::load_states(&app.pool).await.expect("states");
+    assert!(states.iter().all(|alert| alert.target_id != Some(nas)));
+    let queued: i64 = sqlx::query_scalar("SELECT count(*) FROM notify_queue WHERE target_id = ?")
+        .bind(nas)
+        .fetch_one(&app.pool)
+        .await
+        .expect("queue count");
+    assert_eq!(queued, 0, "nothing pending for the deleted device");
+
+    // L'historique garde la trace, marquée non notifiée, avec la raison.
+    let (_, history) = app.request("GET", "/api/alerts/history", None).await;
+    let entry = &history[0];
+    assert_eq!(entry["fingerprint"], json!("cpu_high@0000000000000001"));
+    assert_eq!(entry["target_id"], json!(nas));
+    assert_eq!(entry["from_phase"], json!("firing"));
+    assert_eq!(entry["to_phase"], json!("resolved"));
+    assert_eq!(entry["notified"], json!(false));
+    assert_eq!(entry["reason"], json!("device removed or disabled"));
+    assert_eq!(history.as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn pausing_a_device_clears_its_alerts_without_notifying() {
+    let app = setup().await;
+    let nas = app.create_target("nas", "10.0.0.7").await;
+    db::alerts::save_states(
+        &app.pool,
+        &[TestApp::firing_alert("cpu_high@0000000000000001", Some(nas), "nas")],
+    )
+    .await
+    .expect("states saved");
+
+    let (status, body) = app
+        .request(
+            "PUT",
+            &format!("/api/targets/{nas}"),
+            Some(
+                json!({ "name": "nas", "address": "10.0.0.7", "kind": "dummy", "enabled": false }),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (_, body) = app.request("GET", "/api/alerts", None).await;
+    assert_eq!(body.as_array().unwrap().len(), 0, "{body}");
+    assert!(db::alerts::load_states(&app.pool).await.expect("states").is_empty());
+    let (_, history) = app.request("GET", "/api/alerts/history", None).await;
+    assert_eq!(history[0]["reason"], json!("device removed or disabled"));
+    assert_eq!(history[0]["notified"], json!(false));
 }
 
 #[tokio::test]

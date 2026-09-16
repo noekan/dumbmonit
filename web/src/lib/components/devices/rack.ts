@@ -18,12 +18,13 @@ export interface RackRow {
 
 /** States the operator has to act on. `pending` only waits. */
 export function needsAttention(state: TargetState): boolean {
-	return state === 'offline' || state === 'down';
+	return state === 'offline' || state === 'down' || state === 'misconfigured';
 }
 
 const RANK: Record<TargetState, number> = {
 	offline: 0,
 	down: 0,
+	misconfigured: 0,
 	pending: 1,
 	unknown: 1,
 	online: 2,

@@ -183,6 +183,7 @@ mod tests {
                 kernel_version: None,
                 arch: None,
                 agent_version: "0.1.0".into(),
+                commands_enabled: Some(true),
                 machine_id: None,
                 tags: BTreeMap::new(),
             },

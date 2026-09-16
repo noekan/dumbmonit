@@ -107,6 +107,31 @@ impl Victoria {
         Ok(parsed.data.result)
     }
 
+    /// Efface toutes les séries d'une cible.
+    ///
+    /// Appelé quand l'équipement est supprimé : sans cela, ses séries orphelines
+    /// resteraient interrogeables pendant toute la rétention, et « injoignable »
+    /// pendant la fenêtre de sept jours de la règle. VictoriaMetrics expose cette
+    /// route sans option particulière en mono-nœud ; l'appelant traite un échec
+    /// comme un simple avertissement.
+    pub async fn delete_target_series(&self, target_id: i64) -> Result<()> {
+        let matcher = format!("{{target=\"{target_id}\"}}");
+        let response = self
+            .http
+            .post(format!("{}/api/v1/admin/tsdb/delete_series", self.base_url))
+            .query(&[("match[]", matcher.as_str())])
+            .send()
+            .await
+            .context("effacement des séries dans VictoriaMetrics")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let detail = response.text().await.unwrap_or_default();
+            bail!("delete refused ({status}): {}", detail.trim());
+        }
+        Ok(())
+    }
+
     /// Exécute une requête MetricsQL instantanée.
     pub async fn query(&self, query: &str) -> Result<Vec<InstantSeries>> {
         let response = self

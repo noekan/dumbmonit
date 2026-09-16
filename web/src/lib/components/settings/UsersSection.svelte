@@ -311,7 +311,7 @@
 					{@const editing = editingId === user.id}
 					<li class={`px-4 py-3 ${user.disabled ? 'ghost-cell' : ''}`}>
 						<div class="flex flex-wrap items-center gap-x-3 gap-y-2">
-							<div class="min-w-0 flex-1">
+							<div class="min-w-0 flex-[1_1_14rem]">
 								<div class="flex flex-wrap items-center gap-2">
 									<span class={`font-semibold ${user.disabled ? 'text-ink-2' : 'text-ink'}`}>{user.display_name.trim() || user.username}</span>
 									{#if user.display_name.trim()}

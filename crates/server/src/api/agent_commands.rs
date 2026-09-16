@@ -8,11 +8,11 @@
 //! - [`ui_routes`] : ce que l'interface appelle, sous session ; les écritures
 //!   sont réservées aux administrateurs par le garde de session lui-même.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use dumbmonit_proto::{
     AgentCommand, CMD_CONTAINER_RESTART, CMD_CONTAINER_UPDATE, CommandReport, TargetId,
@@ -140,11 +140,43 @@ async fn report(
 
 pub fn ui_routes() -> Router<AppState> {
     Router::new()
+        .route("/targets/{id}/agent", get(agent_host))
         .route("/targets/{id}/containers", get(list_containers))
         .route("/targets/{id}/containers/{name}/policy", put(set_policy))
         .route("/targets/{id}/containers/{name}/restart", post(restart))
         .route("/targets/{id}/containers/{name}/update", post(update))
         .route("/targets/{id}/commands", get(list_commands))
+        .route("/targets/{id}/commands/{command_id}", delete(cancel_command))
+}
+
+/// La machine et son agent, tels que l'interface en a besoin pour savoir si
+/// les actions ont une chance d'aboutir.
+#[derive(Debug, Serialize)]
+pub struct AgentHostView {
+    pub hostname: String,
+    pub os: String,
+    pub os_version: Option<String>,
+    pub arch: Option<String>,
+    pub agent_version: String,
+    /// Vrai seulement si l'agent a déclaré exécuter les commandes. Un agent
+    /// antérieur au canal, ou configuré avec `commands: false`, donne faux : les
+    /// boutons Restart/Update n'ont alors aucun sens.
+    pub commands_supported: bool,
+    pub last_seen_at: Option<String>,
+}
+
+impl From<agent::HostInfo> for AgentHostView {
+    fn from(info: agent::HostInfo) -> Self {
+        Self {
+            commands_supported: info.commands_supported(),
+            hostname: info.hostname,
+            os: info.os,
+            os_version: info.os_version,
+            arch: info.arch,
+            agent_version: info.agent_version,
+            last_seen_at: info.last_seen_at,
+        }
+    }
 }
 
 /// Une commande telle que l'interface l'affiche.
@@ -329,15 +361,73 @@ async fn list_containers(
     ))
 }
 
+/// Corps de `PUT …/policy` : chaque champ omis garde sa valeur enregistrée,
+/// comme pour les autres `PUT` de l'API. Un interrupteur de l'interface
+/// n'envoie ainsi que ce qu'il change.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct PolicyPatch {
+    pub auto_restart: Option<bool>,
+    pub auto_update: Option<bool>,
+    pub prune_old_image: Option<bool>,
+    pub only_in_maintenance: Option<bool>,
+}
+
+impl PolicyPatch {
+    pub fn apply(&self, current: ContainerPolicy) -> ContainerPolicy {
+        ContainerPolicy {
+            auto_restart: self.auto_restart.unwrap_or(current.auto_restart),
+            auto_update: self.auto_update.unwrap_or(current.auto_update),
+            prune_old_image: self.prune_old_image.unwrap_or(current.prune_old_image),
+            only_in_maintenance: self.only_in_maintenance.unwrap_or(current.only_in_maintenance),
+        }
+    }
+}
+
 async fn set_policy(
     State(state): State<AppState>,
     Path((id, name)): Path<(TargetId, String)>,
-    Json(policy): Json<ContainerPolicy>,
+    Json(patch): Json<PolicyPatch>,
 ) -> ApiResult<Json<ContainerPolicy>> {
     agent_target(&state, id).await?;
     let name = checked_name(&name)?;
+    let current = commands::get_policy(&state.pool, id, &name).await?;
+    let policy = patch.apply(current);
     commands::set_policy(&state.pool, id, &name, policy).await?;
     Ok(Json(policy))
+}
+
+/// Conteneurs connus d'une cible, d'après les dernières mesures de son agent.
+async fn known_containers(state: &AppState, id: TargetId) -> ApiResult<BTreeSet<String>> {
+    let query = format!(r#"{{__name__="dumbmonit_container_up", target="{id}"}}"#);
+    let series = state.victoria.query(&query).await?;
+    Ok(series.into_iter().filter_map(|s| s.metric.get("container").cloned()).collect())
+}
+
+/// Un nom valide, et présent dans l'inventaire : une commande pour un
+/// conteneur que l'agent ne voit pas échouerait de toute façon.
+async fn checked_known_name(state: &AppState, id: TargetId, name: &str) -> ApiResult<String> {
+    let name = checked_name(name)?;
+    if !known_containers(state, id).await?.contains(&name) {
+        return Err(ApiError::NotFound(format!(
+            "No container named '{name}' on device {id}: it is not in the agent's inventory."
+        )));
+    }
+    Ok(name)
+}
+
+/// Refuse une commande que l'agent ne viendra jamais chercher : elle
+/// n'expirerait qu'au bout de dix minutes, sans que rien ne se passe.
+async fn ensure_commands_supported(state: &AppState, id: TargetId) -> ApiResult<()> {
+    let supported = agent::host(&state.pool, id).await?.is_some_and(|h| h.commands_supported());
+    if !supported {
+        return Err(ApiError::Conflict(
+            "This agent cannot run commands: it is too old or has actions disabled. \
+             Reinstall it with the current installer."
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -372,7 +462,8 @@ async fn restart(
     user: Option<Extension<CurrentUser>>,
 ) -> ApiResult<(StatusCode, Json<CommandView>)> {
     agent_target(&state, id).await?;
-    let name = checked_name(&name)?;
+    ensure_commands_supported(&state, id).await?;
+    let name = checked_known_name(&state, id, &name).await?;
     let by = requester(user.as_deref());
     enqueue(&state, id, CMD_CONTAINER_RESTART, serde_json::json!({ "name": name }), &by).await
 }
@@ -384,7 +475,8 @@ async fn update(
     payload: Option<Json<UpdatePayload>>,
 ) -> ApiResult<(StatusCode, Json<CommandView>)> {
     agent_target(&state, id).await?;
-    let name = checked_name(&name)?;
+    ensure_commands_supported(&state, id).await?;
+    let name = checked_known_name(&state, id, &name).await?;
     let policy = commands::get_policy(&state.pool, id, &name).await?;
     let prune = payload.and_then(|Json(p)| p.prune).unwrap_or(policy.prune_old_image);
     let by = requester(user.as_deref());
@@ -399,6 +491,38 @@ async fn list_commands(
     agent_target(&state, id).await?;
     let records = commands::list_for_target(&state.pool, id, RECENT_COMMANDS).await?;
     Ok(Json(records.into_iter().map(CommandView::from).collect()))
+}
+
+/// `DELETE /api/targets/{id}/commands/{command_id}` : retire une commande
+/// encore en attente. `409` si l'agent l'a déjà prise ou si elle est close.
+async fn cancel_command(
+    State(state): State<AppState>,
+    Path((id, command_id)): Path<(TargetId, i64)>,
+    user: Option<Extension<CurrentUser>>,
+) -> ApiResult<StatusCode> {
+    agent_target(&state, id).await?;
+    let by = requester(user.as_deref());
+    match commands::cancel(&state.pool, id, command_id, &by).await {
+        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Err(CommandError::Conflict(why)) => Err(ApiError::Conflict(why)),
+        Err(CommandError::NotFound) => {
+            Err(ApiError::NotFound(format!("Command {command_id} not found on device {id}.")))
+        }
+        Err(CommandError::Internal(error)) => Err(ApiError::Internal(error)),
+    }
+}
+
+/// `GET /api/targets/{id}/agent` : la machine telle que son agent la décrit.
+/// `404` tant qu'aucun agent ne s'est présenté pour cette cible.
+async fn agent_host(
+    State(state): State<AppState>,
+    Path(id): Path<TargetId>,
+) -> ApiResult<Json<AgentHostView>> {
+    agent_target(&state, id).await?;
+    let info = agent::host(&state.pool, id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("No agent has reported for device {id} yet.")))?;
+    Ok(Json(info.into()))
 }
 
 #[cfg(test)]
@@ -451,6 +575,34 @@ mod tests {
         assert_eq!(view.update_available, Some(true));
         assert_eq!(view.restart_count, 3);
         assert_eq!(view.health, "none");
+    }
+
+    #[test]
+    fn a_partial_policy_keeps_the_omitted_fields() {
+        let current = ContainerPolicy {
+            auto_restart: true,
+            auto_update: false,
+            prune_old_image: false,
+            only_in_maintenance: true,
+        };
+        let patch: PolicyPatch = serde_json::from_str(r#"{"auto_update": true}"#).unwrap();
+        let next = patch.apply(current);
+        assert_eq!(next, ContainerPolicy { auto_update: true, ..current });
+        // Un corps vide ne change rien ; un corps complet remplace tout.
+        assert_eq!(PolicyPatch::default().apply(current), current);
+        let full: PolicyPatch = serde_json::from_str(
+            r#"{"auto_restart": false, "auto_update": true, "prune_old_image": true, "only_in_maintenance": false}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            full.apply(current),
+            ContainerPolicy {
+                auto_restart: false,
+                auto_update: true,
+                prune_old_image: true,
+                only_in_maintenance: false
+            }
+        );
     }
 
     #[test]

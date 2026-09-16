@@ -17,7 +17,7 @@
 	import Logo from '$lib/components/Logo.svelte';
 	import IncidentCard from '$lib/components/status/IncidentCard.svelte';
 	import ServiceRow from '$lib/components/status/ServiceRow.svelte';
-	import { OVERALL, isClosed } from '$lib/components/status/words';
+	import { isClosed, overallBanner } from '$lib/components/status/words';
 
 	const REFRESH_MS = 60_000;
 
@@ -66,9 +66,9 @@
 	});
 
 	const notFound = $derived(error !== null && toApiError(error).status === 404);
-	const overall = $derived(status ? OVERALL[status.overall] ?? OVERALL.operational : null);
+	const banner = $derived(status ? overallBanner(status) : null);
 	const days = $derived(status?.page.show_uptime_days ?? 90);
-	const bannerTone = $derived(overall?.tone ?? 'signal');
+	const bannerTone = $derived(banner?.tone ?? 'signal');
 
 	// Open announcements sit at the top; everything closed goes to the history.
 	const active = $derived<PublicIncident[]>(
@@ -107,7 +107,7 @@
 			<EmptyState mascot="dizzy" title="This status page does not exist." description="Check the link you were given, or ask whoever runs this DumbMonit for the right one." />
 		{:else if error}
 			<ErrorNotice {error} title="Could not load the status page" onretry={() => void load()} />
-		{:else if loading || !status || !overall}
+		{:else if loading || !status || !banner}
 			<div class="grid gap-6" aria-busy="true" aria-label="Loading">
 				<Skeleton class="h-9 w-2/3" />
 				<Skeleton class="h-20 w-full" />
@@ -129,9 +129,9 @@
 				aria-live="polite"
 			>
 				<div class="flex min-w-0 items-center gap-3">
-					<Plate tone={bannerTone} size="md" label={bannerTone === 'signal' ? 'Operational' : bannerTone === 'advisory' ? 'Degraded' : bannerTone === 'warning' ? 'Outage' : 'Maintenance'} />
+					<Plate tone={bannerTone} size="md" label={banner.plate} />
 					<p class="display text-xl text-ink sm:text-2xl">
-						<DecryptText text={overall.label} tag="span" />
+						<DecryptText text={banner.label} tag="span" />
 					</p>
 				</div>
 				{#if lastChecked}

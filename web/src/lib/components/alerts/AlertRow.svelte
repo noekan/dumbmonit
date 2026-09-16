@@ -40,7 +40,7 @@
 	class={`rounded-[var(--radius-card)] border border-line bg-surface px-4 py-3 shadow-lift transition ${suppressed ? 'opacity-60' : ''}`}
 >
 	<div class="flex flex-wrap items-start gap-x-4 gap-y-2">
-		<div class="min-w-0 flex-1">
+		<div class="min-w-0 flex-[1_1_16rem]">
 			<div class="flex flex-wrap items-center gap-2">
 				<Plate tone={row.tone} label={row.plate} pulse={firing} />
 				<span class="min-w-0 max-w-full truncate font-semibold text-ink">{alert.rule_name || alert.rule_uid}</span>
@@ -86,7 +86,7 @@
 			{/if}
 		</div>
 
-		<div class="flex shrink-0 flex-col items-end gap-2">
+		<div class="flex flex-[1_1_12rem] flex-wrap items-center justify-between gap-2 sm:flex-initial sm:shrink-0 sm:flex-col sm:items-end sm:justify-start">
 			{#if row.since}
 				<span class="tnum text-[0.8125rem] text-ink-2" title={formatDateTime(row.since)}>
 					since {formatRelative(row.since)}

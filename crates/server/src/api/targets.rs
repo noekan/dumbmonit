@@ -16,6 +16,14 @@ use crate::state::AppState;
 const MIN_INTERVAL_SECS: u64 = 10;
 const DEFAULT_INTERVAL_SECS: u64 = 60;
 
+/// Longueur maximale d'un nom, en caractères. Un nom devient une étiquette
+/// `host` sur chaque échantillon : VictoriaMetrics plafonne les valeurs
+/// d'étiquette à 4096 octets et rejette silencieusement tout le lot au-delà —
+/// bien avant, un nom de plusieurs centaines de caractères n'est plus un nom.
+const MAX_NAME_CHARS: usize = 200;
+/// Longueur maximale d'une adresse : celle d'un nom d'hôte DNS complet.
+const MAX_ADDRESS_CHARS: usize = 253;
+
 /// Représentation d'une cible renvoyée par l'API.
 ///
 /// Le secret n'y figure jamais : seul son type est exposé, ce qui suffit à
@@ -34,6 +42,22 @@ pub struct TargetView {
     pub credential_kind: String,
     pub last_probe_at: Option<String>,
     pub last_error: Option<String>,
+    /// Nature de `last_error` : `down` (équipement injoignable) ou `config`
+    /// (erreur de notre côté : identifiants, adresse, option). L'interface
+    /// affiche « Misconfigured » plutôt que « Unreachable » dans le second cas.
+    pub error_kind: Option<&'static str>,
+}
+
+/// Classe un message d'erreur de sonde d'après son préfixe.
+///
+/// Seul le texte est conservé en base ; les préfixes proviennent de l'affichage
+/// de `ProbeError`, dont `means_down` fait la même distinction.
+fn error_kind(message: &str) -> &'static str {
+    if message.starts_with("Timed out") || message.starts_with("Device unreachable") {
+        "down"
+    } else {
+        "config"
+    }
 }
 
 impl TargetView {
@@ -42,6 +66,7 @@ impl TargetView {
             Some(status) => (status.last_probe_at, status.last_error),
             None => (None, None),
         };
+        let error_kind = last_error.as_deref().map(error_kind);
         Self {
             id: target.id,
             name: target.name,
@@ -55,6 +80,7 @@ impl TargetView {
             credential_kind: target.credential.kind_label().to_string(),
             last_probe_at,
             last_error,
+            error_kind,
         }
     }
 }
@@ -64,6 +90,9 @@ pub struct TargetPayload {
     pub name: String,
     pub address: String,
     pub kind: String,
+    /// Absent lors d'une modification signifie « conserver le profil détecté »,
+    /// comme pour `credential` ; une chaîne vide l'efface, et la détection
+    /// repartira à la prochaine occasion.
     #[serde(default)]
     pub profile_id: Option<String>,
     #[serde(default)]
@@ -94,9 +123,19 @@ impl TargetPayload {
         if name.is_empty() {
             return Err(ApiError::BadRequest("Name is required.".into()));
         }
+        if name.chars().count() > MAX_NAME_CHARS {
+            return Err(ApiError::BadRequest(format!(
+                "The name must be at most {MAX_NAME_CHARS} characters."
+            )));
+        }
         let address = self.address.trim().to_string();
         if address.is_empty() {
             return Err(ApiError::BadRequest("Address is required.".into()));
+        }
+        if address.chars().count() > MAX_ADDRESS_CHARS {
+            return Err(ApiError::BadRequest(format!(
+                "The address must be at most {MAX_ADDRESS_CHARS} characters."
+            )));
         }
         if state.collectors.get(&self.kind).is_none() {
             return Err(ApiError::BadRequest(format!(
@@ -125,7 +164,7 @@ impl TargetPayload {
             name,
             address,
             kind: self.kind,
-            profile_id: self.profile_id,
+            profile_id: self.profile_id.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()),
             parent_id: self.parent_id,
             interval: Duration::from_secs(interval_secs),
             enabled: self.enabled.unwrap_or(true),
@@ -163,6 +202,7 @@ pub async fn create(
     Json(payload): Json<TargetPayload>,
 ) -> ApiResult<(StatusCode, Json<TargetView>)> {
     let input = payload.validate(&state, None)?;
+    check_parent(&state, input.parent_id).await?;
     let id = db::targets::create(&state.pool, &state.cipher, &input)
         .await
         .map_err(duplicate_address_to_conflict)?;
@@ -182,12 +222,23 @@ pub async fn update(
     Path(id): Path<TargetId>,
     Json(payload): Json<TargetPayload>,
 ) -> ApiResult<Json<TargetView>> {
-    let input = payload.validate(&state, Some(id))?;
+    let keep_profile = payload.profile_id.is_none();
+    let mut input = payload.validate(&state, Some(id))?;
+    check_parent(&state, input.parent_id).await?;
+    let before = load(&state, id).await?;
+    if keep_profile {
+        input.profile_id = before.profile_id;
+    }
     let updated = db::targets::update(&state.pool, &state.cipher, id, &input)
         .await
         .map_err(duplicate_address_to_conflict)?;
     if !updated {
         return Err(not_found(id));
+    }
+    // Mettre en pause promet « ne lève aucune alerte » : ce qui était en cours
+    // s'éteint tout de suite, sans notification.
+    if before.enabled && !input.enabled {
+        forget_alerts(&state, id).await;
     }
     let target = load(&state, id).await?;
     let status = db::targets::statuses(&state.pool).await?.remove(&id);
@@ -198,11 +249,52 @@ pub async fn delete(
     State(state): State<AppState>,
     Path(id): Path<TargetId>,
 ) -> ApiResult<StatusCode> {
-    if db::targets::delete(&state.pool, id).await? {
-        Ok(StatusCode::NO_CONTENT)
-    } else {
-        Err(not_found(id))
+    if !db::targets::delete(&state.pool, id).await? {
+        return Err(not_found(id));
     }
+    forget_alerts(&state, id).await;
+    spawn_series_deletion(state, id);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Éteint sans bruit les alertes d'une cible qui vient d'être supprimée ou
+/// mise en pause. Un échec ne fait pas échouer la requête : le moteur d'alerting
+/// écarte de toute façon ces alertes à son prochain cycle.
+async fn forget_alerts(state: &AppState, id: TargetId) {
+    match db::alerts::forget_target(&state.pool, id, chrono::Utc::now()).await {
+        Ok(0) => {}
+        Ok(count) => tracing::info!(target = id, count, "alerts cleared without notifying"),
+        Err(error) => tracing::warn!(target = id, ?error, "alerts of the target not cleared"),
+    }
+}
+
+/// Efface les séries d'une cible supprimée dans VictoriaMetrics, au mieux.
+///
+/// L'effacement attend qu'une interrogation encore en vol ait eu le temps de
+/// finir et d'être écrite : sinon ses échantillons recréeraient la série juste
+/// après. Un échec n'est qu'un avertissement — le moteur d'alerting ignore les
+/// séries d'un équipement inconnu, et la rétention finira le travail.
+fn spawn_series_deletion(state: AppState, id: TargetId) {
+    let grace =
+        state.config.probe_timeout + state.config.write_flush_interval + Duration::from_secs(2);
+    tokio::spawn(async move {
+        tokio::time::sleep(grace).await;
+        match state.victoria.delete_target_series(id).await {
+            Ok(()) => tracing::info!(target = id, "time series deleted"),
+            Err(error) => tracing::warn!(target = id, %error, "time series not deleted"),
+        }
+    });
+}
+
+/// Un parent inexistant est une erreur de saisie, pas une panne : on la dit
+/// avant que la contrainte de clé étrangère ne la transforme en erreur 500.
+async fn check_parent(state: &AppState, parent_id: Option<TargetId>) -> ApiResult<()> {
+    if let Some(parent_id) = parent_id
+        && db::targets::get(&state.pool, &state.cipher, parent_id).await?.is_none()
+    {
+        return Err(ApiError::BadRequest(format!("Parent device {parent_id} not found.")));
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]

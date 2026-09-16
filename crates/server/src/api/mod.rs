@@ -20,7 +20,10 @@ mod users;
 
 pub use error::{ApiError, ApiResult};
 
-use axum::extract::DefaultBodyLimit;
+use axum::extract::{DefaultBodyLimit, Request};
+use axum::http::HeaderValue;
+use axum::middleware::Next;
+use axum::response::Response;
 use axum::routing::{delete, get, post, put};
 use axum::{Extension, Router, middleware};
 use tower_http::trace::TraceLayer;
@@ -48,7 +51,7 @@ pub fn router(state: AppState) -> Router {
         .route("/users", get(users::list).post(users::create))
         .route("/users/{id}", put(users::update).delete(users::delete))
         .route("/collectors", get(collectors::list))
-        .route("/discovery", get(discovery::scan))
+        .route("/discovery", post(discovery::scan))
         .route("/targets", get(targets::list).post(targets::create))
         .route("/targets/{id}", get(targets::get_one).put(targets::update).delete(targets::delete))
         .route("/targets/{id}/probe", post(targets::probe_now))
@@ -132,6 +135,26 @@ pub fn router(state: AppState) -> Router {
         // passe, elle doit donc pouvoir se charger d'abord.
         .fallback(spa::serve)
         .layer(Extension(auth_state))
+        .layer(middleware::from_fn(security_headers))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+/// En-têtes de protection posés sur toute réponse, interface comme API.
+///
+/// L'interface est une application monopage : encadrée dans une page tierce,
+/// elle se prête au détournement de clic. Seules les pages de statut publiques
+/// (`/s/…`) sont faites pour être intégrées ailleurs ; elles restent encadrables.
+async fn security_headers(request: Request, next: Next) -> Response {
+    let embeddable = request.uri().path().starts_with("/s/");
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    headers.insert("referrer-policy", HeaderValue::from_static("same-origin"));
+    if !embeddable {
+        headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+        headers
+            .insert("content-security-policy", HeaderValue::from_static("frame-ancestors 'none'"));
+    }
+    response
 }

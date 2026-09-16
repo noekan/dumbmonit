@@ -25,6 +25,10 @@ use crate::alerting::suppress::{self, Topology};
 /// Nom affiché quand une série n'a pu être rattachée à aucune cible.
 pub const UNKNOWN_TARGET: &str = "no device";
 
+/// Raison consignée dans l'historique quand une alerte s'éteint parce que sa
+/// cible a été supprimée ou désactivée : rien n'est notifié.
+pub const FORGOTTEN_TARGET_REASON: &str = "device removed or disabled";
+
 /// Alerte telle qu'elle était en base au début du cycle.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredAlert {
@@ -144,17 +148,17 @@ impl TargetIndex {
 
     /// Rattache une série à une cible.
     ///
-    /// On essaie plusieurs conventions d'étiquettes plutôt qu'une seule : l'identité
-    /// posée sur les échantillons relève des collecteurs, et une règle écrite à la
-    /// main par l'utilisateur peut parfaitement agréger en ne gardant que `host`.
+    /// Une série qui porte l'identifiant de sa cible n'est rattachée que par lui :
+    /// se rabattre sur le nom ferait revivre, sous l'identité d'un équipement
+    /// actuel, la série d'un équipement supprimé. Sans identifiant, on essaie les
+    /// autres conventions d'étiquettes : l'identité posée sur les échantillons
+    /// relève des collecteurs, et une règle écrite à la main par l'utilisateur
+    /// peut parfaitement agréger en ne gardant que `host`.
     fn resolve(&self, labels: &BTreeMap<String, String>) -> Option<&TargetNode> {
-        for label in TARGET_ID_LABELS {
-            if let Some(raw) = labels.get(label)
-                && let Ok(id) = raw.parse::<TargetId>()
-                && let Some(node) = self.by_id.get(&id)
-            {
-                return Some(node);
-            }
+        if model::carries_target_id(labels) {
+            return TARGET_ID_LABELS.iter().find_map(|label| {
+                labels.get(*label)?.parse::<TargetId>().ok().and_then(|id| self.by_id.get(&id))
+            });
         }
         for label in TARGET_NAME_LABELS {
             if let Some(name) = labels.get(label)
@@ -179,6 +183,43 @@ impl TargetIndex {
             }
         }
         None
+    }
+
+    /// Vrai si la cible existe encore et est active.
+    fn is_live(&self, id: TargetId) -> bool {
+        self.by_id.get(&id).is_some_and(|node| node.enabled)
+    }
+
+    /// Vrai si l'alerte stockée parle d'un équipement qui n'existe plus ou a été
+    /// désactivé : elle doit s'éteindre sans bruit.
+    fn is_orphan(&self, alert: &StoredAlert) -> bool {
+        match alert.target_id {
+            Some(id) => !self.is_live(id),
+            // Une série qui portait un identifiant sans qu'on ait pu le résoudre :
+            // c'est l'alerte d'un équipement déjà supprimé.
+            None => model::carries_target_id(&alert.labels),
+        }
+    }
+}
+
+/// Une série retenue pour l'évaluation, avant dédoublonnage.
+struct Candidate<'a> {
+    fingerprint: String,
+    target: Option<&'a TargetNode>,
+    point: &'a SeriesPoint,
+}
+
+impl Candidate<'_> {
+    /// Vrai si le nom porté par la série est celui que la cible a aujourd'hui.
+    ///
+    /// Après un renommage, l'ancienne série et la nouvelle se réduisent à la même
+    /// empreinte ; seule celle qui porte le nom courant est encore alimentée.
+    fn bears_current_name(&self) -> bool {
+        let Some(target) = self.target else { return true };
+        TARGET_NAME_LABELS
+            .iter()
+            .filter_map(|l| self.point.labels.get(*l))
+            .all(|n| *n == target.name)
     }
 }
 
@@ -209,8 +250,41 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
     let topology = Topology::new(&input.targets);
     let overrides = OverrideIndex::new(&input.overrides);
 
-    let previous: HashMap<&str, &StoredAlert> =
-        input.previous.iter().map(|alert| (alert.fingerprint.as_str(), alert)).collect();
+    // Les alertes des équipements supprimés ou désactivés s'éteignent ici, sans
+    // passer par la machine à états : elles ne sont ni évaluées, ni gelées, ni
+    // notifiées, et la purge de fin de cycle efface leur ligne. Les actives
+    // laissent une transition dans l'historique, pour la chronologie.
+    let (orphans, live): (Vec<&StoredAlert>, Vec<&StoredAlert>) =
+        input.previous.iter().partition(|alert| index.is_orphan(alert));
+    let mut history: Vec<HistoryEntry> = orphans
+        .iter()
+        .filter(|alert| alert.state.phase.is_active())
+        .map(|alert| HistoryEntry {
+            fingerprint: alert.fingerprint.clone(),
+            rule_uid: alert.rule_uid.clone(),
+            target_id: alert.target_id,
+            transition: Transition { from: alert.state.phase, to: Phase::Resolved },
+            severity: input
+                .observations
+                .iter()
+                .find(|o| o.rule.uid == alert.rule_uid)
+                .map_or(crate::alerting::model::Severity::Warning, |o| o.rule.severity),
+            value: None,
+            reason: FORGOTTEN_TARGET_REASON.to_string(),
+            at: now,
+        })
+        .collect();
+
+    // Chaque alerte est retrouvable par son empreinte stockée et par celle que ses
+    // étiquettes donneraient aujourd'hui : quand la formule de l'empreinte change
+    // d'une version à l'autre, l'état en cours est repris tel quel au lieu de se
+    // résoudre puis de se redéclencher — deux notifications pour rien.
+    let mut previous: HashMap<String, &StoredAlert> =
+        live.iter().map(|alert| (alert.fingerprint.clone(), *alert)).collect();
+    for alert in live.iter().copied() {
+        let rekeyed = model::fingerprint(&alert.rule_uid, &model::identity_key(&alert.labels));
+        previous.entry(rekeyed).or_insert(alert);
+    }
 
     let mut evaluated: Vec<Evaluated> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -222,20 +296,46 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
         let Some(series) = &observation.series else {
             // Règle non évaluable ce cycle : on gèle ses empreintes.
             carried_over.extend(
-                input
-                    .previous
-                    .iter()
-                    .filter(|a| a.rule_uid == rule.uid)
-                    .map(|a| a.fingerprint.clone()),
+                live.iter().filter(|a| a.rule_uid == rule.uid).map(|a| a.fingerprint.clone()),
             );
             continue;
         };
 
+        // Premier passage : rattachement et dédoublonnage. Deux séries qui se
+        // réduisent à la même empreinte — la série d'avant et celle d'après un
+        // renommage, ou une agrégation mal écrite — ne doivent pas se battre pour
+        // la même ligne d'état : celle qui porte le nom courant de la cible gagne,
+        // sinon la première rencontrée.
+        let mut candidates: Vec<Candidate<'_>> = Vec::with_capacity(series.len());
+        let mut position: HashMap<String, usize> = HashMap::with_capacity(series.len());
         for point in series {
             let target = index.resolve(&point.labels);
+            // Série d'un équipement supprimé ou désactivé : ignorée, ce qui résout
+            // sans bruit l'alerte en cours (voir les orphelines plus haut).
+            if target.is_some_and(|t| !t.enabled)
+                || (target.is_none() && model::carries_target_id(&point.labels))
+            {
+                continue;
+            }
             if !rule.selector.matches(target) {
                 continue;
             }
+            let fingerprint = model::fingerprint(&rule.uid, &model::identity_key(&point.labels));
+            let candidate = Candidate { fingerprint: fingerprint.clone(), target, point };
+            match position.get(&fingerprint) {
+                Some(&at) => {
+                    if !candidates[at].bears_current_name() && candidate.bears_current_name() {
+                        candidates[at] = candidate;
+                    }
+                }
+                None => {
+                    position.insert(fingerprint, candidates.len());
+                    candidates.push(candidate);
+                }
+            }
+        }
+
+        for Candidate { fingerprint, target, point } in candidates {
             let effective = overrides.effective(rule, target.map(|t| t.id));
             // Règle retirée pour cet équipement : la série est ignorée, ce qui
             // résout proprement une alerte en cours par le passage « séries
@@ -245,15 +345,16 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
             }
 
             let series_key = model::series_key(&point.labels);
-            let fingerprint = model::fingerprint(&rule.uid, &series_key);
-            // Deux séries distinctes qui se réduisent à la même clé — cela arrive
-            // avec une agrégation mal écrite — ne doivent pas se battre pour la même
-            // ligne d'état : la première rencontrée gagne, la seconde est ignorée.
-            if !seen.insert(fingerprint.clone()) {
-                continue;
-            }
+            seen.insert(fingerprint.clone());
 
-            let stored = previous.get(fingerprint.as_str());
+            let stored = previous.get(fingerprint.as_str()).copied();
+            // Alerte reprise sous une nouvelle empreinte : l'ancienne ligne ne doit
+            // pas passer pour une série disparue.
+            if let Some(stored) = stored
+                && stored.fingerprint != fingerprint
+            {
+                seen.insert(stored.fingerprint.clone());
+            }
             let mut before = stored.map(|a| a.state.clone()).unwrap_or_default();
             // Les surcouches du cycle précédent ne doivent pas se propager : elles
             // sont recalculées intégralement plus bas.
@@ -294,7 +395,7 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
 
         // Séries disparues : sans ce passage, une alerte dont la série cesse
         // d'exister resterait `firing` éternellement.
-        for stored in input.previous.iter().filter(|a| a.rule_uid == rule.uid) {
+        for stored in live.iter().copied().filter(|a| a.rule_uid == rule.uid) {
             if seen.contains(&stored.fingerprint) {
                 continue;
             }
@@ -343,7 +444,6 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
         .collect();
 
     let mut alerts = Vec::with_capacity(evaluated.len());
-    let mut history = Vec::new();
 
     for mut entry in evaluated {
         let rule = &input.observations[entry.rule_index].rule;
@@ -540,6 +640,7 @@ mod tests {
             address: format!("10.0.0.{id}"),
             parent_id: parent,
             tags: BTreeMap::new(),
+            enabled: true,
         }
     }
 
@@ -917,6 +1018,116 @@ mod tests {
         assert_eq!(outcome.alerts.len(), 1);
         assert_eq!(outcome.alerts[0].target_id, None);
         assert_eq!(outcome.groups[0].target_name, "unknown");
+    }
+
+    #[test]
+    fn la_serie_d_un_equipement_supprime_est_ignoree_et_son_alerte_s_eteint_sans_bruit() {
+        let down = rule(crate::alerting::model::RULE_HOST_DOWN, RuleKind::Threshold, 180.0, 0);
+        let mut baselines = BaselineStore::default();
+        let obs = || RuleObservations { rule: down.clone(), series: Some(vec![point(1, 600.0)]) };
+
+        let cycle1 =
+            plan_cycle(input(at(0), vec![obs()], vec![node(1, None)], Vec::new()), &mut baselines);
+        assert_eq!(cycle1.alerts[0].state.phase, Phase::Firing);
+        assert_eq!(cycle1.groups.len(), 1);
+        let mut stored = to_stored(&cycle1);
+        mark_notified(&mut stored, &cycle1, at(0));
+
+        // La cible est supprimée ; sa série, orpheline, traîne encore sept jours
+        // dans VictoriaMetrics.
+        let cycle2 = plan_cycle(input(at(30), vec![obs()], Vec::new(), stored), &mut baselines);
+        assert!(cycle2.alerts.is_empty(), "nothing evaluated, nothing kept: {:?}", cycle2.alerts);
+        assert!(cycle2.groups.is_empty(), "no notification, not even a \"resolved\"");
+        assert!(cycle2.carried_over.is_empty());
+        assert_eq!(cycle2.history.len(), 1, "the timeline keeps a trace");
+        assert_eq!(
+            cycle2.history[0].transition,
+            Transition { from: Phase::Firing, to: Phase::Resolved }
+        );
+        assert_eq!(cycle2.history[0].reason, FORGOTTEN_TARGET_REASON);
+        assert_eq!(cycle2.history[0].target_id, Some(1));
+
+        // Cycle suivant : la série orpheline ne recrée rien.
+        let cycle3 = plan_cycle(input(at(60), vec![obs()], Vec::new(), Vec::new()), &mut baselines);
+        assert!(cycle3.alerts.is_empty());
+        assert!(cycle3.history.is_empty());
+    }
+
+    #[test]
+    fn un_equipement_desactive_ne_porte_plus_d_alerte() {
+        let cpu = rule("cpu_high", RuleKind::Threshold, 90.0, 0);
+        let mut baselines = BaselineStore::default();
+        let obs = || RuleObservations { rule: cpu.clone(), series: Some(vec![point(1, 99.0)]) };
+
+        let cycle1 =
+            plan_cycle(input(at(0), vec![obs()], vec![node(1, None)], Vec::new()), &mut baselines);
+        assert_eq!(cycle1.alerts[0].state.phase, Phase::Firing);
+        let mut stored = to_stored(&cycle1);
+        mark_notified(&mut stored, &cycle1, at(0));
+
+        let mut paused = node(1, None);
+        paused.enabled = false;
+        let cycle2 = plan_cycle(input(at(30), vec![obs()], vec![paused], stored), &mut baselines);
+        assert!(cycle2.alerts.is_empty());
+        assert!(cycle2.groups.is_empty(), "silence: the user paused the device on purpose");
+        assert_eq!(cycle2.history[0].reason, FORGOTTEN_TARGET_REASON);
+    }
+
+    #[test]
+    fn un_renommage_ne_cree_pas_une_seconde_alerte() {
+        let down = rule(crate::alerting::model::RULE_HOST_DOWN, RuleKind::Threshold, 180.0, 0);
+        let mut baselines = BaselineStore::default();
+
+        // Avant le renommage : tout va bien.
+        let calm = RuleObservations { rule: down.clone(), series: Some(vec![point(1, 30.0)]) };
+        let cycle1 =
+            plan_cycle(input(at(0), vec![calm], vec![node(1, None)], Vec::new()), &mut baselines);
+        assert_eq!(cycle1.alerts[0].state.phase, Phase::Ok);
+
+        // Après : l'ancienne série (ancien `host`) se tait et vieillit, la nouvelle
+        // est fraîche. Les deux se réduisent à la même empreinte ; seule celle qui
+        // porte le nom courant compte.
+        let mut renamed = node(1, None);
+        renamed.name = "device-1-renamed".to_string();
+        let mut fresh = point(1, 20.0);
+        fresh.labels.insert("host".to_string(), "device-1-renamed".to_string());
+        let stale = point(1, 900.0);
+        for series in [vec![stale.clone(), fresh.clone()], vec![fresh.clone(), stale.clone()]] {
+            let obs = RuleObservations { rule: down.clone(), series: Some(series) };
+            let cycle = plan_cycle(
+                input(at(30), vec![obs], vec![renamed.clone()], to_stored(&cycle1)),
+                &mut baselines,
+            );
+            assert_eq!(cycle.alerts.len(), 1, "one identity per device and rule");
+            assert_eq!(cycle.alerts[0].state.phase, Phase::Ok, "the stale series is ignored");
+            assert_eq!(cycle.alerts[0].fingerprint, cycle1.alerts[0].fingerprint);
+            assert!(cycle.groups.is_empty());
+        }
+    }
+
+    #[test]
+    fn une_alerte_stockee_sous_l_ancienne_empreinte_est_reprise_sans_renotifier() {
+        let cpu = rule("cpu_high", RuleKind::Threshold, 90.0, 0);
+        let mut baselines = BaselineStore::default();
+        let obs = || RuleObservations { rule: cpu.clone(), series: Some(vec![point(1, 99.0)]) };
+
+        let cycle1 =
+            plan_cycle(input(at(0), vec![obs()], vec![node(1, None)], Vec::new()), &mut baselines);
+        let mut stored = to_stored(&cycle1);
+        mark_notified(&mut stored, &cycle1, at(0));
+        // L'état date d'une version qui hachait la clé de série complète.
+        stored[0].fingerprint =
+            model::fingerprint("cpu_high", &model::series_key(&stored[0].labels));
+        assert_ne!(stored[0].fingerprint, cycle1.alerts[0].fingerprint);
+
+        let cycle2 =
+            plan_cycle(input(at(30), vec![obs()], vec![node(1, None)], stored), &mut baselines);
+        assert_eq!(cycle2.alerts.len(), 1, "the old row is neither resolved nor kept");
+        assert_eq!(cycle2.alerts[0].fingerprint, cycle1.alerts[0].fingerprint);
+        assert_eq!(cycle2.alerts[0].state.phase, Phase::Firing);
+        assert_eq!(cycle2.alerts[0].state.notify_count, 1, "the state carries over");
+        assert!(cycle2.groups.is_empty(), "already notified: nothing to send");
+        assert!(cycle2.history.is_empty());
     }
 
     #[test]

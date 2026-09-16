@@ -220,6 +220,18 @@ token), runs it, and reports the outcome (`queued → running → done | failed`
 with a short log you can unfold in the interface. Commands older than ten
 minutes are never executed; the agent runs one command at a time.
 
+A queued command can be **cancelled** from the interface as long as the agent
+has not picked it up. A command nobody came to fetch **expires** after ten
+minutes, on the server, whether or not the agent ever polls — so a machine
+whose agent is stopped never keeps a stale "Queued" forever, and never blocks
+the next action on that container.
+
+The agent tells the server, with every batch, whether it accepts commands.
+When it does not — an agent older than the command channel, or installed with
+`commands: false` — the device page says so instead of showing Restart and
+Update, the API refuses the commands (`409`), and policies do not queue
+anything. Reinstall the agent with the current installer to enable actions.
+
 - **Restart** — `docker restart` for a running container, `docker start` for a
   stopped one, then a 20-second check that it runs.
 - **Update now** — pulls the tag the container already uses, creates a new

@@ -35,13 +35,14 @@ pub struct CurrentUser(pub User);
 /// Écritures que chacun peut faire sur son propre compte, sans être admin.
 const SELF_SERVICE: &[&str] = &["/auth/logout", "/auth/password"];
 
-/// Exige une session valide, sauf tant qu'aucun compte n'existe.
+/// Exige une session valide.
 ///
-/// Cette exception est le comportement attendu du premier démarrage : une instance
-/// vierge n'a rien à protéger, et l'interface doit pouvoir la joindre pour proposer
-/// la création du premier compte. Dès que celui-ci existe, la porte se ferme
-/// définitivement — il n'existe aucun moyen de revenir à l'état non configuré par
-/// l'API.
+/// Tant qu'aucun compte n'existe, il ne peut pas y avoir de session : tout ce qui
+/// est sous ce garde répond 401. L'interface n'a besoin, à ce stade, que des
+/// routes publiques (`/auth/status`, `/auth/setup`, `/auth/login`) pour proposer
+/// la création du premier compte. Ouvrir davantage laisserait quiconque joint le
+/// port préparer l'instance — jetons, équipements, canaux — avant son propriétaire,
+/// et ces préparatifs survivraient à la création du compte.
 pub async fn require_session(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthState>,
@@ -52,7 +53,12 @@ pub async fn require_session(
 
     match auth.is_configured(&state.pool).await {
         Err(error) => return error.into_response(),
-        Ok(false) => return next.run(request).await,
+        Ok(false) => {
+            return AuthError::Unauthorized(
+                "No account exists yet: create the first admin account, then sign in.".into(),
+            )
+            .into_response();
+        }
         Ok(true) => {}
     }
 
@@ -108,8 +114,7 @@ pub async fn current_session(
     }
 }
 
-/// Extracteur : le compte courant, ou 401 si l'instance est ouverte (aucun
-/// compte) — dans cet état, il n'y a personne à administrer.
+/// Extracteur : le compte courant, ou 401 s'il n'y en a pas.
 pub struct Authenticated(pub User);
 
 impl<S: Send + Sync> FromRequestParts<S> for Authenticated {

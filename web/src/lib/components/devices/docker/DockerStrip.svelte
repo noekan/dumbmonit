@@ -46,14 +46,16 @@
 		running: 'info',
 		done: 'signal',
 		failed: 'warning',
-		cancelled: 'muted'
+		cancelled: 'muted',
+		expired: 'advisory'
 	};
 	const STATUS_WORD: Record<CommandStatus, string> = {
 		queued: 'Queued',
 		running: 'Running…',
 		done: 'Done',
 		failed: 'Failed',
-		cancelled: 'Cancelled'
+		cancelled: 'Cancelled',
+		expired: 'Expired'
 	};
 
 	function plural(n: number, word: string): string {
@@ -133,6 +135,12 @@
 
 		{#if editing}
 			<div id={`docker-policies-${target.id}`} class="mt-3 border-t border-line pt-3">
+				{#if !fleet.commandsSupported}
+					<p class="mb-3 rounded-lg border border-advisory/35 bg-advisory-soft px-3 py-2 text-sm text-ink" role="status">
+						<Plate tone="advisory" label="Actions unavailable" class="mr-1" />
+						This agent cannot run commands (too old, or <code class="font-mono text-[0.8125rem]">commands: false</code>): policies are kept but nothing runs until it is reinstalled with the current installer.
+					</p>
+				{/if}
 				<p class="text-sm text-ink-2">
 					Auto-update only runs inside a maintenance window for this device —
 					<a href="/alerts#scheduled" class="text-ink underline decoration-line-strong underline-offset-2 hover:text-signal-ink">schedule one on the Alerts page</a>.
