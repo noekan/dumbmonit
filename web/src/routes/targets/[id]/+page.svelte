@@ -56,6 +56,7 @@
 	import UptimeBar from '$lib/components/devices/UptimeBar.svelte';
 	import DeviceTimeline from '$lib/components/devices/DeviceTimeline.svelte';
 	import FoldSection from '$lib/components/devices/FoldSection.svelte';
+	import { kindPanel } from '$lib/components/devices/kinds';
 	import FoldRow from '$lib/components/devices/FoldRow.svelte';
 	import {
 		formatRate,
@@ -568,6 +569,14 @@
 	{#if target.kind === 'agent'}
 		<section class="mt-6" aria-label="Backups">
 			<PlakarPanel {target} />
+		</section>
+	{/if}
+
+	<!-- What this kind of device has to show beyond charts (guests, backup calendar, disks…) -->
+	{#if kindPanel(target.kind)}
+		{@const Panel = kindPanel(target.kind)}
+		<section class="mt-6" aria-label="Device details">
+			<Panel {target} />
 		</section>
 	{/if}
 
