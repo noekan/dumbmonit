@@ -77,7 +77,7 @@ sha1 = "0.11"
 subtle = "2.6"
 # Validation des jetons d'identité OpenID Connect (signature RS256/ES256 via le
 # JWKS du fournisseur). `rust_crypto` : pas de dépendance C, compatible musl.
-jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "rust_crypto"] }
+jsonwebtoken = { version = "11", default-features = false, features = ["use_pem", "rust_crypto"] }
 # Encodage base64url du défi PKCE.
 base64 = "0.22"
 
