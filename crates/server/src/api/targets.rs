@@ -8,6 +8,7 @@ use dumbmonit_proto::{Credential, Target, TargetId};
 use serde::{Deserialize, Serialize};
 
 use crate::api::{ApiError, ApiResult};
+use crate::collectors::relay::{self, JobResult};
 use crate::db;
 use crate::state::AppState;
 
@@ -36,6 +37,9 @@ pub struct TargetView {
     pub kind: String,
     pub profile_id: Option<String>,
     pub parent_id: Option<TargetId>,
+    /// Agent relais qui interroge cet équipement à la place du serveur ; `None`
+    /// pour une cible interrogée en direct.
+    pub via_agent: Option<TargetId>,
     pub interval_secs: u64,
     pub enabled: bool,
     pub tags: BTreeMap<String, String>,
@@ -62,9 +66,9 @@ fn error_kind(message: &str) -> &'static str {
 
 impl TargetView {
     fn new(target: Target, status: Option<db::targets::TargetStatus>) -> Self {
-        let (last_probe_at, last_error) = match status {
-            Some(status) => (status.last_probe_at, status.last_error),
-            None => (None, None),
+        let (last_probe_at, last_error, via_agent) = match status {
+            Some(status) => (status.last_probe_at, status.last_error, status.via_agent),
+            None => (None, None, None),
         };
         let error_kind = last_error.as_deref().map(error_kind);
         Self {
@@ -74,6 +78,7 @@ impl TargetView {
             kind: target.kind,
             profile_id: target.profile_id,
             parent_id: target.parent_id,
+            via_agent,
             interval_secs: target.interval.as_secs(),
             enabled: target.enabled,
             tags: target.tags,
@@ -97,6 +102,13 @@ pub struct TargetPayload {
     pub profile_id: Option<String>,
     #[serde(default)]
     pub parent_id: Option<TargetId>,
+    /// Agent relais (cible de type `agent` ayant déclaré `relay: true`) qui
+    /// interroge cet équipement depuis son propre réseau. `null` : interrogation
+    /// directe par le serveur. Absent lors d'une modification : conserver le
+    /// relais enregistré, comme pour `profile_id` — un client qui ne connaît
+    /// pas encore ce champ ne doit pas le défaire en passant par là.
+    #[serde(default, deserialize_with = "deserialize_present")]
+    pub via_agent: Option<Option<TargetId>>,
     #[serde(default)]
     pub interval_secs: Option<u64>,
     #[serde(default)]
@@ -159,6 +171,20 @@ impl TargetPayload {
         {
             return Err(ApiError::BadRequest("A device cannot be its own parent.".into()));
         }
+        let via_agent = self.via_agent.flatten();
+        if let (Some(id), Some(via_agent)) = (id, via_agent)
+            && id == via_agent
+        {
+            return Err(ApiError::BadRequest("A device cannot relay itself.".into()));
+        }
+        // Une machine à agent n'est jamais interrogée : ses mesures arrivent en
+        // poussée, un relais n'aurait rien à faire.
+        if via_agent.is_some() && self.kind == "agent" {
+            return Err(ApiError::BadRequest(
+                "An agent-monitored machine pushes its own metrics: it cannot be reached through a relay."
+                    .into(),
+            ));
+        }
 
         Ok(db::targets::TargetInput {
             name,
@@ -166,6 +192,7 @@ impl TargetPayload {
             kind: self.kind,
             profile_id: self.profile_id.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()),
             parent_id: self.parent_id,
+            via_agent,
             interval: Duration::from_secs(interval_secs),
             enabled: self.enabled.unwrap_or(true),
             tags: self.tags,
@@ -203,6 +230,7 @@ pub async fn create(
 ) -> ApiResult<(StatusCode, Json<TargetView>)> {
     let input = payload.validate(&state, None)?;
     check_parent(&state, input.parent_id).await?;
+    check_relay(&state, input.via_agent).await?;
     let id = db::targets::create(&state.pool, &state.cipher, &input)
         .await
         .map_err(duplicate_address_to_conflict)?;
@@ -223,11 +251,16 @@ pub async fn update(
     Json(payload): Json<TargetPayload>,
 ) -> ApiResult<Json<TargetView>> {
     let keep_profile = payload.profile_id.is_none();
+    let keep_relay = payload.via_agent.is_none();
     let mut input = payload.validate(&state, Some(id))?;
     check_parent(&state, input.parent_id).await?;
+    check_relay(&state, input.via_agent).await?;
     let before = load(&state, id).await?;
     if keep_profile {
         input.profile_id = before.profile_id;
+    }
+    if keep_relay {
+        input.via_agent = db::targets::relay_of(&state.pool, id).await?;
     }
     let updated = db::targets::update(&state.pool, &state.cipher, id, &input)
         .await
@@ -297,6 +330,31 @@ async fn check_parent(state: &AppState, parent_id: Option<TargetId>) -> ApiResul
     Ok(())
 }
 
+/// Distingue « champ absent » de « champ à `null` » : serde ne le fait pas
+/// seul pour un `Option<Option<_>>`.
+fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// Le relais doit être une machine à agent : c'est lui qui viendra chercher les
+/// sondes. Qu'il ait déclaré `relay: true` n'est pas exigé ici — l'agent peut
+/// être configuré après la cible — mais l'interface le signale.
+async fn check_relay(state: &AppState, via_agent: Option<TargetId>) -> ApiResult<()> {
+    let Some(via_agent) = via_agent else { return Ok(()) };
+    match db::targets::get(&state.pool, &state.cipher, via_agent).await? {
+        None => Err(ApiError::BadRequest(format!("Relay agent {via_agent} not found."))),
+        Some(agent) if agent.kind != "agent" => Err(ApiError::BadRequest(format!(
+            "Device {via_agent} ({}) is not an agent: only an agent can relay probes.",
+            agent.name
+        ))),
+        Some(_) => Ok(()),
+    }
+}
+
 #[derive(Serialize)]
 pub struct DiscoveryReport {
     pub profile_id: Option<String>,
@@ -313,6 +371,11 @@ pub async fn discover(
 ) -> ApiResult<Json<DiscoveryReport>> {
     let target = load(&state, id).await?;
 
+    if let Some(agent_id) = db::targets::relay_of(&state.pool, id).await? {
+        let profile_id = discover_through_relay(&state, target, agent_id).await?;
+        return Ok(Json(DiscoveryReport { profile_id }));
+    }
+
     let profile_id = state
         .collectors
         .discover(&target, state.config.probe_timeout)
@@ -325,6 +388,31 @@ pub async fn discover(
     Ok(Json(DiscoveryReport { profile_id }))
 }
 
+/// Identification d'une cible relayée, par l'agent. Le profil reconnu est
+/// enregistré par le compte rendu lui-même (`relay::settle`).
+async fn discover_through_relay(
+    state: &AppState,
+    target: Target,
+    agent_id: TargetId,
+) -> ApiResult<Option<String>> {
+    let timeout = state.config.probe_timeout;
+    let deadline = relay::deadline_for(timeout);
+    let receiver = state
+        .relay()
+        .enqueue(agent_id, target, timeout, true, tokio::time::Instant::now() + deadline)
+        .map_err(|error| ApiError::Conflict(error.to_string()))?;
+    match tokio::time::timeout(deadline + Duration::from_secs(5), receiver).await {
+        Ok(Ok(JobResult::Done(outcome))) => match outcome.error {
+            None => Ok(outcome.profile_id),
+            Some(message) => Err(ApiError::BadRequest(message)),
+        },
+        Ok(Ok(JobResult::Expired)) | Ok(Err(_)) | Err(_) => Err(ApiError::BadRequest(format!(
+            "Timed out: relay agent {agent_id} did not answer within {}s (is it running with relay enabled?)",
+            deadline.as_secs()
+        ))),
+    }
+}
+
 /// Lance la détection sans faire attendre l'appelant.
 ///
 /// Un équipement injoignable mettrait le délai complet à répondre : imposer cette
@@ -335,6 +423,15 @@ fn spawn_discovery(state: AppState, id: TargetId) {
         let Ok(Some(target)) = db::targets::get(&state.pool, &state.cipher, id).await else {
             return;
         };
+        if let Ok(Some(agent_id)) = db::targets::relay_of(&state.pool, id).await {
+            // Le compte rendu enregistre le profil lui-même ; ici on ne fait
+            // qu'attendre pour journaliser l'issue.
+            if let Err(error) = discover_through_relay(&state, target, agent_id).await {
+                let (_, message) = error.into_parts();
+                tracing::debug!(target = id, error = %message, "detection through relay failed");
+            }
+            return;
+        }
         match state.collectors.discover(&target, state.config.probe_timeout).await {
             Ok(Some(profile_id)) => {
                 if let Err(error) = db::targets::set_profile(&state.pool, id, &profile_id).await {
@@ -365,6 +462,10 @@ pub async fn probe_now(
 ) -> ApiResult<Json<ProbeReport>> {
     let target = load(&state, id).await?;
 
+    if let Some(agent_id) = db::targets::relay_of(&state.pool, id).await? {
+        return probe_through_relay(&state, target, agent_id).await;
+    }
+
     match state.collectors.probe(&target, state.config.probe_timeout).await {
         Ok(samples) => {
             db::targets::record_probe(&state.pool, id, None).await?;
@@ -378,6 +479,43 @@ pub async fn probe_now(
             db::targets::record_probe(&state.pool, id, Some(&message)).await?;
             Err(ApiError::BadRequest(message))
         }
+    }
+}
+
+/// Sonde immédiate d'une cible relayée : la demande est confiée à l'agent et
+/// l'appelant attend sa réponse, au plus jusqu'à l'échéance de la sonde. Le
+/// serveur n'a aucun moyen de joindre l'équipement lui-même — c'est tout
+/// l'intérêt du relais.
+async fn probe_through_relay(
+    state: &AppState,
+    target: Target,
+    agent_id: TargetId,
+) -> ApiResult<Json<ProbeReport>> {
+    let timeout = state.config.probe_timeout;
+    let deadline = relay::deadline_for(timeout);
+    let receiver = state
+        .relay()
+        .enqueue(agent_id, target.clone(), timeout, false, tokio::time::Instant::now() + deadline)
+        .map_err(|error| ApiError::Conflict(error.to_string()))?;
+    // Un peu au-delà de l'échéance : c'est le planificateur qui la constate, à
+    // son prochain tour, et il répond alors `Expired` ici.
+    match tokio::time::timeout(deadline + Duration::from_secs(5), receiver).await {
+        Ok(Ok(JobResult::Done(outcome))) => match outcome.error {
+            None => {
+                // Les mesures sont déjà rangées par le compte rendu ; on ne fait
+                // que les décrire à l'appelant.
+                let prepared = relay::prepare(&target, outcome.samples);
+                Ok(Json(ProbeReport {
+                    sample_count: prepared.len(),
+                    series: prepared.iter().map(|s| s.series_key()).collect(),
+                }))
+            }
+            Some(message) => Err(ApiError::BadRequest(message)),
+        },
+        Ok(Ok(JobResult::Expired)) | Ok(Err(_)) | Err(_) => Err(ApiError::BadRequest(format!(
+            "Timed out: relay agent {agent_id} did not answer within {}s (is it running with relay enabled?)",
+            deadline.as_secs()
+        ))),
     }
 }
 

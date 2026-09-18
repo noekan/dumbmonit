@@ -9,6 +9,9 @@ use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{ApiError, ApiResult};
+use crate::auth::audit;
+use crate::auth::client_ip::ClientIp;
+use crate::auth::middleware::Authenticated;
 use crate::auth::token::{self as token, Scope, TokenRecord};
 use crate::state::AppState;
 
@@ -38,6 +41,8 @@ pub async fn list(State(state): State<AppState>) -> ApiResult<Json<Vec<TokenReco
 
 pub async fn create(
     State(state): State<AppState>,
+    Authenticated(me): Authenticated,
+    ClientIp(ip): ClientIp,
     Json(payload): Json<TokenPayload>,
 ) -> ApiResult<(StatusCode, Json<CreatedToken>)> {
     let name = payload.name.trim().to_string();
@@ -60,12 +65,20 @@ pub async fn create(
     // pas encore d'identité exploitable ici.
     let (record, secret) = token::create(&state.pool, &name, scope, None).await?;
     tracing::info!(token = %record.name, scope = scope.as_str(), "API token created");
+    audit::record(&state.pool, Some(&me.username), "token.created", Some(&record.name), ip).await;
     Ok((StatusCode::CREATED, Json(CreatedToken { token: record, secret })))
 }
 
-pub async fn revoke(State(state): State<AppState>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+pub async fn revoke(
+    State(state): State<AppState>,
+    Authenticated(me): Authenticated,
+    ClientIp(ip): ClientIp,
+    Path(id): Path<i64>,
+) -> ApiResult<StatusCode> {
     if token::revoke(&state.pool, id).await? {
         tracing::info!(token = id, "API token revoked");
+        audit::record(&state.pool, Some(&me.username), "token.revoked", Some(&id.to_string()), ip)
+            .await;
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::NotFound(format!("Token {id} not found or already revoked.")))

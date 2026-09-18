@@ -61,14 +61,23 @@ input, results in three groups.
 
 | Group | Entries |
 |---|---|
-| Pages | Overview, Devices, Alerts, Settings, Wall mode, Documentation |
-| Actions | Add a device, Scan my network, Schedule maintenance, Add notification channel, Toggle theme |
+| Pages | Overview, Devices, Alerts, Notifications, Status pages, Settings, Wall mode, Documentation |
+| Actions | Add a device, Scan my network, Schedule maintenance, Add notification channel, New status page, Announce an incident, Toggle theme |
 | Devices | Every device, with its state LED; ++enter++ opens it |
 
 ## Navigation
 
-The top bar has Overview, Devices, Alerts (with the count of what needs you)
-and Settings, the palette shortcut and the theme toggle. On a phone, it becomes
-a bottom tab bar. Nothing on the interface conveys status by colour alone: a
+The top bar has Overview, Devices, Alerts (with the count of what needs you),
+Status and Settings, the palette shortcut and the theme toggle. On a phone, it
+becomes a bottom tab bar with the same five entries.
+
+- **Overview** — the bulletin: is everything fine, and what needs you.
+- **Devices** — the rack; every source you monitor. See [Devices page](devices.md).
+- **Alerts** — what is firing, scheduled maintenance, the rules, and the
+  notification channels and policy. See [Alerts page](alerts.md).
+- **Status** — the public status pages and their announcements. See
+  [Status pages](status-pages.md).
+- **Settings** — your account, users and single sign-on, agent and assistant
+  tokens, appearance, about. See [Settings](settings.md). Nothing on the interface conveys status by colour alone: a
 plate or an LED always comes with a word (Reporting, Unreachable, Advisory,
 Warning, Suppressed by parent, Building up).

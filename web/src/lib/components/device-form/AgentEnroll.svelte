@@ -8,6 +8,7 @@
 	 */
 	import { createAgentToken, type CreatedAgentToken } from '$lib/api';
 	import { Button, ClickSpark, CopyBlock, ErrorNotice, Field, Plate } from '$lib/ui';
+	import AgentChecksums from './AgentChecksums.svelte';
 
 	interface Props {
 		cancelHref?: string;
@@ -59,6 +60,7 @@
 			<p class="text-sm font-semibold text-ink">Token <span class="font-normal text-ink-2">— {token.name}</span></p>
 			<CopyBlock value={token.secret} label="Copy the token" secret />
 		</div>
+		<AgentChecksums />
 
 		<p class="text-sm leading-relaxed text-ink-2">
 			The agent registers itself as a device within a minute. You can close this page.

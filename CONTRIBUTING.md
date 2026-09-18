@@ -18,8 +18,7 @@ the `Dockerfile` doubles as a development environment.
 ```bash
 docker compose up -d --build                     # one container (server + embedded VictoriaMetrics), UI on http://localhost:8080
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-                                                 # + a lab SNMP agent (address `snmp-lab`, community `public`)
-                                                 #   and the embedded VictoriaMetrics published on :8428
+                                                 # developer overlay: the embedded VictoriaMetrics is published on :8428
 ```
 
 The first build takes about ten minutes; later ones reuse the dependency layers.

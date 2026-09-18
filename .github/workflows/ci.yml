@@ -71,3 +71,13 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # The agent image (ghcr.io/noekan/dumbmonit-agent) is a second target of
+      # the same Dockerfile; it reuses the layers just built.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: agent-image
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

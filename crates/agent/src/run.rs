@@ -17,6 +17,7 @@ use crate::collect::system_health::SystemHealthProbe;
 use crate::collect::{SystemProbe, agent_samples, services};
 use crate::commands::CommandRunner;
 use crate::config::{Config, MIN_INTERVAL_SECS};
+use crate::relay::RelayRunner;
 use crate::shutdown::Shutdown;
 
 /// Première temporisation après un échec d'envoi.
@@ -43,6 +44,10 @@ const SHUTDOWN_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 /// viendra la finir après nous.
 const ONCE_COMMAND_TIMEOUT: Duration = Duration::from_secs(900);
 
+/// Délai d'une requête SNMP unitaire en mode relais. Le délai global de chaque
+/// sonde vient du serveur avec la sonde elle-même.
+const RELAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub struct Agent {
     config: Config,
     identity: AgentIdentity,
@@ -56,6 +61,9 @@ pub struct Agent {
     backoff: Backoff,
     /// Commandes du serveur : redémarrage ou mise à jour d'un conteneur.
     commands: CommandRunner,
+    /// Boucle du relais, lancée après le premier lot accepté — avant, le
+    /// serveur ne nous connaît pas encore et refuserait la demande.
+    relay: Option<tokio::task::JoinHandle<()>>,
     /// Période courante : celle de la configuration, jusqu'à ce que le serveur en
     /// demande une autre dans son accusé de réception.
     interval: Duration,
@@ -82,6 +90,7 @@ impl Agent {
             plakar: PlakarProbe::new(&config.plakar),
             backoff: Backoff::new(BACKOFF_BASE, BACKOFF_MAX),
             commands,
+            relay: None,
             identity,
             client,
             config,
@@ -189,6 +198,7 @@ impl Agent {
                             // Le serveur vient de nous répondre : c'est le moment
                             // de lui demander s'il attend quelque chose de nous.
                             self.commands.poll().await;
+                            self.start_relay(&shutdown);
                             Instant::now()
                         }
                         FlushOutcome::Idle => Instant::now(),
@@ -199,9 +209,24 @@ impl Agent {
         }
 
         self.commands.finish(SHUTDOWN_COMMAND_TIMEOUT).await;
+        if let Some(relay) = self.relay.take() {
+            // Le relais observe le même signal d'arrêt : on attend seulement
+            // qu'il ait rendu la main.
+            let _ = relay.await;
+        }
         self.final_flush().await;
         info!("agent stopped");
         Ok(())
+    }
+
+    /// Lance la boucle du relais si la configuration le demande, une seule fois.
+    fn start_relay(&mut self, shutdown: &Shutdown) {
+        if !self.config.relay || self.relay.is_some() {
+            return;
+        }
+        let runner =
+            RelayRunner::new(self.client.clone(), self.identity.key(), RELAY_REQUEST_TIMEOUT);
+        self.relay = Some(tokio::spawn(runner.run(shutdown.clone())));
     }
 
     /// Envoie un lot prélevé dans le tampon.
@@ -303,6 +328,8 @@ mod tests {
             docker_update_check: false,
             docker_max_containers: 200,
             commands: false,
+            relay: false,
+            site: None,
             probe: crate::collect::ProbeConfig::default(),
             system_health: crate::collect::system_health::SystemHealthConfig::default(),
             plakar: crate::collect::plakar::PlakarConfig::default(),

@@ -457,7 +457,10 @@ pub fn builtin_rules() -> Vec<Rule> {
             )
         },
         // Sauvegardes Plakar, par kloset et par source. Mêmes seuils que PBS :
-        // deux jours, c'est une nuit ratée plus la marge d'une nuit.
+        // deux jours, c'est une nuit ratée plus la marge d'une nuit. Les deux
+        // règles ne visent que des séries étiquetées `kloset`, que l'agent
+        // n'émet qu'une fois Plakar détecté : sans Plakar, rien ne peut se
+        // déclencher.
         Rule {
             description: "No new Plakar snapshot for this source for more than two days."
                 .to_string(),
@@ -784,6 +787,468 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "dumbmonit_pbs_node_updates_pending",
             )
         },
+        // --- Proxmox Backup Server : travaux, GC, disques (`collectors/pbs`) ---
+        //
+        // Un travail de purge ou de vérification en échec n'empêche pas les
+        // sauvegardes de tourner : c'est justement pourquoi personne ne le voit
+        // avant que le datastore soit plein ou qu'une restauration échoue. Les
+        // séries `job_last_ok` valent 1 ou 0 et n'existent pas pour un travail
+        // qui n'a jamais tourné ; « < 1 » ne vise donc que les vrais échecs. Le
+        // `for` de dix minutes absorbe une lecture prise pendant la relance.
+        Rule {
+            description: "The last run of this PBS prune job failed: nothing is pruned and the \
+                          datastore keeps filling up."
+                .to_string(),
+            operator: Operator::Lt,
+            threshold: 1.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "pbs_prune_failed",
+                "PBS prune job failed",
+                RuleKind::Threshold,
+                "dumbmonit_pbs_job_last_ok{kind=\"prune\"}",
+            )
+        },
+        Rule {
+            description: "The last run of this PBS verification job failed: at least one \
+                          snapshot could not be verified."
+                .to_string(),
+            operator: Operator::Lt,
+            threshold: 1.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "pbs_verify_job_failed",
+                "PBS verification job failed",
+                RuleKind::Threshold,
+                "dumbmonit_pbs_job_last_ok{kind=\"verify\"}",
+            )
+        },
+        // `gc_last_run_ok` vient de `/gc` (PBS 3.3+) ou, avant, de la GC la plus
+        // récente de la fenêtre de tâches.
+        Rule {
+            description: "The last garbage collection on this PBS datastore failed: freed \
+                          space is not reclaimed."
+                .to_string(),
+            operator: Operator::Lt,
+            threshold: 1.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "pbs_gc_failed",
+                "PBS garbage collection failed",
+                RuleKind::Threshold,
+                "dumbmonit_pbs_gc_last_run_ok",
+            )
+        },
+        // Disques du serveur de sauvegarde, mêmes séries que pour un nœud PVE :
+        // un SMART en échec est le dernier avertissement avant de perdre le
+        // datastore avec les sauvegardes qu'il porte. La série n'existe que si
+        // SMART a rendu un verdict.
+        Rule {
+            description: "A disk of the backup server reports SMART health FAILED.".to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "pbs_disk_smart_failed",
+                "PBS disk SMART failure",
+                RuleKind::Threshold,
+                "dumbmonit_pbs_node_disk_smart_failed",
+            )
+        },
+        Rule {
+            description: "This SSD of the backup server has used more than 90% of its rated \
+                          endurance."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 90.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Warning,
+            unit: "%".to_string(),
+            repeat_interval: Some(Duration::from_secs(7 * 24 * 3600)),
+            ..base(
+                "pbs_disk_wearout",
+                "PBS SSD worn out",
+                RuleKind::Threshold,
+                "dumbmonit_pbs_node_disk_wearout_percent",
+            )
+        },
+        // `zfs_pool_degraded` vaut 0 pour ONLINE ; DEGRADED, FAULTED, OFFLINE
+        // ou UNAVAIL donnent 1. Un pool dégradé fonctionne encore : c'est le
+        // moment de remplacer le disque, pas après le second.
+        Rule {
+            description: "A ZFS pool of the backup server is not ONLINE (degraded, faulted or \
+                          unavailable)."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "pbs_zpool_degraded",
+                "PBS ZFS pool degraded",
+                RuleKind::Threshold,
+                "dumbmonit_pbs_node_zfs_pool_degraded",
+            )
+        },
+        // --- fin du bloc Proxmox Backup Server ---
+        // --- Proxmox VE : invités, disques, ZFS, paquets (`collectors/proxmox`) ---
+        //
+        // Les séries d'invité portent `name` et `vmid` : la notification dit
+        // « nextcloud (202) ». Celles de disque portent `node` et `disk`, celles
+        // de pool `node` et `pool` : « pve1 · /dev/sda », « pve2 · tank ».
+        //
+        // Processeur d'un invité : le pourcentage est celui des cœurs alloués,
+        // une machine à 100 % n'a que ses propres cœurs à saturer. Quinze
+        // minutes écartent les pics de démarrage et de sauvegarde.
+        Rule {
+            description:
+                "A VM or container has used more than 90% of its allocated cores for fifteen minutes."
+                    .to_string(),
+            operator: Operator::Gt,
+            threshold: 90.0,
+            for_duration: Duration::from_secs(15 * 60),
+            severity: Severity::Warning,
+            unit: "%".to_string(),
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "pve_guest_cpu_high",
+                "VM or container CPU high",
+                RuleKind::Threshold,
+                "dumbmonit_proxmox_guest_cpu_percent",
+            )
+        },
+        // Mémoire d'un invité : PVE mesure la mémoire consommée vue de l'hôte,
+        // qui plafonne naturellement près de 100 % avec un ballon ou un cache
+        // de fichiers actif — d'où 95 % et dix minutes.
+        Rule {
+            description: "A VM or container has used more than 95% of its memory for ten minutes."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 95.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Warning,
+            unit: "%".to_string(),
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "pve_guest_memory_high",
+                "VM or container memory high",
+                RuleKind::Threshold,
+                "dumbmonit_proxmox_guest_memory_percent",
+            )
+        },
+        // Disque racine d'un invité : connu pour un conteneur, et pour une
+        // machine virtuelle dont l'agent QEMU répond. Sans mesure, pas de série
+        // et donc pas d'alerte — jamais un faux « 0 % ».
+        Rule {
+            description: "The root disk of a VM or container is more than 90% full.".to_string(),
+            operator: Operator::Gt,
+            threshold: 90.0,
+            for_duration: Duration::from_secs(15 * 60),
+            severity: Severity::Warning,
+            unit: "%".to_string(),
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "pve_guest_disk_almost_full",
+                "VM or container disk almost full",
+                RuleKind::Threshold,
+                "dumbmonit_proxmox_guest_disk_used_percent",
+            )
+        },
+        // Usure d'un SSD ou NVMe : 0 % neuf, 100 % en fin de vie d'après le
+        // constructeur. À 90 %, il est temps de commander le remplaçant.
+        Rule {
+            description: "An SSD or NVMe disk of a node has used more than 90% of its rated life."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 90.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Warning,
+            unit: "%".to_string(),
+            repeat_interval: Some(Duration::from_secs(7 * 24 * 3600)),
+            ..base(
+                "pve_disk_wearout",
+                "Proxmox disk wearing out",
+                RuleKind::Threshold,
+                "dumbmonit_proxmox_node_disk_wearout_percent",
+            )
+        },
+        // SMART en échec : le disque lui-même se déclare en fin de vie.
+        Rule {
+            description: "A disk of a Proxmox node reports a failed SMART health check.".to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "pve_disk_smart_failed",
+                "Proxmox disk SMART failure",
+                RuleKind::Threshold,
+                "dumbmonit_proxmox_node_disk_smart_failed",
+            )
+        },
+        // Pool ZFS dégradé : un disque manque, la redondance est consommée.
+        Rule {
+            description: "A ZFS pool of a Proxmox node is not ONLINE: a disk is missing or faulted."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "pve_zfs_pool_degraded",
+                "Proxmox ZFS pool degraded",
+                RuleKind::Threshold,
+                "dumbmonit_proxmox_node_zfs_pool_degraded",
+            )
+        },
+        // Correctifs de sécurité : un seul suffit, contrairement au décompte
+        // général des mises à jour qui attend vingt paquets.
+        Rule {
+            description: "Security updates are pending on this Proxmox node.".to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(7 * 24 * 3600)),
+            ..base(
+                "pve_security_updates_pending",
+                "Proxmox security updates pending",
+                RuleKind::Threshold,
+                "dumbmonit_proxmox_node_updates_security_pending",
+            )
+        },
+        // Paquets mis à jour : quelqu'un a passé `apt upgrade` sur le nœud. Une
+        // information, pas une panne — mais celle qui explique le redémarrage
+        // ou le comportement changé qu'on constate ensuite. La série reste
+        // publiée une heure avec le détail en étiquette `changes`, puis se
+        // résout seule.
+        Rule {
+            description: "Installed Proxmox packages changed since the previous probe.".to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(60),
+            severity: Severity::Info,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "pve_packages_changed",
+                "Proxmox packages changed",
+                RuleKind::Threshold,
+                "dumbmonit_proxmox_node_packages_changed",
+            )
+        },
+        // --- fin du bloc Proxmox VE : invités, disques, ZFS, paquets ---
+        // --- Synology DSM : stockage, disques, mémoire et rythme Active Backup
+        // (`collectors/synology/{metrics,devices,rhythm}.rs`) ---
+        //
+        // Les états de DSM sont publiés sur une échelle commune : 0 normal, 1 à
+        // surveiller, 2 critique — et l'inconnu vaut 1, jamais 0. Une règle sur
+        // « > 0 » attrape donc aussi un état inédit, ce qui est voulu : mieux vaut
+        // un avertissement qu'un disque en panne sous un libellé nouveau.
+        Rule {
+            description: "The SMART status of this disk is no longer \"normal\", as reported \
+                          by DSM."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(15 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "synology_disk_smart_warning",
+                "Synology disk SMART warning",
+                RuleKind::Threshold,
+                "dumbmonit_synology_disk_smart_status",
+            )
+        },
+        // Un disque « crashed » a déjà quitté la grappe : c'est une panne, pas un
+        // avertissement.
+        Rule {
+            description: "DSM reports this disk as crashed or failed.".to_string(),
+            operator: Operator::Ge,
+            threshold: 2.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "synology_disk_failed",
+                "Synology disk failed",
+                RuleKind::Threshold,
+                "dumbmonit_synology_disk_status",
+            )
+        },
+        Rule {
+            description: "The bad-sector count of this disk exceeds the threshold set in DSM."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(15 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "synology_disk_bad_sectors",
+                "Synology disk bad sectors",
+                RuleKind::Threshold,
+                "dumbmonit_synology_disk_bad_sector_exceeded",
+            )
+        },
+        // Des secteurs illisibles qui apparaissent sont le signe le plus précoce
+        // d'une panne : `delta` sur une jauge compare la valeur d'il y a un jour à
+        // celle d'aujourd'hui. Un disque remplacé repart de zéro, ce qui donne une
+        // variation négative et ne déclenche pas.
+        Rule {
+            description: "New unreadable (UNC) sectors appeared on this disk in the last \
+                          24 hours."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(15 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "synology_disk_bad_sectors_growing",
+                "Synology disk bad sectors growing",
+                RuleKind::Threshold,
+                "delta(dumbmonit_synology_disk_unc_count[24h])",
+            )
+        },
+        Rule {
+            description: "This SSD has less than 10% of its rated life left.".to_string(),
+            operator: Operator::Lt,
+            threshold: 10.0,
+            clear_threshold: Some(12.0),
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Warning,
+            unit: "%".to_string(),
+            repeat_interval: Some(Duration::from_secs(7 * 24 * 3600)),
+            ..base(
+                "synology_ssd_wearout",
+                "Synology SSD wearing out",
+                RuleKind::Threshold,
+                "dumbmonit_synology_disk_remaining_life_percent",
+            )
+        },
+        // Un volume dégradé fonctionne encore, sans redondance : la prochaine
+        // panne est celle qui perd les données. Même seuil pour « crashed ».
+        Rule {
+            description: "This volume is degraded or crashed: its redundancy is gone.".to_string(),
+            operator: Operator::Ge,
+            threshold: 2.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "synology_volume_degraded",
+                "Synology volume degraded",
+                RuleKind::Threshold,
+                "dumbmonit_synology_volume_status",
+            )
+        },
+        Rule {
+            description: "Volume 90% full or more.".to_string(),
+            operator: Operator::Ge,
+            threshold: 90.0,
+            clear_threshold: Some(88.0),
+            for_duration: Duration::from_secs(15 * 60),
+            severity: Severity::Warning,
+            unit: "%".to_string(),
+            escalate_after: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "synology_volume_almost_full",
+                "Synology volume almost full",
+                RuleKind::Threshold,
+                "dumbmonit_synology_volume_used_percent",
+            )
+        },
+        // 55 °C est le seuil à partir duquel les fabricants de disques mécaniques
+        // et Synology parlent de surchauffe ; l'hystérésis évite les allers-retours
+        // d'un disque qui oscille autour du seuil pendant une reconstruction.
+        Rule {
+            description: "A disk of this NAS is above 55 °C, or DSM raised its temperature \
+                          warning."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 55.0,
+            clear_threshold: Some(52.0),
+            for_duration: Duration::from_secs(15 * 60),
+            severity: Severity::Warning,
+            unit: "°C".to_string(),
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "synology_temperature_high",
+                "Synology temperature high",
+                RuleKind::Threshold,
+                // Le drapeau de DSM vaut 0 ou 1 : multiplié par 100, il dépasse le
+                // seuil à lui seul quand le NAS lui-même se déclare en surchauffe.
+                "dumbmonit_synology_disk_temperature_celsius \
+                 or (100 * dumbmonit_synology_temperature_warning > 55)",
+            )
+        },
+        Rule {
+            description: "Memory usage of the NAS above 95% for fifteen minutes.".to_string(),
+            operator: Operator::Gt,
+            threshold: 95.0,
+            clear_threshold: Some(90.0),
+            for_duration: Duration::from_secs(15 * 60),
+            severity: Severity::Warning,
+            unit: "%".to_string(),
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "synology_memory_high",
+                "Synology memory high",
+                RuleKind::Threshold,
+                "dumbmonit_synology_memory_usage_percent",
+            )
+        },
+        // Rythme Active Backup par appareil : la série vaut 1 seulement quand le
+        // modèle juge l'appareil en retard *par rapport à ses propres habitudes*
+        // (jours de repos exclus, tolérance dérivée de son intervalle habituel).
+        // Une demi-heure de `for` laisse passer une relecture de l'historique.
+        Rule {
+            description: "No successful Active Backup for Business run for this device for \
+                          longer than its usual rhythm allows (off-days excluded)."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(30 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "synology_abb_device_overdue",
+                "Active Backup device overdue",
+                RuleKind::Threshold,
+                "dumbmonit_abb_device_overdue",
+            )
+        },
+        // Deux tentatives échouées d'affilée : ce n'est plus un portable refermé
+        // au mauvais moment, c'est un appareil qui ne se sauvegarde plus.
+        Rule {
+            description: "The last two or more Active Backup for Business attempts of this \
+                          device failed."
+                .to_string(),
+            operator: Operator::Ge,
+            threshold: 2.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "synology_abb_device_failing",
+                "Active Backup device failing",
+                RuleKind::Threshold,
+                "dumbmonit_abb_device_consecutive_failures",
+            )
+        },
+        // --- fin du bloc Synology DSM ---
     ]
 }
 
@@ -849,6 +1314,32 @@ mod tests {
             "pve_certificate_expiring",
             "pbs_sync_failed",
             "pbs_updates_pending",
+            "pbs_prune_failed",
+            "pbs_verify_job_failed",
+            "pbs_gc_failed",
+            "pbs_disk_smart_failed",
+            "pbs_disk_wearout",
+            "pbs_zpool_degraded",
+            "pve_guest_cpu_high",
+            "pve_guest_memory_high",
+            "pve_guest_disk_almost_full",
+            "pve_disk_wearout",
+            "pve_disk_smart_failed",
+            // Synology DSM (`collectors/synology`).
+            "synology_disk_smart_warning",
+            "synology_disk_failed",
+            "synology_disk_bad_sectors",
+            "synology_disk_bad_sectors_growing",
+            "synology_ssd_wearout",
+            "synology_volume_degraded",
+            "synology_volume_almost_full",
+            "synology_temperature_high",
+            "synology_memory_high",
+            "synology_abb_device_overdue",
+            "synology_abb_device_failing",
+            "pve_zfs_pool_degraded",
+            "pve_security_updates_pending",
+            "pve_packages_changed",
         ] {
             assert!(uids.contains(&attendu), "missing built-in rule: {attendu}");
         }
@@ -895,6 +1386,20 @@ mod tests {
             "dumbmonit_abb_task_last_status",
             "dumbmonit_abb_task_last_success_seconds",
             "dumbmonit_abb_task_enabled",
+            // Synology DSM : stockage, disques, mémoire et rythme Active Backup
+            // (`collectors/synology/{metrics,devices}.rs`).
+            "dumbmonit_synology_disk_smart_status",
+            "dumbmonit_synology_disk_status",
+            "dumbmonit_synology_disk_bad_sector_exceeded",
+            "dumbmonit_synology_disk_unc_count",
+            "dumbmonit_synology_disk_remaining_life_percent",
+            "dumbmonit_synology_volume_status",
+            "dumbmonit_synology_volume_used_percent",
+            "dumbmonit_synology_disk_temperature_celsius",
+            "dumbmonit_synology_temperature_warning",
+            "dumbmonit_synology_memory_usage_percent",
+            "dumbmonit_abb_device_overdue",
+            "dumbmonit_abb_device_consecutive_failures",
             // Proxmox VE, parité avec Pulse (`collectors/proxmox/{metrics,ha,
             // snapshots,replication,ceph}.rs`).
             "dumbmonit_proxmox_guest_running",
@@ -910,6 +1415,22 @@ mod tests {
             // PBS, travaux de synchronisation et mises à jour (`collectors/pbs/jobs.rs`).
             "dumbmonit_pbs_sync_job_last_ok",
             "dumbmonit_pbs_node_updates_pending",
+            // Proxmox VE, invités, disques, ZFS et paquets
+            // (`collectors/proxmox/{metrics,guest,disks,apt}.rs`).
+            "dumbmonit_proxmox_guest_cpu_percent",
+            "dumbmonit_proxmox_guest_memory_percent",
+            "dumbmonit_proxmox_guest_disk_used_percent",
+            "dumbmonit_proxmox_node_disk_wearout_percent",
+            "dumbmonit_proxmox_node_disk_smart_failed",
+            "dumbmonit_proxmox_node_zfs_pool_degraded",
+            "dumbmonit_proxmox_node_updates_security_pending",
+            "dumbmonit_proxmox_node_packages_changed",
+            // PBS, travaux, GC et disques (`collectors/pbs/{jobs,backup,metrics}.rs`).
+            "dumbmonit_pbs_job_last_ok",
+            "dumbmonit_pbs_gc_last_run_ok",
+            "dumbmonit_pbs_node_disk_smart_failed",
+            "dumbmonit_pbs_node_disk_wearout_percent",
+            "dumbmonit_pbs_node_zfs_pool_degraded",
         ];
 
         for rule in builtin_rules() {

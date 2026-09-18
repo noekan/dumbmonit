@@ -14,6 +14,7 @@ use tokio::sync::Semaphore;
 use tokio::time::{Instant, MissedTickBehavior, interval};
 use tracing::{debug, info, warn};
 
+use crate::collectors::relay::{self, EnqueueError, JobResult};
 use crate::db;
 use crate::state::AppState;
 
@@ -39,6 +40,8 @@ async fn run(state: AppState) -> anyhow::Result<()> {
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut last_reload = Instant::now() - RELOAD_EVERY;
     let mut targets = Vec::new();
+    // Cibles interrogées par un agent relais plutôt que par le serveur.
+    let mut relays: HashMap<TargetId, TargetId> = HashMap::new();
 
     info!(
         max_concurrent = state.config.max_concurrent_probes,
@@ -61,7 +64,17 @@ async fn run(state: AppState) -> anyhow::Result<()> {
                 }
                 Err(error) => warn!(?error, "cannot reload targets"),
             }
+            match db::targets::relay_map(&state.pool).await {
+                Ok(loaded) => relays = loaded,
+                Err(error) => warn!(?error, "cannot reload relay assignments"),
+            }
             last_reload = now;
+        }
+
+        // Les sondes déléguées que personne n'a rapportées à temps comptent
+        // comme un échec, exactement comme un délai dépassé en local.
+        for job in state.relay().expire(now) {
+            relay::settle(&state, job, JobResult::Expired).await;
         }
 
         for target in &targets {
@@ -75,6 +88,11 @@ async fn run(state: AppState) -> anyhow::Result<()> {
                 continue;
             }
             *due = now + target.interval;
+
+            if let Some(agent_id) = relays.get(&target.id) {
+                delegate(&state, target, *agent_id, now);
+                continue;
+            }
 
             let Ok(permit) = permits.clone().acquire_owned().await else {
                 return Ok(()); // sémaphore fermé : arrêt du serveur
@@ -116,6 +134,27 @@ async fn probe_once(state: AppState, target: dumbmonit_proto::Target) {
         db::targets::record_probe(&state.pool, target.id, error_message.as_deref()).await
     {
         warn!(target = target.id, ?error, "cannot record the result");
+    }
+}
+
+/// Confie la sonde à l'agent relais de la cible plutôt que de l'exécuter ici.
+///
+/// Rien n'attend la réponse : elle arrive par l'API, qui range les mesures et
+/// le verdict elle-même. Une sonde encore en vol n'est pas doublée — le relais
+/// est lent ou absent, empiler n'y changerait rien.
+fn delegate(state: &AppState, target: &dumbmonit_proto::Target, agent_id: TargetId, now: Instant) {
+    let timeout = state.config.probe_timeout;
+    match state.relay().enqueue(
+        agent_id,
+        target.clone(),
+        timeout,
+        false,
+        now + relay::deadline_for(timeout),
+    ) {
+        Ok(_) => debug!(target = target.id, agent = agent_id, "probe delegated to relay"),
+        Err(EnqueueError::Busy) => {
+            debug!(target = target.id, agent = agent_id, "relay still busy with the previous probe")
+        }
     }
 }
 

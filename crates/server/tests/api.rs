@@ -75,7 +75,10 @@ impl TestApp {
     async fn request(&self, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
         let mut builder = Request::builder().method(method).uri(uri);
         if !self.cookie.is_empty() {
-            builder = builder.header(header::COOKIE, &self.cookie);
+            builder = builder
+                .header(header::COOKIE, &self.cookie)
+                // L'en-tête que l'interface pose sur chaque écriture (anti-CSRF).
+                .header("x-requested-with", "DumbMonit");
         }
         let request = match body {
             Some(value) => builder

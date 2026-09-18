@@ -639,6 +639,7 @@ mod tests {
             name: format!("device-{id}"),
             address: format!("10.0.0.{id}"),
             parent_id: parent,
+            via_agent: None,
             tags: BTreeMap::new(),
             enabled: true,
         }

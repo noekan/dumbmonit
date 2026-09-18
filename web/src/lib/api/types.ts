@@ -41,9 +41,16 @@ export type Credential =
 			context?: string | null;
 	  }
 	| { type: 'api_token'; token: string }
-	| { type: 'username_password'; username: string; password: string };
+	/**
+	 * A Proxmox VE / PBS token in the two pieces the product shows: the server
+	 * assembles `token_id=secret` and stores the combined form.
+	 */
+	| { type: 'api_token'; token_id: string; secret: string }
+	| { type: 'username_password'; username: string; password: string }
+	/** A family this build does not know: sent as the server described it. */
+	| ({ type: string } & Record<string, string>);
 
-/** Credential families offered by the form, in display order. */
+/** Credential families this build knows how to label, in display order. */
 export const CREDENTIAL_KINDS = [
 	{ value: 'snmp_community', label: 'SNMP v1 / v2c (community)' },
 	{ value: 'snmp_v3', label: 'SNMP v3' },
@@ -53,6 +60,36 @@ export const CREDENTIAL_KINDS = [
 ] as const;
 
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number]['value'];
+
+/** Input shapes a credential field can ask for. */
+export type CredentialFieldInput = 'text' | 'password' | 'select';
+
+/**
+ * One field of a credential form, described by the server.
+ *
+ * `key` is the property sent in the `credential` object; the server knows how
+ * to recompose what it needs from those keys (a Proxmox token from `token_id`
+ * + `secret`, an SNMP v3 user from its protocols and passphrases).
+ */
+export interface CredentialField {
+	key: string;
+	label: string;
+	help: string;
+	placeholder: string;
+	input: CredentialFieldInput;
+	/** Values offered when `input === 'select'`, the first one by default. */
+	choices: string[];
+	required: boolean;
+}
+
+/** A credential family a device type accepts, with the fields to fill in. */
+export interface CredentialView {
+	/** Value of `credential.type`. */
+	kind: string;
+	label: string;
+	help: string;
+	fields: CredentialField[];
+}
 
 // --- Targets ----------------------------------------------------------------
 
@@ -69,6 +106,8 @@ export interface Target {
 	kind: string;
 	profile_id: string | null;
 	parent_id: TargetId | null;
+	/** Agent that probes this device from its own network; `null` when the server does. */
+	via_agent: TargetId | null;
 	interval_secs: number;
 	enabled: boolean;
 	tags: Record<string, string>;
@@ -86,6 +125,7 @@ export interface TargetPayload {
 	kind: string;
 	profile_id?: string | null;
 	parent_id?: TargetId | null;
+	via_agent?: TargetId | null;
 	interval_secs?: number;
 	enabled?: boolean;
 	tags?: Record<string, string>;
@@ -361,6 +401,8 @@ export interface CollectorInfo {
 	summary: string;
 	examples: string[];
 	credential_types: string[];
+	/** The same families as `credential_types`, field by field, in order. */
+	credentials: CredentialView[];
 	address_hint: string;
 	default_port: number;
 	setup: CollectorSetup;
@@ -379,12 +421,23 @@ export interface CollectorInfo {
 export function normalizeCollector(raw: Partial<CollectorInfo> & { kind: string }): CollectorInfo {
 	const setup = raw.setup ?? { title: '', steps: [], warning: '', doc_url: '' };
 	const options = Array.isArray(raw.options) ? raw.options : [];
+	const credential_types = Array.isArray(raw.credential_types)
+		? raw.credential_types.filter((t) => typeof t === 'string')
+		: [];
+	// A server predating field descriptions only names the families: rebuild
+	// the fields it would have sent, so the form looks the same against both.
+	const credentials = Array.isArray(raw.credentials)
+		? raw.credentials
+				.filter((c) => c && typeof c.kind === 'string' && c.kind.trim())
+				.map(normalizeCredentialView)
+		: credential_types.map(fallbackCredentialView);
 	return {
 		kind: raw.kind,
 		label: raw.label?.trim() || raw.kind,
 		summary: raw.summary?.trim() ?? '',
 		examples: Array.isArray(raw.examples) ? raw.examples : [],
-		credential_types: Array.isArray(raw.credential_types) ? raw.credential_types : [],
+		credential_types,
+		credentials,
 		address_hint: raw.address_hint?.trim() ?? '',
 		default_port: typeof raw.default_port === 'number' ? raw.default_port : 0,
 		setup: {
@@ -424,6 +477,104 @@ function normalizeOption(raw: Partial<CollectorOption> & { key: string }): Colle
 	};
 }
 
+const CREDENTIAL_INPUTS: readonly CredentialFieldInput[] = ['text', 'password', 'select'];
+
+function normalizeCredentialView(raw: Partial<CredentialView> & { kind: string }): CredentialView {
+	const fields = Array.isArray(raw.fields) ? raw.fields : [];
+	return {
+		kind: raw.kind.trim(),
+		label: raw.label?.trim() || fallbackCredentialView(raw.kind.trim()).label,
+		help: raw.help?.trim() ?? '',
+		fields: fields
+			.filter((field) => field && typeof field.key === 'string' && field.key.trim())
+			.map((field) => {
+				const input = CREDENTIAL_INPUTS.includes(field.input as CredentialFieldInput)
+					? (field.input as CredentialFieldInput)
+					: 'text';
+				return {
+					key: field.key.trim(),
+					label: field.label?.trim() || field.key.trim(),
+					help: field.help?.trim() ?? '',
+					placeholder: field.placeholder?.trim() ?? '',
+					input,
+					choices: Array.isArray(field.choices) ? field.choices.filter((c) => typeof c === 'string') : [],
+					required: Boolean(field.required)
+				};
+			})
+	};
+}
+
+function credentialField(
+	key: string,
+	label: string,
+	input: CredentialFieldInput,
+	required: boolean,
+	extra: Partial<CredentialField> = {}
+): CredentialField {
+	return { key, label, help: '', placeholder: '', input, choices: [], required, ...extra };
+}
+
+/** The fields a family asks for, when the server does not say (older builds). */
+function fallbackCredentialView(kind: string): CredentialView {
+	const label = CREDENTIAL_KINDS.find((option) => option.value === kind)?.label ?? kind;
+	switch (kind) {
+		case 'snmp_community':
+			return {
+				kind,
+				label,
+				help: '',
+				fields: [
+					credentialField('community', 'SNMP community', 'password', true, {
+						help: 'Most devices ship with "public". A read-only community is enough.',
+						placeholder: 'public'
+					})
+				]
+			};
+		case 'snmp_v3':
+			return {
+				kind,
+				label,
+				help: '',
+				fields: [
+					credentialField('username', 'User name', 'text', true),
+					credentialField('auth_protocol', 'Authentication protocol', 'select', false, {
+						choices: ['sha256', 'sha512', 'sha384', 'sha224', 'sha1', 'md5']
+					}),
+					credentialField('auth_passphrase', 'Authentication passphrase', 'password', true),
+					credentialField('privacy_protocol', 'Privacy protocol', 'select', false, {
+						choices: ['aes128', 'aes192', 'aes256', 'des']
+					}),
+					credentialField('privacy_passphrase', 'Privacy passphrase', 'password', false, {
+						help: 'Leave blank for authentication without encryption (authNoPriv).'
+					})
+				]
+			};
+		case 'api_token':
+			return {
+				kind,
+				label,
+				help: '',
+				fields: [
+					credentialField('token', 'API token', 'password', true, {
+						help: 'A read-only token is enough. The server stores it encrypted and never shows it again.'
+					})
+				]
+			};
+		case 'username_password':
+			return {
+				kind,
+				label,
+				help: '',
+				fields: [
+					credentialField('username', 'User name', 'text', true),
+					credentialField('password', 'Password', 'password', true)
+				]
+			};
+		default:
+			return { kind, label, help: '', fields: [] };
+	}
+}
+
 // --- Authentication ---------------------------------------------------------
 
 export type Role = 'admin' | 'viewer';
@@ -439,6 +590,8 @@ export interface User {
 	role: Role;
 	auth: AuthMethod;
 	disabled: boolean;
+	/** Two-factor authentication is active on this account. */
+	totp_enabled: boolean;
 	created_at: string;
 	last_login_at: string | null;
 }
@@ -650,6 +803,12 @@ export interface AgentHost {
 	 * Restart/Update — the UI must not offer them.
 	 */
 	commands_supported: boolean;
+	/** True when the agent declared `relay: true`: it runs probes for other devices. */
+	relay: boolean;
+	/** Site declared by the agent, if any. */
+	site: string | null;
+	/** Devices reached through this agent (`via_agent`). */
+	relayed: number;
 	last_seen_at: string | null;
 }
 
@@ -888,4 +1047,405 @@ export interface PublicStatus {
 	incidents: PublicIncident[];
 	/** Scheduled or in-progress maintenance windows. */
 	maintenance: PublicIncident[];
+}
+
+// --- Proxmox Backup Server (crates/server/src/api/pbs.rs) --------------------
+//
+// Times are Unix seconds, as PBS reports them (not server date strings).
+
+export interface PbsSnapshot {
+	time: number;
+	size: number | null;
+	/** `true` verified, `false` verification failed, `null` never verified. */
+	verified: boolean | null;
+	protected: boolean;
+}
+
+export type PbsDayState = 'ok' | 'verify_failed' | 'failed' | 'running' | 'none';
+
+export interface PbsCalendarRun {
+	upid: string;
+	start: number;
+	end: number | null;
+	/** `null` while the task is still running. */
+	ok: boolean | null;
+	status: string | null;
+}
+
+export interface PbsCalendarDay {
+	/** `YYYY-MM-DD` in the timezone the calendar was asked for. */
+	date: string;
+	state: PbsDayState;
+	/** Backup tasks of that day, newest first. */
+	runs: PbsCalendarRun[];
+	snapshot: PbsSnapshot | null;
+}
+
+export interface PbsCalendarFailure {
+	time: number;
+	upid: string;
+	error: string;
+}
+
+export interface PbsCalendarGroup {
+	datastore: string;
+	namespace: string;
+	backup_type: string;
+	backup_id: string;
+	/** Guest name from the latest snapshot's notes, when PVE wrote one. */
+	name: string | null;
+	count: number;
+	last_time: number | null;
+	last_size: number | null;
+	last_verified: boolean | null;
+	last_success: number | null;
+	last_failure: PbsCalendarFailure | null;
+	retention: string | null;
+	/** One entry per day, oldest first, today last. */
+	days: PbsCalendarDay[];
+}
+
+export interface PbsCalendar {
+	/** `null` before the first successful probe. */
+	probed_at: number | null;
+	days: number;
+	offset_minutes: number;
+	groups: PbsCalendarGroup[];
+}
+
+export type PbsTaskKind = 'backup' | 'sync' | 'verify' | 'prune' | 'gc' | 'other';
+
+export interface PbsFailure {
+	upid: string;
+	worker_type: string;
+	kind: PbsTaskKind;
+	worker_id: string;
+	datastore: string | null;
+	object: string | null;
+	user: string | null;
+	start: number;
+	end: number | null;
+	/** Error message without the `TASK ERROR:` prefix. */
+	error: string;
+}
+
+export interface PbsJob {
+	/** `sync`, `verify`, `prune` or `gc`. */
+	kind: string;
+	id: string;
+	datastore: string;
+	namespace: string | null;
+	/** Sync jobs only: `remote:remote-store`, or `local`. */
+	remote: string | null;
+	enabled: boolean;
+	schedule: string | null;
+	comment: string | null;
+	/** Prune jobs only: `last 3, daily 7, weekly 4`. */
+	retention: string | null;
+	next_run: number | null;
+	last_run_state: string | null;
+	last_run_end: number | null;
+	last_run_upid: string | null;
+	/** `null` when the job never ran. */
+	last_run_ok: boolean | null;
+	error: string | null;
+}
+
+export interface PbsJobs {
+	probed_at: number | null;
+	jobs: PbsJob[];
+}
+
+export interface PbsGc {
+	last_run_state: string | null;
+	last_run_end: number | null;
+	last_run_upid: string | null;
+	schedule: string | null;
+	next_run: number | null;
+	removed_bytes: number | null;
+	pending_bytes: number | null;
+}
+
+export interface PbsDatastore {
+	name: string;
+	available: boolean;
+	error: string | null;
+	total_bytes: number | null;
+	used_bytes: number | null;
+	avail_bytes: number | null;
+	/** PBS's own fill-up estimate, only when it lies in the future. */
+	estimated_full_at: number | null;
+	dedup_factor: number | null;
+	gc: PbsGc | null;
+}
+
+export interface PbsDisk {
+	name: string;
+	devpath: string | null;
+	model: string | null;
+	serial: string | null;
+	size_bytes: number | null;
+	disk_type: string | null;
+	used: string | null;
+	/** `passed`, `failed` or `unknown`. */
+	status: string | null;
+	/** Endurance used, in percent (SSD only). */
+	wearout_percent: number | null;
+}
+
+export interface PbsZpool {
+	name: string;
+	health: string;
+	size_bytes: number | null;
+	alloc_bytes: number | null;
+	free_bytes: number | null;
+	fragmentation_percent: number | null;
+}
+
+export interface PbsHealth {
+	probed_at: number | null;
+	version: string | null;
+	datastores: PbsDatastore[];
+	disks: PbsDisk[];
+	zpools: PbsZpool[];
+}
+
+export interface PbsTaskLog {
+	upid: string;
+	total: number;
+	lines: string[];
+}
+
+export interface PbsSmartAttribute {
+	id: number | null;
+	name: string | null;
+	raw: string | null;
+	normalized: number | null;
+	threshold: number | null;
+	worst: number | null;
+	flags: string | null;
+}
+
+export interface PbsDiskSmart {
+	disk: string;
+	health: string | null;
+	wearout_percent: number | null;
+	kind: string | null;
+	attributes: PbsSmartAttribute[];
+	text: string | null;
+}
+
+// --- Relay agents (remote sites) --------------------------------------------
+
+/**
+ * `GET /api/relays`: an agent as the device form offers it under "Reached
+ * through". Mirrors `RelayView` in `crates/server/src/api/relay.rs`.
+ */
+export interface RelayAgent {
+	/** Id of the agent's target. */
+	id: TargetId;
+	name: string;
+	site: string | null;
+	/**
+	 * True when the agent declared `relay: true` at its last batch. An agent
+	 * picked as relay without it never fetches the probes: the UI warns.
+	 */
+	relay: boolean;
+	last_seen_at: string | null;
+	/** Devices reached through this agent. */
+	relayed: number;
+}
+
+// --- Two-factor authentication (TOTP) and audit log ---------------------------
+
+/** Outcome of `POST /auth/login`: either the session is open, or a second step is needed. */
+export interface LoginOutcome {
+	totp_required: boolean;
+	/** Short-lived token to present with the code on `/auth/login/totp`. */
+	pending: string | null;
+}
+
+/** Mirrors `api::totp::TotpStatus`. */
+export interface TotpStatus {
+	enabled: boolean;
+	pending: boolean;
+	recovery_codes_left: number;
+}
+
+/** Mirrors `api::totp::Enrolment`. */
+export interface TotpEnrolment {
+	secret: string;
+	otpauth_uri: string;
+	issuer: string;
+	account: string;
+}
+
+/** Mirrors `auth::audit::Entry`. */
+export interface AuditEntry {
+	id: number;
+	at: string;
+	actor: string | null;
+	action: string;
+	subject: string | null;
+	ip: string | null;
+}
+
+// --- Proxmox VE guests (`crates/server/src/api/proxmox.rs`) -----------------
+
+export type ProxmoxGuestStatus = 'running' | 'stopped' | 'paused' | 'suspended' | 'template' | 'unknown';
+
+/**
+ * One row of the Guests panel, as the last probe left it. Every unknown value
+ * is `null`, never zero: a VM without guest agent has a disk size but no
+ * usage; a stopped guest keeps its sizes and loses its measurements.
+ */
+export interface ProxmoxGuest {
+	vmid: number;
+	name: string;
+	node: string;
+	kind: 'qemu' | 'lxc' | string;
+	status: ProxmoxGuestStatus | string;
+	/** Of the cores allocated to the guest. */
+	cpu_percent: number | null;
+	cpu_count: number | null;
+	memory_used_bytes: number | null;
+	memory_total_bytes: number | null;
+	memory_percent: number | null;
+	balloon_bytes: number | null;
+	disk_used_bytes: number | null;
+	disk_total_bytes: number | null;
+	disk_percent: number | null;
+	/** `true` guest agent answered, `false` enabled but silent, `null` none (or a container). */
+	agent: boolean | null;
+	network_in_bps: number | null;
+	network_out_bps: number | null;
+	disk_read_bps: number | null;
+	disk_write_bps: number | null;
+	uptime_seconds: number | null;
+	last_backup_age_seconds: number | null;
+	ha_state: string | null;
+}
+
+// --- Synology DSM -------------------------------------------------------------
+// Mirrors `crates/server/src/api/synology.rs`: the device panel reads the last
+// `dumbmonit_synology_*` series and the Active Backup history the probe stored.
+
+export interface SynologySystem {
+	model: string | null;
+	dsm_version: string | null;
+	uptime_seconds: number | null;
+	temperature_celsius: number | null;
+	temperature_warning: boolean | null;
+	cpu_percent: number | null;
+	memory_used_bytes: number | null;
+	memory_total_bytes: number | null;
+	memory_percent: number | null;
+	/** Worst state seen: 0 normal, 1 attention, 2 critical. */
+	storage_health: number | null;
+	system_crashed: boolean | null;
+	system_need_repair: boolean | null;
+}
+
+export interface SynologyVolume {
+	id: string;
+	name: string;
+	fs_type: string;
+	raid_type: string;
+	/** DSM's own word: `normal`, `degrade`, `crashed`, `repairing`… */
+	status: string;
+	/** 0 normal, 1 attention, 2 critical. */
+	severity: number;
+	total_bytes: number | null;
+	used_bytes: number | null;
+	used_percent: number | null;
+}
+
+export interface SynologyDisk {
+	id: string;
+	name: string;
+	model: string;
+	serial: string;
+	vendor: string;
+	firmware: string;
+	kind: string;
+	ssd: boolean;
+	status: string;
+	severity: number;
+	smart_status: string;
+	smart_severity: number;
+	temperature_celsius: number | null;
+	size_bytes: number | null;
+	bad_sector_exceeded: boolean | null;
+	life_below_threshold: boolean | null;
+	remaining_life_percent: number | null;
+	/** DSM's `unc` counter: unreadable sectors. */
+	unc_count: number | null;
+}
+
+export interface SynologyOverview {
+	system: SynologySystem;
+	volumes: SynologyVolume[];
+	disks: SynologyDisk[];
+	/** Unix seconds of the newest reading, `null` before the first probe. */
+	sampled_at: number | null;
+}
+
+export type AbbDeviceState = 'ok' | 'idle' | 'learning' | 'running' | 'overdue' | 'failing' | 'never';
+
+export type AbbDayOutcome = 'success' | 'failure' | 'cancelled' | 'running' | 'none';
+
+export interface AbbDayCell {
+	/** Local day, `YYYY-MM-DD`. */
+	day: string;
+	outcome: AbbDayOutcome;
+	runs: number;
+}
+
+export interface AbbDevice {
+	device_id: number;
+	device_name: string;
+	task_id: number;
+	task_name: string;
+	state: AbbDeviceState;
+	last_success_s: number | null;
+	last_run_s: number | null;
+	last_outcome: string | null;
+	runs_30d: number;
+	successes_30d: number;
+	failures_30d: number;
+	consecutive_failures: number;
+	typical_interval_s: number | null;
+	p90_gap_s: number | null;
+	/** Active time tolerated since the last success before "overdue". */
+	allowance_s: number;
+	active_elapsed_s: number | null;
+	/** Monday first. */
+	active_weekdays: [boolean, boolean, boolean, boolean, boolean, boolean, boolean];
+	usual_hour: number | null;
+	/** The rhythm in words: "weekdays, around 20:00". */
+	rhythm: string;
+	/** Thirty cells, oldest first. */
+	calendar: AbbDayCell[];
+}
+
+export interface AbbTask {
+	task_id: string;
+	name: string;
+	source_type: string;
+	result: string;
+	/** 1 success, 0 failed, 2 running, -1 unknown. */
+	last_status: number | null;
+	enabled: boolean | null;
+	device_count: number | null;
+	last_success_seconds: number | null;
+}
+
+export interface SynologyAbb {
+	tasks: AbbTask[];
+	devices: AbbDevice[];
+	/** Offset, in seconds, in which the rhythm's days and hours are expressed (the server's local time). */
+	utc_offset_s: number;
+	min_allowance_s: number;
+	learning_allowance_s: number;
+	failing_streak: number;
 }

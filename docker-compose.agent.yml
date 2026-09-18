@@ -1,0 +1,65 @@
+# The DumbMonit agent as a container, for a Docker host or a remote site.
+#
+#   DUMBMONIT_AGENT_URL=https://monitor.example.org \
+#   DUMBMONIT_AGENT_TOKEN=dmon_… \
+#   docker compose -f docker-compose.agent.yml up -d
+#
+# The agent only connects outbound to the server: nothing to open on this side.
+# With DUMBMONIT_AGENT_RELAY=true it also runs, for the server, the probes of the
+# devices you assign to it ("Reached through" in the device form): SNMP, Proxmox,
+# PBS, Synology, HTTP, TCP, DNS, ping, TLS — from this network, not the server's.
+# See docs/install/remote-site.md.
+name: dumbmonit-agent
+
+services:
+  agent:
+    # Same tags as the server image (:latest, :edge, :X.Y.Z). To build from this
+    # checkout: `docker compose -f docker-compose.agent.yml up -d --build`.
+    image: ghcr.io/noekan/dumbmonit-agent:latest
+    build:
+      context: .
+      target: agent-image
+    environment:
+      DUMBMONIT_AGENT_URL: ${DUMBMONIT_AGENT_URL:?set the server URL, e.g. https://monitor.example.org}
+      DUMBMONIT_AGENT_TOKEN: ${DUMBMONIT_AGENT_TOKEN:?create an enrollment token in Settings › Agents}
+      # The name the machine gets in DumbMonit. A container's hostname is a
+      # random id: give it the host's name (or a site name for a relay).
+      DUMBMONIT_AGENT_HOSTNAME: ${DUMBMONIT_AGENT_HOSTNAME:-}
+      # Relay mode: run the probes of the devices assigned to this agent.
+      DUMBMONIT_AGENT_RELAY: ${DUMBMONIT_AGENT_RELAY:-false}
+      # Site label shown next to the relay in the device form ("Reached
+      # through: office-lyon (Lyon)").
+      DUMBMONIT_AGENT_SITE: ${DUMBMONIT_AGENT_SITE:-}
+      # Optional, same keys as the config file: DUMBMONIT_AGENT_INTERVAL_SECS,
+      # DUMBMONIT_AGENT_TAGS (a=b,c=d), DUMBMONIT_AGENT_LOG (debug|info|warn).
+    volumes:
+      # Container monitoring of this host (optional). Remove the line to keep
+      # the agent away from the Docker API; without the socket the agent just
+      # reports no containers. Read-only is enough to list and inspect; the
+      # Restart/Update actions need it writable (and DUMBMONIT_AGENT_COMMANDS).
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Filesystem usage is that of the mounts visible *inside* the container:
+      # bind-mount the host paths you care about, read-only, and the agent
+      # reports them under that mount point (here `/host`).
+      # - /:/host:ro
+    # Host metrics need no privilege: /proc/stat, /proc/meminfo, /proc/loadavg
+    # and /proc/diskstats are host-wide inside a container, so CPU, memory, load
+    # and disk I/O are the host's as is. What is namespaced is the network:
+    # without `network_mode: host` the interface counters are the container's
+    # own (one veth). Trade-offs, from least to most privileged:
+    #   - default: everything above, network counters of the container only,
+    #     relayed probes go out through Docker's bridge (fine for HTTP/SNMP/
+    #     Proxmox on routed networks).
+    #   - network_mode: host — real host interface counters; relayed probes use
+    #     the host's network stack exactly (needed for `localhost` targets, for
+    #     link-local or VLAN devices, and for ping on some setups).
+    #   - pid: host / privileged — never needed: the agent collects no
+    #     per-process metrics.
+    # network_mode: host
+    # Only for "ping" (ICMP) monitors relayed through this agent:
+    # cap_add:
+    #   - NET_RAW
+    # A private CA (server behind an internal reverse proxy, devices with
+    # self-signed certificates):
+    # - ./ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
+    restart: unless-stopped

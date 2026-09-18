@@ -810,7 +810,7 @@ mod tests {
         assert!(validate_name("web?force=1").is_err());
         assert!(validate_name("-web").is_err());
         assert!(validate_name("").is_err());
-        assert!(validate_name("lab-victim").is_ok());
+        assert!(validate_name("nginx-victim").is_ok());
         assert!(validate_name("immich_server.2").is_ok());
     }
 
@@ -863,13 +863,13 @@ mod tests {
         json!({
             "Id": "45dd9effdb61cab13b47bc6a1d1edf9fc2c19fcc339ff6d5ccc011f644e9363d",
             "Image": "sha256:516475cc129d",
-            "Name": "/lab-victim",
+            "Name": "/nginx-victim",
             "State": {"Running": true},
             "Config": {
                 "Hostname": "45dd9effdb61",
                 "Image": "nginx:1.25-alpine",
                 "Env": ["NGINX_VERSION=1.25.5"],
-                "Labels": {"com.docker.compose.service": "lab-victim"},
+                "Labels": {"com.docker.compose.service": "nginx-victim"},
                 "Volumes": {"/var/cache/nginx": {}}
             },
             "HostConfig": {
@@ -883,7 +883,7 @@ mod tests {
             ],
             "NetworkSettings": {"Networks": {
                 "dumbmonit_default": {
-                    "Aliases": ["lab-victim", "lab-victim", "45dd9effdb61"],
+                    "Aliases": ["nginx-victim", "nginx-victim", "45dd9effdb61"],
                     "IPAMConfig": null, "Links": null, "DriverOpts": null,
                     "IPAddress": "172.20.0.12", "EndpointID": "37c4", "NetworkID": "04eb"
                 },
@@ -926,7 +926,7 @@ mod tests {
             assert!(endpoint.get("EndpointID").is_none());
         }
         let default = if network == "dumbmonit_default" { endpoint } else { extra_endpoint };
-        assert_eq!(default["Aliases"], json!(["lab-victim"]));
+        assert_eq!(default["Aliases"], json!(["nginx-victim"]));
         assert!(default.get("IPAMConfig").is_none(), "a null IPAMConfig is dropped");
         let backend = if network == "backend" { endpoint } else { extra_endpoint };
         assert_eq!(backend["IPAMConfig"]["IPv4Address"], "10.9.0.5");
@@ -937,7 +937,7 @@ mod tests {
         let mut inspect = inspect_sample();
         inspect["Config"]["Env"] = json!(["NGINX_VERSION=1.25.5", "MARKER=yes", "PATH=/usr/bin"]);
         inspect["Config"]["Labels"] =
-            json!({"maintainer": "NGINX", "lab": "victim", "com.docker.compose.service": "x"});
+            json!({"maintainer": "NGINX", "role": "victim", "com.docker.compose.service": "x"});
         inspect["Config"]["Cmd"] = json!(["nginx", "-g", "daemon off;"]);
         inspect["Config"]["Entrypoint"] = json!(["/docker-entrypoint.sh"]);
         inspect["Config"]["ExposedPorts"] = json!({"80/tcp": {}, "8443/tcp": {}});
@@ -952,7 +952,7 @@ mod tests {
         assert_eq!(spec.body["Env"], json!(["MARKER=yes"]));
         assert_eq!(
             spec.body["Labels"],
-            json!({"lab": "victim", "com.docker.compose.service": "x"})
+            json!({"role": "victim", "com.docker.compose.service": "x"})
         );
         assert_eq!(spec.body["ExposedPorts"], json!({"8443/tcp": {}}));
         assert!(spec.body.get("Cmd").is_none(), "the image's own command is not pinned");
@@ -1023,13 +1023,14 @@ mod tests {
         assert!(error.contains("no container named"), "{error}");
     }
 
-    /// Redémarre pour de bon le conteneur de laboratoire.
+    /// Redémarre pour de bon un conteneur nommé `nginx-victim` (à créer soi-même :
+    /// `docker run -d --name nginx-victim nginx:alpine`).
     #[tokio::test]
     #[ignore]
-    async fn the_lab_victim_is_restarted_for_real() {
+    async fn a_real_container_is_restarted() {
         let docker = DockerClient::new(Path::new("/var/run/docker.sock"));
         let mut log = Log::default();
-        restart(&docker, "lab-victim", &mut log).await.expect("restart");
+        restart(&docker, "nginx-victim", &mut log).await.expect("restart");
         assert!(log.excerpt().contains("running (no healthcheck)"));
     }
 }

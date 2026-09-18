@@ -5,6 +5,49 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.1.0-alpha.2 — 2026-09-18
+
+### Added
+
+- Proxmox VE: guests panel (status, CPU, RAM, disk size and usage, network,
+  uptime, last backup, HA), node disk health and wear, ZFS pools, security
+  updates and changed packages, matching rules.
+- Proxmox Backup Server: 30-day backup calendar per group, failures list with
+  task logs, sync/verify/prune/GC jobs with their last result, disk health.
+- Synology: volumes and disks (SMART, temperature, SSD remaining life), and a
+  rhythm-aware Active Backup for Business monitor that learns each device's
+  usual backup cadence before calling it overdue.
+- Remote agent: `ghcr.io/noekan/dumbmonit-agent` Docker image and relay mode
+  (`via_agent`) to monitor another network through an agent.
+- Two-factor authentication (TOTP with recovery codes), CSRF protection,
+  per-IP and per-user login limits, SSRF guard on HTTP monitors, checksum
+  verification of agent downloads, hardened container.
+- Status pages get their own top-level page; notification channels and
+  policy move under Alerts; Settings keeps administration only.
+
+### Changed
+
+- Proxmox VE and PBS credentials are entered as Token ID + Secret; setup
+  guides create a dedicated read-only user instead of root/admin.
+- Plakar is detected automatically on the agent host and stays invisible
+  when absent.
+- Copy buttons work on plain-http (LAN) deployments.
+
+### Added
+
+- Remote sites: an agent with `relay: true` runs, on the server's behalf, the
+  probes of the devices assigned to it (*Reached through* on the device form
+  — SNMP, Proxmox VE, PBS, Synology, HTTP, TCP, DNS, ping, TLS), from its own
+  network, over its existing outbound connection. A relay that goes silent
+  suppresses the alerts of its devices like a parent would.
+- Agent image `ghcr.io/noekan/dumbmonit-agent` (same tags as the server) and
+  `docker-compose.agent.yml`, for Docker hosts and remote sites.
+
+### Changed
+
+- The network collectors moved to the `dumbmonit-collectors` crate, shared by
+  the server and the agent; the server re-exports them under their old paths.
+
 ## 0.1.0-alpha.1 — 2026-09-16
 
 First tagged build, for early testers: `ghcr.io/noekan/dumbmonit:0.1.0-alpha.1`

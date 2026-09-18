@@ -244,12 +244,18 @@ pub async fn put_config(
     }
     .normalized();
 
-    if !config.issuer.is_empty()
-        && !(config.issuer.starts_with("https://") || config.issuer.starts_with("http://"))
-    {
-        return Err(crate::auth::AuthError::Invalid(
-            "The issuer must be a URL starting with https://.".into(),
-        ));
+    if !config.issuer.is_empty() && !config.issuer.starts_with("https://") {
+        // Un émetteur en clair livre le code d'autorisation et le secret client
+        // au réseau ; seul un fournisseur de test justifie de l'accepter, et il
+        // faut le dire à l'environnement (`DUMBMONIT_OIDC_ALLOW_HTTP=1`).
+        let tolerated = state.config.oidc_allow_http && config.issuer.starts_with("http://");
+        if !tolerated {
+            return Err(crate::auth::AuthError::Invalid(
+                "The issuer must be a URL starting with https:// (set DUMBMONIT_OIDC_ALLOW_HTTP=1 \
+                 to allow a plain-HTTP provider for testing)."
+                    .into(),
+            ));
+        }
     }
     if !config.public_url.is_empty()
         && !(config.public_url.starts_with("https://") || config.public_url.starts_with("http://"))

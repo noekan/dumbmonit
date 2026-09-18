@@ -52,7 +52,7 @@ DumbMonit monitors ten-ish machines and a few switches for people who do not wan
 
 - README.md (French) with the full feature list and roadmap (all items shipped).
 - docs/notifications.md: per-channel setup documentation.
-- A live dev stack: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d` with an `snmp-lab` container (address `snmp-lab`, community `public`) to produce real data.
+- A live dev stack: `docker compose up -d`, with the `demo` device kind to produce data without hardware.
 - No customer logos, testimonials, screenshots or metrics exist; none may be invented.
 
 ## Product Principles

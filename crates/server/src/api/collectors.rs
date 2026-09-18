@@ -31,8 +31,13 @@ pub struct CollectorView {
     pub summary: &'static str,
     /// Exemples d'équipements concernés, pour que l'utilisateur se reconnaisse.
     pub examples: &'static [&'static str],
-    /// Formes de `credential` acceptées.
+    /// Formes de `credential` acceptées (leurs `kind`), dans l'ordre de préférence.
+    /// Redondant avec `credentials`, conservé pour les interfaces plus anciennes.
     pub credential_types: &'static [&'static str],
+    /// Les mêmes formes, décrites champ par champ : c'est ce que le formulaire
+    /// affiche. Un jeton Proxmox se saisit ainsi en deux cases (identifiant et
+    /// secret) plutôt qu'en une chaîne `user@pve!nom=secret` que personne ne devine.
+    pub credentials: &'static [CredentialView],
     /// Adresse d'exemple, utilisée comme texte indicatif du champ.
     pub address_hint: &'static str,
     /// Port par défaut, affiché pour lever le doute.
@@ -49,6 +54,12 @@ pub struct Setup {
     /// Titre de la notice.
     pub title: &'static str,
     /// Étapes à effectuer sur l'équipement, dans l'ordre.
+    ///
+    /// Une étape est une phrase. Si elle est suivie d'un saut de ligne, ce qui
+    /// suit est une commande ou une valeur à copier telle quelle : l'interface
+    /// l'affiche dans un bloc avec un bouton « copier », et la documentation la
+    /// reprend dans un bloc de code. Les mêmes étapes figurent dans
+    /// `docs/devices/<kind>.md` ; un test vérifie qu'elles n'ont pas divergé.
     pub steps: &'static [&'static str],
     /// Point d'attention fréquent, à mettre en évidence. Vide s'il n'y en a pas.
     pub warning: &'static str,
@@ -75,6 +86,221 @@ pub struct OptionView {
     /// Valeurs proposées quand `input == "select"`.
     pub choices: &'static [&'static str],
 }
+
+/// Une forme d'identifiant acceptée par un type, et les champs à remplir.
+///
+/// C'est le contrat avec le formulaire : un champ par entrée, envoyé sous la clé
+/// `key` dans l'objet `credential` (`{"type": kind, key: valeur, …}`). Le serveur
+/// sait recomposer ce qu'il attend — un jeton Proxmox à partir de `token_id` et
+/// `secret`, un SNMP v3 à partir de ses protocoles et phrases de passe.
+#[derive(Serialize)]
+pub struct CredentialView {
+    /// Valeur du champ `type` de `credential`.
+    pub kind: &'static str,
+    pub label: &'static str,
+    /// Une phrase pour situer cette forme par rapport aux autres. Vide si inutile.
+    pub help: &'static str,
+    pub fields: &'static [CredentialField],
+}
+
+#[derive(Serialize)]
+pub struct CredentialField {
+    /// Clé du champ dans l'objet `credential`.
+    pub key: &'static str,
+    pub label: &'static str,
+    pub help: &'static str,
+    pub placeholder: &'static str,
+    /// `text`, `password` ou `select`.
+    pub input: &'static str,
+    /// Valeurs proposées quand `input == "select"`, la première par défaut.
+    pub choices: &'static [&'static str],
+    pub required: bool,
+}
+
+/// Champ visible (nom d'utilisateur, identifiant de jeton).
+const fn cred_text(
+    key: &'static str,
+    label: &'static str,
+    help: &'static str,
+    placeholder: &'static str,
+) -> CredentialField {
+    CredentialField { key, label, help, placeholder, input: "text", choices: &[], required: true }
+}
+
+/// Champ masqué avec un bouton « afficher » : mot de passe, secret, phrase de passe.
+const fn cred_secret(
+    key: &'static str,
+    label: &'static str,
+    help: &'static str,
+    placeholder: &'static str,
+    required: bool,
+) -> CredentialField {
+    CredentialField { key, label, help, placeholder, input: "password", choices: &[], required }
+}
+
+const fn cred_select(
+    key: &'static str,
+    label: &'static str,
+    help: &'static str,
+    choices: &'static [&'static str],
+) -> CredentialField {
+    CredentialField { key, label, help, placeholder: "", input: "select", choices, required: false }
+}
+
+const NO_AUTH: CredentialView = CredentialView {
+    kind: "none",
+    label: "No authentication",
+    help: "Nothing is sent: the device answers without credentials.",
+    fields: &[],
+};
+
+const SNMP_COMMUNITY: CredentialView = CredentialView {
+    kind: "snmp_community",
+    label: "SNMP v1 / v2c (community)",
+    help: "The simplest form: one shared word, sent unencrypted.",
+    fields: &[cred_secret(
+        "community",
+        "SNMP community",
+        "Most devices ship with \"public\". A read-only community is enough.",
+        "public",
+        true,
+    )],
+};
+
+const SNMP_V3: CredentialView = CredentialView {
+    kind: "snmp_v3",
+    label: "SNMP v3 (user, authentication, privacy)",
+    help: "Authenticated and encrypted. Needs a USM user on the device.",
+    fields: &[
+        cred_text("username", "User name", "The SNMP v3 user configured on the device.", "monitor"),
+        cred_select(
+            "auth_protocol",
+            "Authentication protocol",
+            "Must match what the device was configured with.",
+            &["sha256", "sha512", "sha384", "sha224", "sha1", "md5"],
+        ),
+        cred_secret(
+            "auth_passphrase",
+            "Authentication passphrase",
+            "At least 8 characters, as set on the device.",
+            "",
+            true,
+        ),
+        cred_select(
+            "privacy_protocol",
+            "Privacy protocol",
+            "Encryption of the SNMP traffic. Ignored when the privacy passphrase is empty.",
+            &["aes128", "aes192", "aes256", "des"],
+        ),
+        cred_secret(
+            "privacy_passphrase",
+            "Privacy passphrase",
+            "Leave blank for authentication without encryption (authNoPriv).",
+            "",
+            false,
+        ),
+    ],
+};
+
+/// Identifiant d'un jeton Proxmox (VE ou PBS) : `user@realm!nom`, tel que le
+/// produit l'affiche à la création.
+const fn token_id_field(placeholder: &'static str) -> CredentialField {
+    CredentialField {
+        key: "token_id",
+        label: "Token ID",
+        help: "User, realm and token name, exactly as shown when the token was created.",
+        placeholder,
+        input: "text",
+        choices: &[],
+        required: true,
+    }
+}
+
+/// Secret d'un jeton Proxmox : l'UUID montré une seule fois.
+const TOKEN_SECRET_FIELD: CredentialField = cred_secret(
+    "secret",
+    "Secret",
+    "The UUID shown once when the token was created. Stored encrypted, never shown again.",
+    "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    true,
+);
+
+const PROXMOX_TOKEN_LABEL: &str = "API token (recommended)";
+const PROXMOX_TOKEN_HELP: &str =
+    "No expiry and no session opened: the right choice for monitoring.";
+
+/// Jeton d'API Proxmox VE, en deux morceaux tels que le produit les affiche.
+const PROXMOX_TOKEN: CredentialView = CredentialView {
+    kind: "api_token",
+    label: PROXMOX_TOKEN_LABEL,
+    help: PROXMOX_TOKEN_HELP,
+    fields: &[token_id_field("dumbmonit@pve!monitor"), TOKEN_SECRET_FIELD],
+};
+
+const PBS_TOKEN: CredentialView = CredentialView {
+    kind: "api_token",
+    label: PROXMOX_TOKEN_LABEL,
+    help: PROXMOX_TOKEN_HELP,
+    fields: &[token_id_field("dumbmonit@pbs!monitor"), TOKEN_SECRET_FIELD],
+};
+
+/// Nom d'utilisateur Proxmox, realm compris.
+const fn proxmox_user_field(placeholder: &'static str) -> CredentialField {
+    cred_text("username", "User name", "User and realm, as in \"dumbmonit@pve\".", placeholder)
+}
+
+const PROXMOX_LOGIN_LABEL: &str = "Username / password";
+const PROXMOX_LOGIN_HELP: &str =
+    "Opens a two-hour session, renewed automatically. Use it only if tokens are not an option.";
+const PASSWORD_FIELD: CredentialField = cred_secret("password", "Password", "", "", true);
+
+/// Connexion par mot de passe à l'API Proxmox VE : ouvre un ticket de deux heures.
+const PROXMOX_LOGIN: CredentialView = CredentialView {
+    kind: "username_password",
+    label: PROXMOX_LOGIN_LABEL,
+    help: PROXMOX_LOGIN_HELP,
+    fields: &[proxmox_user_field("dumbmonit@pve"), PASSWORD_FIELD],
+};
+
+const PBS_LOGIN: CredentialView = CredentialView {
+    kind: "username_password",
+    label: PROXMOX_LOGIN_LABEL,
+    help: PROXMOX_LOGIN_HELP,
+    fields: &[proxmox_user_field("dumbmonit@pbs"), PASSWORD_FIELD],
+};
+
+const SYNOLOGY_LOGIN: CredentialView = CredentialView {
+    kind: "username_password",
+    label: "DSM account",
+    help: "",
+    fields: &[
+        cred_text("username", "User name", "The DSM account created for monitoring.", "dumbmonit"),
+        cred_secret(
+            "password",
+            "Password",
+            "Two-step verification must be off for this account: a monitor cannot type a one-time code.",
+            "",
+            true,
+        ),
+    ],
+};
+
+const HTTP_TOKEN: CredentialView = CredentialView {
+    kind: "api_token",
+    label: "Bearer token",
+    help: "Sent as \"Authorization: Bearer …\" on every request.",
+    fields: &[cred_secret("token", "Token", "Stored encrypted, never shown again.", "", true)],
+};
+
+const HTTP_LOGIN: CredentialView = CredentialView {
+    kind: "username_password",
+    label: "Username / password",
+    help: "Sent as HTTP basic authentication.",
+    fields: &[
+        cred_text("username", "User name", "", ""),
+        cred_secret("password", "Password", "", "", true),
+    ],
+};
 
 /// Champ texte libre.
 const fn text(
@@ -175,6 +401,16 @@ const fn insecure_tls(help: &'static str) -> OptionView {
     boolean("insecure_tls", "Accept an unverifiable certificate", help, false)
 }
 
+/// Lever le garde-fou d'adresses des sondes (`collectors/uptime/guard.rs`) : la
+/// boucle locale et le lien local sont refusés par défaut, parce qu'ils ne sont
+/// joignables que depuis l'hôte de supervision lui-même.
+const ALLOW_PRIVATE_TARGETS: OptionView = boolean(
+    "allow_private_targets",
+    "Allow loopback and link-local targets",
+    "By default the check refuses addresses only the DumbMonit host itself can reach (127.0.0.1, ::1, 169.254.x.x). Enable this to monitor a service running on the DumbMonit host. Private LAN addresses (10.x, 192.168.x) are always allowed.",
+    false,
+);
+
 /// Options lues par `collectors/uptime/http/options.rs`.
 const HTTP_OPTIONS: &[OptionView] = &[
     select(
@@ -254,6 +490,7 @@ const HTTP_OPTIONS: &[OptionView] = &[
     insecure_tls(
         "The check no longer fails on a self-signed certificate or one issued by a private authority.",
     ),
+    ALLOW_PRIVATE_TARGETS,
     boolean(
         "check_certificate",
         "Read the certificate",
@@ -286,6 +523,7 @@ const TCP_OPTIONS: &[OptionView] = &[
         "22",
         "",
     ),
+    ALLOW_PRIVATE_TARGETS,
     PROBE_TIMEOUT,
 ];
 
@@ -374,6 +612,7 @@ const TLS_OPTIONS: &[OptionView] = &[
     insecure_tls(
         "An unverifiable chain no longer counts as a failure: the expiry date is still recorded.",
     ),
+    ALLOW_PRIVATE_TARGETS,
     PROBE_TIMEOUT,
 ];
 
@@ -459,6 +698,36 @@ const PROXMOX_OPTIONS: &[OptionView] = &[
         "Reports the days left before each node certificate expires.",
         true,
     ),
+    boolean(
+        "guest_agent",
+        "Ask the QEMU guest agent",
+        "For each running VM: balloon memory and, when the guest agent is enabled, the disk usage seen from inside (needs VM.Monitor). Silently skipped when the agent is absent.",
+        true,
+    ),
+    boolean(
+        "disks",
+        "Watch physical disks",
+        "SMART health, wearout and temperature of every disk of each node.",
+        true,
+    ),
+    boolean(
+        "zfs",
+        "Watch ZFS pools",
+        "Health, capacity and fragmentation of the ZFS pools of each node.",
+        true,
+    ),
+    boolean(
+        "packages",
+        "Detect package changes",
+        "Compares the installed Proxmox packages with the previous probe and reports an upgrade for one hour.",
+        true,
+    ),
+    boolean(
+        "subscription",
+        "Watch subscription and repositories",
+        "Subscription status and APT repositories of each node (enterprise without subscription, unreadable sources).",
+        true,
+    ),
 ];
 
 /// Options lues par `collectors/pbs/options.rs`.
@@ -505,6 +774,12 @@ const PBS_OPTIONS: &[OptionView] = &[
         "updates",
         "Count pending updates",
         "Lists the packages waiting for an update on the backup server. Needs Sys.Audit on \"/\"; silently skipped otherwise.",
+        true,
+    ),
+    boolean(
+        "disks",
+        "Watch disks and ZFS pools",
+        "Reads the physical disks (SMART verdict, SSD wear) and the ZFS pools of the backup server (/nodes/localhost/disks). Needs Sys.Audit on \"/system\"; silently skipped otherwise.",
         true,
     ),
 ];
@@ -555,6 +830,7 @@ fn describe(kind: &'static str) -> CollectorView {
             summary: "The most universal: almost every piece of network hardware speaks SNMP.",
             examples: &["Switch", "Router", "NAS", "UPS", "Printer"],
             credential_types: &["snmp_community", "snmp_v3"],
+            credentials: &[SNMP_COMMUNITY, SNMP_V3],
             address_hint: "192.168.1.10",
             default_port: 161,
             setup: Setup {
@@ -577,41 +853,47 @@ fn describe(kind: &'static str) -> CollectorView {
             summary: "Hypervisor: nodes, virtual machines, containers, storages and backups.",
             examples: &["Proxmox server", "Proxmox cluster"],
             credential_types: &["api_token", "username_password"],
+            credentials: &[PROXMOX_TOKEN, PROXMOX_LOGIN],
             address_hint: "192.168.1.20",
             default_port: 8006,
             setup: Setup {
-                title: "Create an API token in Proxmox",
+                title: "Create a read-only user and token in Proxmox VE",
                 steps: &[
-                    "In Proxmox, go to Datacenter → Permissions → API Tokens.",
-                    "Click \"Add\", pick a user and name the token (for example \"dumbmonit\").",
-                    "Untick \"Privilege Separation\" so the token inherits the user's rights.",
-                    "Copy the secret shown right away: Proxmox will never show it again.",
-                    "In Datacenter → Permissions, give this user the PVEAuditor role on \"/\".",
-                    "Paste the full token here, as user@realm!name=secret.",
+                    "Open a shell on any node (in the web UI: select the node, then Shell; or SSH) and create a user reserved for monitoring. It needs no password: the token is what logs in.\npveum user add dumbmonit@pve --comment \"DumbMonit monitoring\"",
+                    "Create a role with only the privileges the collector uses: Sys.Audit (nodes, cluster, HA, disks and SMART, ZFS, certificates, package versions, subscription), Datastore.Audit (storages and backup archives), VM.Audit (VMs, containers, snapshots) and VM.Monitor (disk usage inside VMs, through the QEMU guest agent). None of them can change anything.\npveum role add DumbMonit --privs \"Datastore.Audit Sys.Audit VM.Audit VM.Monitor\"",
+                    "Give the user that role on the whole cluster.\npveum aclmod / -user dumbmonit@pve -role DumbMonit",
+                    "Create the user's API token. Privilege separation is off, so the token simply inherits the user's rights.\npveum user token add dumbmonit@pve monitor --privsep 0",
+                    "The command prints a table with full-tokenid and value. Copy full-tokenid into DumbMonit's Token ID field and value (the UUID) into its Secret field. The secret is shown once: if it is lost, remove the token and create a new one.\ndumbmonit@pve!monitor",
+                    "Optional, to count pending updates and pending security fixes: Proxmox guards that list with Sys.Modify. Grant it on /nodes only; without it the collector skips the list silently.\npveum role add DumbMonitUpdates --privs Sys.Modify\npveum aclmod /nodes -user dumbmonit@pve -role DumbMonitUpdates",
+                    "Prefer the web UI? The same steps live under Datacenter → Permissions: Users, Roles, Add → User Permission, then API Tokens with \"Privilege Separation\" unticked.",
+                    "In DumbMonit, enter the address of any node (port 8006 by default).",
                 ],
-                warning: "Proxmox uses a self-signed certificate by default. If the connection is refused for that reason, tick \"Accept an unverifiable certificate\" in the options.",
-                doc_url: "https://pve.proxmox.com/wiki/Proxmox_VE_API",
+                warning: "Do not reuse the account you log in with: a leaked token would then control the whole cluster. The DumbMonit role above can only read. Proxmox also uses a self-signed certificate by default: if the connection is refused for that reason, tick \"Accept an unverifiable certificate\" in the options.",
+                doc_url: "https://pve.proxmox.com/wiki/User_Management",
             },
             options: PROXMOX_OPTIONS,
         },
         "pbs" => CollectorView {
             kind,
             label: "Proxmox Backup Server",
-            summary: "Backup server: datastores, backup age and verification, failed tasks.",
+            summary: "Backup server: backup calendar per machine, failed tasks with their logs, sync/verify/prune/GC jobs, datastores and disks.",
             examples: &["Proxmox Backup Server"],
             credential_types: &["api_token", "username_password"],
+            credentials: &[PBS_TOKEN, PBS_LOGIN],
             address_hint: "pbs.lan",
             default_port: 8007,
             setup: Setup {
-                title: "Create an API token in Proxmox Backup Server",
+                title: "Create a read-only user and token in Proxmox Backup Server",
                 steps: &[
-                    "In PBS, go to Configuration → Access Control → Users and create a dedicated user, for example \"monitoring@pbs\".",
-                    "In the API Tokens tab, add a token to this user (for example \"dumbmonit\") and copy the secret shown right away: PBS will never show it again.",
-                    "In the Permissions tab, give the token the DatastoreAudit role on \"/datastore\" and the Audit role on \"/system\": that is the read-only minimum.",
-                    "Paste the full token here, as user@pbs!name=secret.",
-                    "Enter the server address, for example \"pbs.lan\" or \"pbs.lan:8007\".",
+                    "Open a shell on the backup server (in the web UI: Administration → Shell; or SSH) and create a user reserved for monitoring. It needs no password: the token is what logs in.\nproxmox-backup-manager user create dumbmonit@pbs --comment \"DumbMonit monitoring\"",
+                    "Create the user's API token. The command prints the token id and its secret: copy both now, PBS never shows the secret again.\nproxmox-backup-manager user generate-token dumbmonit@pbs monitor",
+                    "Give the token the exact read-only minimum, per path. DatastoreAudit on /datastore (Datastore.Audit) reads the datastores, snapshots, verify and prune jobs and GC; Audit on /system (Sys.Audit) reads the node status, the task list and task logs, the disks and ZFS pools. In PBS a token has its own permissions, so the ACL names the token, not the user.\nproxmox-backup-manager acl update /datastore DatastoreAudit --auth-id 'dumbmonit@pbs!monitor'\nproxmox-backup-manager acl update /system Audit --auth-id 'dumbmonit@pbs!monitor'",
+                    "Optional: RemoteAudit on /remote (Remote.Audit) lists the sync jobs; Audit on / (Sys.Audit at the top level) lists pending package updates. Without them those two items are silently skipped, nothing else changes. Audit on / alone also covers /datastore and /system if you prefer one line.\nproxmox-backup-manager acl update /remote RemoteAudit --auth-id 'dumbmonit@pbs!monitor'\nproxmox-backup-manager acl update / Audit --auth-id 'dumbmonit@pbs!monitor'",
+                    "Copy the token id into DumbMonit's Token ID field and the secret into its Secret field.\ndumbmonit@pbs!monitor",
+                    "Prefer the web UI? Configuration → Access Control: Users → Add, then API Tokens → Add, then Permissions → Add → API Token Permission with path /datastore and role DatastoreAudit, and again with path /system and role Audit.",
+                    "In DumbMonit, enter the server address, for example \"pbs.lan\" or \"pbs.lan:8007\".",
                 ],
-                warning: "PBS uses a self-signed certificate by default. If the connection is refused for that reason, tick \"Accept an unverifiable certificate\" in the options.",
+                warning: "Do not reuse the account you log in with: a leaked token would then manage every backup. The Audit role can only read. PBS also uses a self-signed certificate by default: if the connection is refused for that reason, tick \"Accept an unverifiable certificate\" in the options.",
                 doc_url: "https://pbs.proxmox.com/docs/user-management.html#api-tokens",
             },
             options: PBS_OPTIONS,
@@ -622,20 +904,21 @@ fn describe(kind: &'static str) -> CollectorView {
             summary: "Synology NAS: volumes, disk health, temperature, Hyper Backup and Active Backup for Business.",
             examples: &["DiskStation", "RackStation"],
             credential_types: &["username_password"],
+            credentials: &[SYNOLOGY_LOGIN],
             address_hint: "192.168.1.30",
             default_port: 5001,
             setup: Setup {
-                title: "Prepare the Synology NAS",
+                title: "Create a monitoring account in DSM",
                 steps: &[
-                    "In DSM, open Control Panel → User & Group.",
-                    "Create a user dedicated to monitoring, without administration rights.",
-                    "Give it read-only access; it needs no shared folder.",
-                    "If two-step verification is enforced for everyone, exempt this account, otherwise the login will fail.",
-                    "Active Backup for Business only answers an administrator, or an account the package was delegated to (Active Backup for Business → Settings → Privileges). Without that, its tasks are not read and the error is counted in \"scrape_errors\"; untick the option below to skip it.",
-                    "Enter the NAS address and this account's credentials here.",
+                    "In DSM, open Control Panel → User & Group → User and click Create. Name the account as follows and give it a long password that is used nowhere else.\ndumbmonit",
+                    "Join groups: tick administrators. DSM only answers the storage, volume and disk SMART calls to that group; without it the NAS shows as alive but says nothing about its disks. The next two steps take back everything else.",
+                    "Assign shared folder permissions: No access on every shared folder. Assign application permissions: Deny everything except DSM, plus Active Backup for Business if you want its tasks read. Skip the quota and speed limit pages.",
+                    "Two-step verification must stay off for this account: no automated monitor can type a one-time code. If Control Panel → Security → Account enforces it, restrict the rule to groups this user is not in, or exempt it.",
+                    "Active Backup for Business, if installed: its tasks are read only by an account allowed to use the package (Active Backup for Business → Settings → Privileges). Otherwise untick DumbMonit's \"Watch Active Backup for Business\" option to stop asking.",
+                    "In DumbMonit, enter the NAS address (HTTPS, port 5001 by default), then this account's user name and password.",
                 ],
-                warning: "An administrator account would work, but would give DumbMonit far more rights than needed.",
-                doc_url: "",
+                warning: "The administrators group is required by DSM's storage API, not by DumbMonit. That is why this account gets no shared folder, no application and a password used nowhere else: it can read the NAS, not touch your files.",
+                doc_url: "https://kb.synology.com/en-global/DSM/help/DSM/AdminCenter/file_user_create",
             },
             options: SYNOLOGY_OPTIONS,
         },
@@ -645,17 +928,18 @@ fn describe(kind: &'static str) -> CollectorView {
             summary: "Detailed view of a server: CPU, memory, disks, services, containers.",
             examples: &["Linux server", "Windows server", "Raspberry Pi"],
             credential_types: &["none"],
+            credentials: &[NO_AUTH],
             address_hint: "detected automatically",
             default_port: 0,
             setup: Setup {
                 title: "Install the agent on the machine",
                 steps: &[
-                    "Create the device here: an enrollment token will be shown.",
-                    "Copy the install command shown and run it on the machine to monitor.",
-                    "The agent installs itself as a service and pushes its measurements to this server.",
-                    "The machine shows up on its own within a few seconds.",
-                    "Docker: to see the containers and let DumbMonit restart or update them, the agent must reach the Docker socket — add its user to the \"docker\" group or run it as root. Restart and auto-update policies are then set per container on the device page.",
-                    "Plakar backups: klosets are discovered automatically from ~/.config/plakar/stores.yml of every user and from ~/.plakar. To watch a specific list instead, set \"plakar_klosets\" in agent.yaml.",
+                    "Save the device in DumbMonit: an enrollment token (dmon_…) is shown once, with the install command ready to copy for Linux and for Windows.",
+                    "That token is the agent's key to push its measurements to DumbMonit. It is not an account on the machine: nothing to create there, and one token may enrol several machines.",
+                    "Run the install command on the machine to monitor, with elevated rights (sudo on Linux, an elevated PowerShell on Windows). It downloads the agent, writes the token into agent.yaml and starts the service.",
+                    "The machine shows up on its own within a few seconds, named after its host name. Lost the token? Settings → Agents lets you revoke it and create another.",
+                    "Docker: to see the containers and let DumbMonit restart or update them, the agent must reach the Docker socket. The service the installer registers already can; if you run the agent under a dedicated user instead, add that user to the \"docker\" group and restart it. Restart and auto-update policies are then set per container on the device page.\nusermod -aG docker dumbmonit",
+                    "Plakar backups: detected automatically — the Backups panel appears when the plakar binary or a kloset (~/.config/plakar/stores.yml of every user, ~/.plakar, /var/lib/plakar) is found, and nothing is shown otherwise. Set \"plakar_klosets\" in agent.yaml to watch a fixed list, or \"plakar: false\" to opt out.",
                 ],
                 warning: "The agent contacts the server, never the other way round: no port needs to be opened on the monitored machine.",
                 doc_url: "",
@@ -677,6 +961,7 @@ fn describe(kind: &'static str) -> CollectorView {
                 "Self-hosted service interface",
             ],
             credential_types: &["none", "username_password", "api_token"],
+            credentials: &[NO_AUTH, HTTP_LOGIN, HTTP_TOKEN],
             address_hint: "https://example.com/health",
             default_port: 443,
             setup: Setup {
@@ -699,6 +984,7 @@ fn describe(kind: &'static str) -> CollectorView {
             summary: "Checks that a port accepts connections: SSH, database, file share…",
             examples: &["SSH", "SMB or NFS share", "Database", "Game server", "Network printer"],
             credential_types: &["none"],
+            credentials: &[NO_AUTH],
             address_hint: "nas.home.lan:22",
             default_port: 0,
             setup: Setup {
@@ -724,6 +1010,7 @@ fn describe(kind: &'static str) -> CollectorView {
                 "An MX record",
             ],
             credential_types: &["none"],
+            credentials: &[NO_AUTH],
             address_hint: "www.example.com",
             default_port: 53,
             setup: Setup {
@@ -751,6 +1038,7 @@ fn describe(kind: &'static str) -> CollectorView {
                 "Remote host",
             ],
             credential_types: &["none"],
+            credentials: &[NO_AUTH],
             address_hint: "192.168.1.1",
             default_port: 0,
             setup: Setup {
@@ -778,6 +1066,7 @@ fn describe(kind: &'static str) -> CollectorView {
                 "Administration interface",
             ],
             credential_types: &["none"],
+            credentials: &[NO_AUTH],
             address_hint: "mail.example.com:993",
             default_port: 443,
             setup: Setup {
@@ -800,6 +1089,7 @@ fn describe(kind: &'static str) -> CollectorView {
             summary: "Fictional device producing measurements, to explore the tool without hardware.",
             examples: &["No hardware required"],
             credential_types: &["none"],
+            credentials: &[NO_AUTH],
             address_hint: "demo",
             default_port: 0,
             setup: Setup {
@@ -819,6 +1109,7 @@ fn describe(kind: &'static str) -> CollectorView {
             summary: "",
             examples: &[],
             credential_types: &["none"],
+            credentials: &[NO_AUTH],
             address_hint: "",
             default_port: 0,
             setup: Setup { title: "", steps: &[], warning: "", doc_url: "" },
@@ -885,13 +1176,14 @@ mod tests {
                     "follow_redirects",
                     "max_redirects",
                     "insecure_tls",
+                    "allow_private_targets",
                     "check_certificate",
                     "max_body_bytes",
                     "user_agent",
                     "timeout_seconds",
                 ],
             ),
-            ("tcp", &["port", "timeout_seconds"]),
+            ("tcp", &["port", "allow_private_targets", "timeout_seconds"]),
             ("dns", &["record_type", "resolver", "expect", "timeout_seconds"]),
             (
                 "ping",
@@ -905,7 +1197,7 @@ mod tests {
                     "timeout_seconds",
                 ],
             ),
-            ("tls", &["server_name", "insecure_tls", "timeout_seconds"]),
+            ("tls", &["server_name", "insecure_tls", "allow_private_targets", "timeout_seconds"]),
             (
                 "proxmox",
                 &[
@@ -923,6 +1215,11 @@ mod tests {
                     "ceph",
                     "updates",
                     "certificates",
+                    "guest_agent",
+                    "disks",
+                    "zfs",
+                    "packages",
+                    "subscription",
                 ],
             ),
             (
@@ -936,6 +1233,7 @@ mod tests {
                     "max_groups",
                     "jobs",
                     "updates",
+                    "disks",
                 ],
             ),
             ("synology", &["scheme", "port", "insecure_tls", "request_timeout_seconds", "abb"]),
@@ -1006,6 +1304,157 @@ mod tests {
         assert_eq!(defaut("pbs", "max_groups"), "500");
         assert_eq!(defaut("synology", "request_timeout_seconds"), "15");
         assert_eq!(defaut("synology", "abb"), "true");
+    }
+
+    /// `credential_types` et `credentials` décrivent la même liste : l'ancienne
+    /// interface lit la première, la nouvelle la seconde.
+    #[test]
+    fn les_formes_didentifiant_sont_decrites_champ_par_champ() {
+        for kind in KINDS_ENREGISTRES {
+            let view = describe(kind);
+            let kinds: Vec<&str> = view.credentials.iter().map(|c| c.kind).collect();
+            assert_eq!(&kinds, view.credential_types, "« {kind} » : formes annoncées");
+            for credential in view.credentials {
+                assert!(!credential.label.is_empty(), "« {kind} » : forme sans libellé");
+                let mut keys = std::collections::BTreeSet::new();
+                for field in credential.fields {
+                    let contexte = format!("champ « {} » de « {kind} »", field.key);
+                    assert!(keys.insert(field.key), "{contexte} : déclaré deux fois");
+                    assert!(!field.label.is_empty(), "{contexte} : sans libellé");
+                    match field.input {
+                        "select" => assert!(!field.choices.is_empty(), "{contexte} : sans choix"),
+                        "text" | "password" => {
+                            assert!(field.choices.is_empty(), "{contexte} : choix sur un texte")
+                        }
+                        other => panic!("{contexte} : type de champ inconnu « {other} »"),
+                    }
+                }
+                if credential.kind == "none" {
+                    assert!(credential.fields.is_empty(), "« {kind} » : « none » sans champ");
+                } else {
+                    assert!(!credential.fields.is_empty(), "« {kind} » : forme sans champ");
+                }
+            }
+        }
+    }
+
+    /// Un jeton Proxmox se saisit en deux cases ; les clés sont celles que
+    /// `dumbmonit_proto::Credential` sait recomposer.
+    #[test]
+    fn un_jeton_proxmox_se_saisit_en_deux_champs() {
+        for kind in ["proxmox", "pbs"] {
+            let view = describe(kind);
+            let token = view.credentials.iter().find(|c| c.kind == "api_token").unwrap();
+            let keys: Vec<&str> = token.fields.iter().map(|f| f.key).collect();
+            assert_eq!(keys, ["token_id", "secret"], "« {kind} »");
+            assert!(token.fields[0].placeholder.contains('!'), "l'exemple montre user@realm!nom");
+            assert_eq!(token.fields[1].input, "password");
+            let credential: dumbmonit_proto::Credential =
+                serde_json::from_value(serde_json::json!({
+                    "type": "api_token",
+                    "token_id": token.fields[0].placeholder,
+                    "secret": "8f3a1c9e-0000-4444-8888-aaaabbbbcccc",
+                }))
+                .unwrap();
+            assert_eq!(
+                credential,
+                dumbmonit_proto::Credential::ApiToken {
+                    token: format!(
+                        "{}=8f3a1c9e-0000-4444-8888-aaaabbbbcccc",
+                        token.fields[0].placeholder
+                    )
+                }
+            );
+        }
+    }
+
+    /// Texte d'une notice, étapes et mise en garde comprises.
+    fn notice(kind: &'static str) -> String {
+        let view = describe(kind);
+        let mut text = view.setup.steps.join("\n");
+        text.push('\n');
+        text.push_str(view.setup.warning);
+        text
+    }
+
+    /// Les tutoriels font créer un compte réservé, jamais réutiliser le compte
+    /// tout-puissant : le mot « root » ou « admin » n'a rien à y faire — sauf le
+    /// nom du groupe `administrators` que l'API de stockage de DSM exige, et qui
+    /// est justement expliqué.
+    #[test]
+    fn les_notices_font_creer_un_compte_dedie_et_ne_citent_jamais_le_compte_racine() {
+        let attendus = [
+            ("proxmox", "dumbmonit@pve"),
+            ("pbs", "dumbmonit@pbs"),
+            ("synology", "dumbmonit"),
+            ("agent", "token"),
+        ];
+        for (kind, dedie) in attendus {
+            let text = notice(kind);
+            assert!(text.contains(dedie), "« {kind} » ne nomme pas le compte dédié « {dedie} »");
+            let allowed = text.to_lowercase().replace("administrators", "");
+            for word in allowed.split(|c: char| !c.is_alphanumeric()) {
+                assert!(
+                    !matches!(word, "root" | "admin" | "administrator"),
+                    "la notice de « {kind} » cite « {word} » comme compte à utiliser"
+                );
+            }
+        }
+    }
+
+    /// Les commandes des notices sont des lignes à copier telles quelles : pas
+    /// d'espace autour, pas de guillemets typographiques qu'un shell refuserait.
+    #[test]
+    fn les_commandes_des_notices_sont_copiables_telles_quelles() {
+        for kind in KINDS_ENREGISTRES {
+            for step in describe(kind).setup.steps {
+                let mut lines = step.lines();
+                let text = lines.next().unwrap_or_default();
+                assert!(!text.trim().is_empty(), "« {kind} » : étape sans texte");
+                for command in lines {
+                    assert_eq!(command, command.trim(), "« {kind} » : commande avec des espaces");
+                    assert!(!command.is_empty(), "« {kind} » : ligne de commande vide");
+                    assert!(
+                        !command.contains(['“', '”', '‘', '’']),
+                        "« {kind} » : guillemets typographiques dans « {command} »"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Les pages `docs/devices/*.md` reprennent les notices mot pour mot : le
+    /// tutoriel affiché dans l'application et celui de la documentation ne
+    /// doivent pas diverger. La comparaison ignore les retours à la ligne et
+    /// les accents de code Markdown.
+    #[test]
+    fn la_documentation_reprend_les_notices_mot_pour_mot() {
+        let docs: &[(&str, &str)] = &[
+            ("proxmox", include_str!("../../../../docs/devices/proxmox.md")),
+            ("pbs", include_str!("../../../../docs/devices/pbs.md")),
+            ("synology", include_str!("../../../../docs/devices/synology.md")),
+            ("agent", include_str!("../../../../docs/devices/agent.md")),
+        ];
+        fn flatten(text: &str) -> String {
+            text.replace('`', "").split_whitespace().collect::<Vec<_>>().join(" ")
+        }
+        for (kind, doc) in docs {
+            let flat = flatten(doc);
+            let view = describe(kind);
+            for step in view.setup.steps {
+                let mut lines = step.lines();
+                let text = flatten(lines.next().unwrap_or_default());
+                assert!(flat.contains(&text), "docs/devices/{kind}.md ne reprend pas : {text}");
+                for command in lines {
+                    assert!(
+                        doc.contains(command),
+                        "docs/devices/{kind}.md ne reprend pas : {command}"
+                    );
+                }
+            }
+            let warning = flatten(view.setup.warning);
+            assert!(flat.contains(&warning), "docs/devices/{kind}.md ne reprend pas : {warning}");
+        }
     }
 
     #[test]

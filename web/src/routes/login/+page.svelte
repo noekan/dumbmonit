@@ -22,6 +22,11 @@
 	let username = $state('');
 	let password = $state('');
 	let sending = $state(false);
+	// Second step: the server accepted the password and waits for a one-time
+	// code. `pending` is the short-lived token that ties the two steps together.
+	let pending = $state<string | null>(null);
+	let code = $state('');
+	let codeError = $state<string | null>(null);
 	let usernameError = $state<string | null>(null);
 	let failure = $state<{ title: string; error: unknown } | null>(null);
 	let localError = $state<string | null>(null);
@@ -76,9 +81,10 @@
 
 		sending = true;
 		try {
-			await auth.login(username.trim(), password);
+			pending = await auth.login(username.trim(), password);
 			password = '';
-			// The layout guard notices the open session and sends us to `destination`.
+			// Without a second factor, the layout guard notices the open session
+			// and sends us to `destination`. Otherwise the code form takes over.
 		} catch (cause) {
 			if (cause instanceof ApiError && cause.status === 401) {
 				failure = {
@@ -111,6 +117,48 @@
 			sending = false;
 		}
 	}
+
+	async function submitCode(event: SubmitEvent) {
+		event.preventDefault();
+		failure = null;
+		codeError = null;
+		if (!code.trim()) {
+			codeError = 'Enter the code from your authenticator app.';
+			return;
+		}
+		if (pending === null) return;
+		sending = true;
+		try {
+			await auth.loginTotp(pending, code.trim());
+			code = '';
+		} catch (cause) {
+			if (cause instanceof ApiError && cause.status === 401) {
+				if (/expired|start over|password again/i.test(cause.message)) {
+					// The pending token is gone: back to the password step.
+					pending = null;
+					code = '';
+					failure = { title: 'Start again.', error: new ApiError(cause.message, 400) };
+				} else {
+					codeError = cause.message;
+				}
+			} else if (cause instanceof ApiError && cause.status === 429) {
+				const seconds = retryDelay(cause.message);
+				retryIn = seconds ?? 30;
+				failure = { title: 'Too many attempts.', error: new ApiError(cause.message, 429) };
+			} else {
+				failure = { title: 'Could not sign in', error: cause };
+			}
+		} finally {
+			sending = false;
+		}
+	}
+
+	function backToPassword() {
+		pending = null;
+		code = '';
+		codeError = null;
+		failure = null;
+	}
 </script>
 
 <svelte:head><title>Sign in · DumbMonit</title></svelte:head>
@@ -131,6 +179,49 @@
 				<span class="text-[1.05rem] font-bold tracking-tight text-ink">DumbMonit</span>
 			</div>
 
+			{#if pending !== null}
+				<h1 id="gate-title" class="display mt-6 text-[1.75rem] text-ink sm:text-3xl">One more step.</h1>
+				<p class="mt-2 text-sm text-ink-2">
+					Enter the six-digit code from your authenticator app, or one of your recovery codes.
+				</p>
+
+				<form class="mt-6 grid gap-4" onsubmit={submitCode} novalidate>
+					<Field label="Verification code" for="totp-code" error={codeError}>
+						<!-- svelte-ignore a11y_autofocus -->
+						<input
+							id="totp-code"
+							type="text"
+							class="input tnum tracking-[0.2em]"
+							bind:value={code}
+							autocomplete="one-time-code"
+							inputmode="text"
+							autocapitalize="off"
+							spellcheck="false"
+							autofocus
+							disabled={sending}
+							aria-invalid={codeError ? 'true' : undefined}
+							oninput={() => (codeError = null)}
+						/>
+					</Field>
+
+					{#if failure}
+						<ErrorNotice title={failure.title} error={failure.error} />
+					{/if}
+
+					<ClickSpark class="w-full">
+						<Button type="submit" variant="primary" size="lg" class="w-full" loading={sending} disabled={retryIn > 0}>
+							{#if retryIn > 0}
+								<span class="tnum">Try again in {retryIn} s</span>
+							{:else}
+								Verify
+							{/if}
+						</Button>
+					</ClickSpark>
+					<Button type="button" variant="ghost" size="sm" class="justify-self-start" onclick={backToPassword}>
+						Back to password
+					</Button>
+				</form>
+			{:else}
 			<h1 id="gate-title" class="display mt-6 text-[1.75rem] text-ink sm:text-3xl">Welcome back.</h1>
 			<p class="mt-2 text-sm text-ink-2">
 				{#if cameFromElsewhere}
@@ -208,6 +299,7 @@
 			<p class="mt-5 text-[0.8125rem] text-ink-2">
 				Lost the password? It cannot be recovered from here: reset it on the machine that runs DumbMonit.
 			</p>
+			{/if}
 		</section>
 
 		<p class="mt-6 text-[0.8125rem] text-ink-2">DumbMonit · open source, Apache 2.0</p>

@@ -254,10 +254,11 @@ pub async fn set_rule_enabled(pool: &SqlitePool, id: i64, enabled: bool) -> Resu
 /// Les cibles désactivées sont incluses : elles peuvent être le parent d'une cible
 /// active, et les retirer casserait la chaîne de suppression.
 pub async fn list_target_nodes(pool: &SqlitePool) -> Result<Vec<TargetNode>> {
-    let rows = sqlx::query("SELECT id, name, address, parent_id, tags, enabled FROM targets")
-        .fetch_all(pool)
-        .await
-        .context("lecture de la topologie des cibles")?;
+    let rows =
+        sqlx::query("SELECT id, name, address, parent_id, via_agent, tags, enabled FROM targets")
+            .fetch_all(pool)
+            .await
+            .context("lecture de la topologie des cibles")?;
 
     rows.iter()
         .map(|row| {
@@ -267,6 +268,7 @@ pub async fn list_target_nodes(pool: &SqlitePool) -> Result<Vec<TargetNode>> {
                 name: row.try_get("name")?,
                 address: row.try_get("address")?,
                 parent_id: row.try_get("parent_id")?,
+                via_agent: row.try_get("via_agent")?,
                 tags: json_or_default(&tags),
                 enabled: row.try_get::<i64, _>("enabled")? != 0,
             })

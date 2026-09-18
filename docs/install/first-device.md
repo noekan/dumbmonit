@@ -45,15 +45,45 @@ Rather than typing devices one by one, scan a range:
    *Already added*.
 4. Click **Add** on the ones you want.
 
+## Add a Proxmox VE server
+
+The same flow, with a credential in two fields rather than one:
+
+1. In Proxmox, create a user reserved for monitoring, a read-only role and an
+   API token — the four `pveum` commands are in the notice next to the form,
+   with a copy button each, and on the [Proxmox VE page](../devices/proxmox.md).
+   Never reuse the account you log in with.
+2. In DumbMonit, **Add a device** → **Proxmox VE**.
+3. Enter a **name** and the **address** of any node (port 8006 by default).
+4. Copy the token's **full-tokenid** (`dumbmonit@pve!monitor`) into **Token
+   ID** and its **value** (the UUID) into **Secret**. Pasted the whole
+   `user@pve!name=secret` string into Token ID by mistake? The form splits it
+   and says so.
+5. Proxmox ships with a self-signed certificate: tick **Accept an unverifiable
+   certificate** under *More options* if the first probe complains about it.
+6. Click **Add device**.
+
+[Proxmox Backup Server](../devices/pbs.md) works the same way with
+`proxmox-backup-manager`; a [Synology NAS](../devices/synology.md) takes a
+dedicated DSM account (user name and password); a
+[server with the agent](../devices/agent.md) needs no credential at all, only
+the enrollment token shown once the device is saved.
+
 ## The setup notice
 
 Every type carries its own notice, written by the server and shown next to the
-form: the steps to do on the device (create an API token, create a read-only
-user, allow the address…), a common pitfall, and a link to the vendor's
-documentation when there is one. The per-kind pages in this documentation
-mirror those notices: [SNMP](../devices/snmp.md), [Proxmox VE](../devices/proxmox.md),
+form: numbered steps to do on the device (create a read-only user, create an
+API token, allow the address…), with the exact menu path in the product and a
+copy button on every command or value, then a common pitfall and a link to the
+vendor's documentation when there is one. The per-kind pages in this
+documentation carry the same steps word for word — a test in the server keeps
+them identical: [SNMP](../devices/snmp.md), [Proxmox VE](../devices/proxmox.md),
 [Proxmox Backup Server](../devices/pbs.md), [Synology DSM](../devices/synology.md),
 [agent](../devices/agent.md), [services](../devices/services.md).
+
+The principle behind every notice: a dedicated read-only account, never the
+one you log in with. A leaked monitoring secret must not be able to change
+anything.
 
 ## Common fields
 
@@ -63,7 +93,7 @@ Whatever the type, the form has:
 |---|---|
 | Name | How the device appears in lists and alerts. |
 | Address | IP, host name, `host:port` or URL depending on the type; the placeholder shows the expected shape. |
-| Credential | Community, SNMP v3 user, API token or username/password, as accepted by the type. Stored encrypted, never returned by the API. |
+| Credential | The families the type accepts, each with its own fields: community, SNMP v3 user and passphrases, Proxmox token (Token ID + Secret), user name and password. Secrets have a show/hide eye and pasted values are cleaned of stray spaces, quotes and line breaks. Stored encrypted, never returned by the API: on edit, blank fields keep what is saved. |
 | Check interval | How often DumbMonit reads the device. Default 60 s, minimum 10 s. |
 | Parent device | If the parent goes down, alerts from this device are suppressed instead of sent. See [dependency suppression](../alerting/index.md#dependency-suppression). |
 | Enabled | A paused device is not checked and raises no alerts. |
@@ -80,7 +110,7 @@ Whatever the type, the form has:
 - The [built-in alert rules](../alerting/rules.md) apply immediately: device
   unreachable, CPU saturated, disk almost full, and so on. Nothing to configure.
 - To be notified, add a [notification channel](../notifications.md) in
-  **Settings → Notifications**. Built-in rules notify every enabled channel.
+  **Alerts → Notifications**. Built-in rules notify every enabled channel.
 
 !!! tip "No data after a minute?"
     Open the device page: a configuration error (wrong community, refused

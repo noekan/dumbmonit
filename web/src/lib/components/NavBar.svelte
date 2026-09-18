@@ -4,7 +4,7 @@
 	 * sliding pill that springs between items (the gooey nav, tamed).
 	 */
 	import { page } from '$app/state';
-	import { Gauge, Server, BellRing, Settings2, Command, Search, LogOut } from 'lucide-svelte';
+	import { Gauge, Server, BellRing, Globe, Settings2, Command, Search, LogOut } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { Plate } from '$lib/ui';
 	import { alertsStore } from '$lib/stores/alerts.svelte';
@@ -16,6 +16,7 @@
 		{ href: '/', label: 'Overview', icon: Gauge, exact: true },
 		{ href: '/targets', label: 'Devices', icon: Server, exact: false },
 		{ href: '/alerts', label: 'Alerts', icon: BellRing, exact: false },
+		{ href: '/status', label: 'Status', icon: Globe, exact: false },
 		{ href: '/settings', label: 'Settings', icon: Settings2, exact: false }
 	];
 
@@ -131,9 +132,9 @@
 	</div>
 </header>
 
-<!-- Phones: the four destinations as thumb-reachable tabs. -->
+<!-- Phones: the five destinations as thumb-reachable tabs. -->
 <nav aria-label="Main" class="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-canvas/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-md sm:hidden">
-	<ul class="grid grid-cols-4">
+	<ul class="grid grid-cols-5">
 		{#each LINKS as link (link.href)}
 			{@const active = isActive(link.href, link.exact)}
 			<li>

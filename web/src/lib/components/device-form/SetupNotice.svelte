@@ -5,11 +5,13 @@
 	 * Its content comes entirely from the server (`CollectorInfo.setup`). Before
 	 * a kind is chosen, or for a kind the server cannot describe, it explains
 	 * the idea instead of showing an empty box.
+	 *
+	 * A step is one sentence; the lines that follow it, if any, are a command
+	 * or a value to copy as is, shown in a copy block.
 	 */
 	import { ExternalLink } from 'lucide-svelte';
 	import type { CollectorInfo } from '$lib/api';
-	import { Panel, Plate } from '$lib/ui';
-	import { CREDENTIAL_KINDS } from '$lib/api';
+	import { CopyBlock, Panel, Plate } from '$lib/ui';
 	import { kindIcon } from './kinds';
 
 	interface Props {
@@ -25,15 +27,17 @@
 	/** Short human list of the credential families the kind accepts. */
 	const credentialSummary = $derived.by(() => {
 		if (!collector) return '';
-		const labels: string[] = [];
-		for (const value of collector.credential_types) {
-			const label = CREDENTIAL_KINDS.find((option) => option.value === value)?.label;
-			if (label) labels.push(label);
-		}
+		const labels = collector.credentials.map((view) => view.label);
 		if (labels.length === 0) return '';
-		if (labels.length === 1 && labels[0] === 'No authentication') return 'No credentials needed';
+		if (labels.length === 1 && collector.credentials[0].kind === 'none') return 'No credentials needed';
 		return labels.join(' or ');
 	});
+
+	/** Splits a step into its sentence and the lines to copy, if any. */
+	function parts(step: string): { text: string; copy: string } {
+		const [text, ...rest] = step.split('\n');
+		return { text: text.trim(), copy: rest.join('\n').trim() };
+	}
 </script>
 
 <div aria-live="polite">
@@ -55,6 +59,7 @@
 		{#if setup && setup.steps.length > 0}
 			<ol class="space-y-3">
 				{#each setup.steps as step, index (index)}
+					{@const { text, copy } = parts(step)}
 					<li class="flex gap-3">
 						<span
 							class="tnum mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-signal-soft text-[0.75rem] font-semibold text-signal-ink"
@@ -62,7 +67,12 @@
 						>
 							{index + 1}
 						</span>
-						<span class="min-w-0 text-sm leading-relaxed text-ink">{step}</span>
+						<div class="grid min-w-0 flex-1 gap-2">
+							<span class="text-sm leading-relaxed text-ink">{text}</span>
+							{#if copy}
+								<CopyBlock value={copy} label="Copy" />
+							{/if}
+						</div>
 					</li>
 				{/each}
 			</ol>

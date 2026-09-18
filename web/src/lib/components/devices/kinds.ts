@@ -9,10 +9,14 @@
  */
 import type { Component } from 'svelte';
 import type { Target } from '$lib/api/types';
+import PbsPanel from './pbs/PbsPanel.svelte';
+import ProxmoxPanel from './proxmox/ProxmoxPanel.svelte';
+import RelayPanel from './relay/RelayPanel.svelte';
+import SynologyPanel from './synology/SynologyPanel.svelte';
 
 export type KindPanel = Component<{ target: Target }>;
 
-export const kindPanels: Record<string, KindPanel> = {};
+export const kindPanels: Record<string, KindPanel> = { pbs: PbsPanel, agent: RelayPanel, proxmox: ProxmoxPanel, synology: SynologyPanel };
 
 /** The panel for a kind, or `null` when the generic charts are all there is. */
 export function kindPanel(kind: string): KindPanel | null {

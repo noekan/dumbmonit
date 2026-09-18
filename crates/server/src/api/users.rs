@@ -10,9 +10,10 @@ use axum::http::StatusCode;
 use serde::Deserialize;
 
 use crate::api::auth::UserView;
+use crate::auth::client_ip::ClientIp;
 use crate::auth::middleware::AdminUser;
 use crate::auth::users::{self, NewUser, Role, User};
-use crate::auth::{AuthError, AuthResult, oidc, password, session};
+use crate::auth::{AuthError, AuthResult, audit, oidc, password, session};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -67,7 +68,8 @@ pub async fn list(State(state): State<AppState>, _: AdminUser) -> AuthResult<Jso
 /// actif : un compte sans mot de passe ni fournisseur ne pourrait jamais entrer.
 pub async fn create(
     State(state): State<AppState>,
-    _: AdminUser,
+    AdminUser(me): AdminUser,
+    ClientIp(ip): ClientIp,
     Json(payload): Json<CreatePayload>,
 ) -> AuthResult<(StatusCode, Json<UserView>)> {
     let username = payload.username.trim();
@@ -106,6 +108,7 @@ pub async fn create(
         return Err(AuthError::Conflict(format!("A user named \"{username}\" already exists.")));
     };
     let user = load(&state, id).await?;
+    audit::record(&state.pool, Some(&me.username), "user.created", Some(&user.username), ip).await;
     tracing::info!(user = %user.username, role = user.role.as_str(), "user created");
     Ok((StatusCode::CREATED, Json(user.into())))
 }
@@ -114,6 +117,7 @@ pub async fn create(
 pub async fn update(
     State(state): State<AppState>,
     AdminUser(me): AdminUser,
+    ClientIp(ip): ClientIp,
     Path(id): Path<i64>,
     Json(payload): Json<UpdatePayload>,
 ) -> AuthResult<Json<UserView>> {
@@ -159,6 +163,7 @@ pub async fn update(
     }
 
     let user = load(&state, id).await?;
+    audit::record(&state.pool, Some(&me.username), "user.updated", Some(&user.username), ip).await;
     tracing::info!(user = %user.username, "user updated");
     Ok(Json(user.into()))
 }
@@ -167,6 +172,7 @@ pub async fn update(
 pub async fn delete(
     State(state): State<AppState>,
     AdminUser(me): AdminUser,
+    ClientIp(ip): ClientIp,
     Path(id): Path<i64>,
 ) -> AuthResult<StatusCode> {
     let user = load(&state, id).await?;
@@ -183,6 +189,7 @@ pub async fn delete(
     }
     // Les sessions suivent en cascade.
     users::delete(&state.pool, id).await?;
+    audit::record(&state.pool, Some(&me.username), "user.deleted", Some(&user.username), ip).await;
     tracing::info!(user = %user.username, "user deleted");
     Ok(StatusCode::NO_CONTENT)
 }

@@ -19,6 +19,7 @@ path = "src/main.rs"
 
 [dependencies]
 dumbmonit-proto = { path = "../proto" }
+dumbmonit-collectors = { path = "../collectors" }
 
 anyhow.workspace = true
 async-trait.workspace = true
@@ -45,18 +46,8 @@ reqwest = { version = "0.13", default-features = false, features = [
     "json", "query", "form", "rustls", "rustls-native-certs", "gzip",
 ] }
 
-# SNMP v1/v2c/v3 en asynchrone. Les fonctionnalités par défaut (`tokio` +
-# `crypto-rust`) couvrent v3 sans dépendance C ; `mibs` est volontairement écarté,
-# il exigerait libnetsnmp et casserait le binaire statique.
-#
-# `heap_buffers` n'est pas un détail : sans elle, `AsyncSession` porte 128 Kio de
-# tampons en ligne et sa construction consomme 1 à 2 Mio de pile, soit la totalité
-# de celle d'une tâche Tokio. Un dépassement n'est pas rattrapable et abrège le
-# processus entier.
-snmp2 = { version = "0.5", features = ["heap_buffers"] }
-
-serde_yaml_ng = "0.10"
-humantime-serde = "1"
+# Les collecteurs réseau (SNMP, sondes de disponibilité, clients Proxmox/PBS/DSM)
+# vivent dans `dumbmonit-collectors`, avec leurs dépendances.
 ipnet = "2"
 futures = "0.3"
 
@@ -68,18 +59,8 @@ lettre = { version = "0.11", default-features = false, features = [
     "smtp-transport", "tokio1-rustls", "ring", "rustls-native-certs", "builder", "hostname",
 ] }
 
-# --- Moniteurs de disponibilité (HTTP, TCP, DNS, ICMP, expiration TLS) ---
-hickory-resolver = "0.26"
-# ICMP demande une socket brute, ou la plage `net.ipv4.ping_group_range` sous
-# Linux : le conteneur doit donc recevoir CAP_NET_RAW pour que le ping fonctionne.
-surge-ping = "0.9"
-# Lecture de la date d'expiration d'un certificat présenté par un service.
-x509-parser = "0.18"
-tokio-rustls = "0.26"
 tokio-util = { version = "0.7", features = ["io"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-rustls-pki-types = "1"
-webpki-roots = "1"
 
 aes-gcm = "0.11"
 argon2 = "0.6"
@@ -88,6 +69,10 @@ hex = "0.4"
 # Empreinte des jetons de session : rapide, contrairement à Argon2id qui est
 # volontairement lent et serait payé à chaque requête authentifiée.
 sha2 = "0.11"
+# Second facteur TOTP (RFC 6238) : HMAC-SHA1, le seul algorithme que lisent
+# toutes les applications d'authentification.
+hmac = "0.13"
+sha1 = "0.11"
 # Comparaison en temps constant du secret de session.
 subtle = "2.6"
 # Validation des jetons d'identité OpenID Connect (signature RS256/ES256 via le

@@ -140,8 +140,9 @@ community: the collection profile is detected automatically.
 - **Lost password**: `DUMBMONIT_RESET_PASSWORD=1 docker compose up -d` clears the
   password and all sessions at startup; the UI asks for a new one at `/setup`.
   Then run `docker compose up -d` again without the variable.
-- **ICMP ping monitors** need the `NET_RAW` capability: uncomment the `cap_add`
-  block in `docker-compose.yml`.
+- **ICMP ping monitors** work without any capability: the container runs as a
+  non-root user and `docker-compose.yml` sets the `net.ipv4.ping_group_range`
+  sysctl that allows ICMP echo sockets. Keep those lines.
 
 ### Installing the agent
 
@@ -154,6 +155,13 @@ curl -sSL http://server:8080/install.sh | sh -s -- --token=dmon_xxx --url=http:/
 
 The agent registers itself as a device. A PowerShell script is served at
 `/install.ps1` for Windows.
+
+The agent is also published as an image, `ghcr.io/noekan/dumbmonit-agent`
+(same tags as the server), for Docker hosts and **remote sites**: with
+`DUMBMONIT_AGENT_RELAY=true` the agent runs, on the server's behalf, the
+probes of the devices you assign to it (SNMP, Proxmox, HTTP…) from its own
+network, so several sites show up in one DumbMonit — outbound only, no VPN.
+See `docker-compose.agent.yml` and [Monitor a remote site](docs/install/remote-site.md).
 
 ## What it looks like
 
@@ -221,17 +229,18 @@ and state.
 
 ```
 crates/proto     shared types: Sample, Target, Credential, trait Collector (+ ProbeError)
+crates/collectors  snmp (profiles/*.yaml), proxmox, pbs, synology, uptime — shared by the server and the relay agent
 crates/server    the binary
   api/           axum routes; spa.rs serves the embedded web UI
   auth/          single instance password, HttpOnly session cookie, rate limit
-  collectors/    snmp (profiles/*.yaml), proxmox, pbs, synology, agent, uptime
-  scheduler.rs   runs every enabled target on its interval through the collector registry
+  collectors/    the agent collector (pushed metrics, commands, tokens) and the relay hub; re-exports crates/collectors
+  scheduler.rs   runs every enabled target on its interval through the collector registry, or delegates it to its relay agent
   tsdb/          VictoriaMetrics writer (batched flush) + query proxy
   db/            SQLite + numbered migrations
   alerting/      rules, state machine, suppression by parent, silences, seasonal baseline
   notify/        22 notification channels, described to the UI by notify/catalog.rs
   crypto.rs      AES-256-GCM for credentials/tokens
-crates/agent     Linux/Windows agent + install scripts
+crates/agent     Linux/Windows agent + install scripts; relay mode runs the shared collectors remotely
 web/             SvelteKit (Svelte 5 runes, Tailwind 4, uPlot), static build embedded in the binary
 profiles/        SNMP collection profiles, auto-applied by sysObjectID
 ```
@@ -264,8 +273,8 @@ This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
 **Work in progress — alpha.** DumbMonit is developed in the open and
 used daily on the author's own homelab, but it is not ready for anyone who needs
 it to be boring: the HTTP API is not frozen, the database schema still moves,
-and some parts have only been exercised against the Docker lab in this
-repository. Known gaps and open bugs are tracked in the
+and some integrations have only been exercised against simulated devices, not
+the real hardware. Known gaps and open bugs are tracked in the
 [issues](https://github.com/noekan/dumbmonit/issues); the biggest ones today are
 a push/heartbeat monitor, API tokens for the whole REST API (they only cover the
 MCP endpoint for now), config export/import and 2FA. The project was called

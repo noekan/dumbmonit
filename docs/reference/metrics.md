@@ -51,7 +51,7 @@ the service is down, an interruption of `up` says the monitoring is down.
 | `host` | server | The device name. |
 | `tag_<key>` | server | Every tag of the device, including type options (`tag_insecure_tls`, `tag_port`…). Never put a secret in a tag. |
 | `probe` | services | `http`, `tcp`, `dns`, `ping` or `tls`. |
-| per-series labels | collector | `ifname`, `mountpoint`, `device`, `fstype`, `core`, `service`, `container`, `node`, `vmid`, `storage`, `datastore`, `group`, `volume`, `disk`, `reason`, `version`, `issuer`… as listed on each device page. |
+| per-series labels | collector | `ifname`, `mountpoint`, `device`, `fstype`, `core`, `service`, `container`, `node`, `vmid`, `name`, `storage`, `datastore`, `group`, `volume`, `disk`, `pool`, `repo`, `changes`, `reason`, `version`, `issuer`… as listed on each device page. |
 
 Identity labels always win over collector labels, and for agents they are set
 on reception: a machine cannot write into another machine's series.

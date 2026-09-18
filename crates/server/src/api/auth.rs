@@ -12,9 +12,11 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 
+use crate::auth::client_ip::ClientIp;
 use crate::auth::middleware::{Authenticated, CurrentSession, current_session};
+use crate::auth::rate_limit::Key;
 use crate::auth::users::{self, Role, User};
-use crate::auth::{AuthError, AuthResult, AuthState, cookie, oidc, password, session};
+use crate::auth::{AuthError, AuthResult, AuthState, audit, cookie, oidc, password, session};
 use crate::state::AppState;
 
 /// Un compte, tel que l'interface le voit. Jamais d'empreinte de mot de passe.
@@ -27,6 +29,8 @@ pub struct UserView {
     /// « password » ou « oidc » : la façon dont ce compte se connecte.
     pub auth: &'static str,
     pub disabled: bool,
+    /// Second facteur actif sur ce compte.
+    pub totp_enabled: bool,
     pub created_at: String,
     pub last_login_at: Option<String>,
 }
@@ -35,6 +39,7 @@ impl From<User> for UserView {
     fn from(user: User) -> Self {
         Self {
             auth: user.auth_method(),
+            totp_enabled: user.totp_enabled,
             id: user.id,
             username: user.username,
             display_name: user.display_name,
@@ -184,9 +189,14 @@ fn already_configured() -> AuthError {
 }
 
 /// `POST /api/auth/login` — ouvre une session et pose le cookie.
+///
+/// Quand le compte a un second facteur, la réponse est `200 {"totp_required":
+/// true, "pending": …}` : le mot de passe est accepté, mais la session n'est
+/// ouverte que par `POST /api/auth/login/totp` (voir `api::totp`).
 pub async fn login(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthState>,
+    ClientIp(ip): ClientIp,
     Json(payload): Json<LoginPayload>,
 ) -> AuthResult<Response> {
     if !auth.is_configured(&state.pool).await? {
@@ -195,9 +205,10 @@ pub async fn login(
         ));
     }
 
-    guard_attempt(&auth).await?;
-
     let username = payload.username.as_deref().map(str::trim).filter(|name| !name.is_empty());
+    let keys = limiter_keys(ip, username);
+    guard_attempt(&auth, &keys).await?;
+
     let user = match username {
         Some(username) => users::by_username(&state.pool, username).await?,
         None => users::sole_password_user(&state.pool).await?,
@@ -214,20 +225,52 @@ pub async fn login(
     let verified = password::verify(payload.password, stored).await?;
     let Some(user) = user.filter(|user| !user.disabled && user.password_hash.is_some() && verified)
     else {
-        auth.limiter().lock().await.record_failure(Instant::now());
+        auth.limiter().lock().await.record_failure(&keys, Instant::now());
+        audit::record(&state.pool, username, "login.failed", None, ip).await;
         return Err(AuthError::Unauthorized(if username.is_some() {
             "Wrong username or password.".into()
         } else {
             "Wrong password.".into()
         }));
     };
-    auth.limiter().lock().await.record_success();
+    auth.limiter().lock().await.record_success(&keys);
 
+    if user.totp_enabled && user.totp_secret.is_some() {
+        let pending = auth.pending_totp().lock().await.start(user.id, Instant::now());
+        return Ok(
+            Json(serde_json::json!({ "totp_required": true, "pending": pending })).into_response()
+        );
+    }
+
+    open_session(&state, &auth, &user, ip).await
+}
+
+/// Ouvre la session d'un compte dont l'identité vient d'être établie et pose le
+/// cookie. Partagé avec le second facteur.
+pub async fn open_session(
+    state: &AppState,
+    auth: &AuthState,
+    user: &User,
+    ip: Option<std::net::IpAddr>,
+) -> AuthResult<Response> {
     let token = session::create(&state.pool, user.id).await?;
     users::touch_login(&state.pool, user.id).await?;
+    audit::record(&state.pool, Some(&user.username), "login", None, ip).await;
     tracing::info!(user = %user.username, "login succeeded");
     Ok((StatusCode::NO_CONTENT, [(header::SET_COOKIE, cookie::set(&token, auth.cookie_secure()))])
         .into_response())
+}
+
+/// Seaux du compteur de tentatives : l'adresse du client et le compte visé.
+pub fn limiter_keys(ip: Option<std::net::IpAddr>, username: Option<&str>) -> Vec<Key> {
+    let mut keys = Vec::with_capacity(2);
+    if let Some(ip) = ip {
+        keys.push(Key::Ip(ip));
+    }
+    // Sans identifiant (ancien formulaire), c'est le compte local unique qui est
+    // visé : une clé vide le désigne aussi bien.
+    keys.push(Key::user(username.unwrap_or("")));
+    keys
 }
 
 /// Empreinte d'un mot de passe inconnu, vérifiée quand le compte n'existe pas,
@@ -260,6 +303,7 @@ pub async fn change_password(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthState>,
     Authenticated(user): Authenticated,
+    ClientIp(ip): ClientIp,
     current: Option<Extension<CurrentSession>>,
     Json(payload): Json<ChangePayload>,
 ) -> AuthResult<StatusCode> {
@@ -270,13 +314,14 @@ pub async fn change_password(
         ));
     };
 
-    guard_attempt(&auth).await?;
+    let keys = limiter_keys(ip, Some(&user.username));
+    guard_attempt(&auth, &keys).await?;
 
     if !password::verify(payload.current_password, stored).await? {
-        auth.limiter().lock().await.record_failure(Instant::now());
+        auth.limiter().lock().await.record_failure(&keys, Instant::now());
         return Err(AuthError::Unauthorized("Current password is wrong.".into()));
     }
-    auth.limiter().lock().await.record_success();
+    auth.limiter().lock().await.record_success(&keys);
 
     password::validate(&payload.new_password)?;
     let hash = password::hash(payload.new_password).await?;
@@ -284,14 +329,15 @@ pub async fn change_password(
 
     let keep = current.as_ref().map(|Extension(CurrentSession(token))| token.id());
     let closed = session::delete_for_user(&state.pool, user.id, keep).await?;
+    audit::record(&state.pool, Some(&user.username), "password.changed", None, ip).await;
     tracing::info!(user = %user.username, sessions_closed = closed, "password changed");
 
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Refuse la tentative si le compteur d'échecs est en cours de blocage.
-async fn guard_attempt(auth: &AuthState) -> AuthResult<()> {
-    auth.limiter().lock().await.check(Instant::now()).map_err(|retry_after| {
+/// Refuse la tentative si l'un des seaux est en cours de blocage.
+pub async fn guard_attempt(auth: &AuthState, keys: &[Key]) -> AuthResult<()> {
+    auth.limiter().lock().await.check(keys, Instant::now()).map_err(|retry_after| {
         AuthError::TooManyAttempts {
             message: format!("Too many failed attempts. Try again in {retry_after} seconds."),
             retry_after,

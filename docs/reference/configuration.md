@@ -21,6 +21,8 @@ configuration file to mount.
 | `DUMBMONIT_AGENT_DIR` | `/agents` | Directory of the agent binaries served under `/download/`. Empty or missing: the install command fails with `404`, the server still runs. |
 | `DUMBMONIT_RESET_PASSWORD` | *(off)* | `1`, `true`, `yes` or `on`: clear the password and every session at startup. The UI then shows `/setup` again. Remove it afterwards. |
 | `DUMBMONIT_COOKIE_SECURE` | *(off)* | `1` to set the `Secure` attribute on the session cookie. Only behind HTTPS: over plain HTTP the browser would never send the cookie back. |
+| `DUMBMONIT_TRUSTED_PROXIES` | *(empty)* | Reverse proxies whose `X-Forwarded-For` is believed, as addresses or CIDR ranges separated by commas (`10.0.0.5, 172.16.0.0/12`). The login rate limiter and the security log then see the real client address instead of the proxy's; without it, every visitor behind the proxy shares one bucket. The header is ignored from any other address, so a client cannot pick its own bucket. |
+| `DUMBMONIT_OIDC_ALLOW_HTTP` | *(off)* | `1` to accept an OpenID Connect issuer in plain `http://`. Off, the settings screen refuses anything but `https://`: a clear-text issuer hands the authorization code and client secret to whoever listens on the network. Only for a test provider on the loopback. |
 | `DUMBMONIT_ALERT_INTERVAL_SECS` | `30` | Alert evaluation period. Values below 10 are raised to 10. |
 | `DUMBMONIT_ALERT_HISTORY_DAYS` | `90` | Retention of alert history, in days. |
 
@@ -82,7 +84,8 @@ These are read by `docker-compose.yml`, not by the server:
 
 Outbound: SNMP (UDP 161 by default) towards devices, HTTPS towards Proxmox,
 PBS, Synology and notification services, plus whatever your service monitors
-target. ICMP ping needs the `NET_RAW` capability.
+target. ICMP ping needs the `net.ipv4.ping_group_range` sysctl set in the
+Compose file (no capability).
 
 ## Volumes and files
 

@@ -21,6 +21,7 @@
 	import { auth, PASSWORD_MIN_LENGTH, validatePassword } from '$lib/stores/auth.svelte';
 	import { Button, Confirm, CopyBlock, EmptyState, ErrorNotice, Field, Panel, Plate, Skeleton, Toggle } from '$lib/ui';
 	import PasswordInput from './PasswordInput.svelte';
+	import { resetUserTotp } from '$lib/api/totp';
 
 	let users = $state<User[]>([]);
 	let loading = $state(true);
@@ -177,6 +178,20 @@
 		}
 	}
 
+	/** Admin: removes someone's second factor (lost phone, no recovery code). */
+	async function resetTotp(user: User) {
+		busyId = user.id;
+		rowError = null;
+		try {
+			await resetUserTotp(user.id);
+			users = users.map((u) => (u.id === user.id ? { ...u, totp_enabled: false } : u));
+		} catch (cause) {
+			rowError = { id: user.id, cause };
+		} finally {
+			busyId = null;
+		}
+	}
+
 	async function remove(user: User) {
 		busyId = user.id;
 		rowError = null;
@@ -319,6 +334,7 @@
 									{/if}
 									<Plate tone={user.role === 'admin' ? 'signal' : 'ghost'} bare label={user.role === 'admin' ? 'Admin' : 'Viewer'} />
 									<Plate tone="info" bare label={user.auth === 'oidc' ? auth.oidc.provider_name || 'SSO' : 'Password'} title={user.auth === 'oidc' ? 'Signs in through the identity provider' : 'Signs in with a password'} />
+									{#if user.totp_enabled}<Plate tone="signal" bare label="2FA" title="Two-factor authentication is on" />{/if}
 									{#if user.disabled}<Plate tone="muted" label="Disabled" />{/if}
 									{#if me}<span class="text-[0.75rem] font-semibold text-ink-3">you</span>{/if}
 								</div>
@@ -337,6 +353,11 @@
 										<Toggle id={`user-enabled-${user.id}`} checked={!user.disabled} disabled={busy || lastAdmin || me} onchange={(v) => void setDisabled(user, !v)} />
 										<label for={`user-enabled-${user.id}`} class="text-[0.8125rem] font-semibold text-ink">Enabled</label>
 									</div>
+									{#if user.totp_enabled && !me}
+										<span title="Removes their authenticator and recovery codes, and signs them out: the password alone will sign them in again.">
+											<Confirm confirmLabel="Reset two-factor?" variant="secondary" loading={busy} onconfirm={() => resetTotp(user)}>Reset 2FA</Confirm>
+										</span>
+									{/if}
 									<span title={lastAdmin ? 'The last admin cannot be deleted. Promote another user first.' : me ? 'You cannot delete your own account.' : undefined}>
 										<Confirm confirmLabel="Delete for good?" loading={busy} disabled={lastAdmin || me} onconfirm={() => remove(user)}>Delete</Confirm>
 									</span>

@@ -45,6 +45,14 @@ services:
       - "${DUMBMONIT_PORT:-8080}:8080"
     volumes:
       # SQLite database, instance secret and the time series (/data/vm).
+      #
+      # The server runs as user 65532 (not root). A named volume created by
+      # Docker inherits that owner from the image: nothing to do. A bind mount
+      # (`./data:/data`) or a volume created before this change must be handed
+      # over once:
+      #   docker run --rm -v dumbmonit-data:/data alpine chown -R 65532:65532 /data
+      # or, to keep the files as they are, run the container as their owner
+      # with `user: "1000:1000"` (any uid works: the image has no /etc/passwd).
       - dumbmonit-data:/data
     environment:
       # Uncomment to set the secret yourself instead of letting DumbMonit
@@ -62,9 +70,20 @@ services:
       DUMBMONIT_VM_MEMORY: ${DUMBMONIT_VM_MEMORY:-256MB}
       # External VictoriaMetrics instead of the embedded one:
       # DUMBMONIT_VM_URL: http://victoriametrics:8428
-    # Only needed for "ping" (ICMP) monitors:
-    # cap_add:
-    #   - NET_RAW
+    # Least privilege: no capability at all, no privilege escalation, and the
+    # image's file system read-only — /data (volume) and /tmp (tmpfs) are the
+    # only writable places. ICMP "ping" monitors need no capability either: the
+    # sysctl below lets the (unprivileged) server open ICMP echo sockets inside
+    # the container's own network namespace. Remove it if you never use ping.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    sysctls:
+      net.ipv4.ping_group_range: "0 2147483647"
     # The server stops VictoriaMetrics after itself: leave it the time to do so.
     stop_grace_period: 30s
     restart: unless-stopped
@@ -288,31 +307,65 @@ browser would never send the cookie back and login would be impossible.
     too: make sure `/install.sh`, `/install.ps1`, `/download/…` and `/api/ingest`
     pass through the proxy.
 
-## ICMP ping needs `NET_RAW`
+## Runs as a non-root user
 
-The final image is built `FROM scratch` and gets no capability. The
-[ping monitor](../devices/services.md#ping) needs to open a raw ICMP socket, so
-uncomment these lines under the `dumbmonit` service and restart it:
+The container runs the server as user `65532:65532` (numeric: the `scratch`
+image has no `/etc/passwd`), with every capability dropped, `no-new-privileges`
+and a read-only root file system; `/data` (the volume) and `/tmp` (a tmpfs)
+are the only writable paths. All of this is in the Compose file above.
+
+A named volume created by Docker on first start inherits the owner of `/data`
+from the image: nothing to do. Two cases need one command:
+
+- **A volume created by an earlier version** (the server used to run as root,
+  so the files belong to root). Hand them over once, with the stack stopped:
+
+  ```bash
+  docker compose stop
+  docker run --rm -v dumbmonit-data:/data alpine chown -R 65532:65532 /data
+  docker compose up -d
+  ```
+
+  The symptom, otherwise, is a container that exits at once with
+  `creating directory /data … Permission denied` (or `unable to open database
+  file`).
+
+- **A bind mount** (`./data:/data`) keeps the ownership of the host directory.
+  Either `chown -R 65532:65532 ./data`, or run the container as the directory's
+  owner: `user: "1000:1000"` under the service, any uid works.
+
+## ICMP ping without a capability
+
+The [ping monitor](../devices/services.md#ping) sends ICMP echoes. Rather than
+a raw socket — which needs `NET_RAW`, and a capability granted to a non-root
+container user is not usable anyway — it uses an ICMP echo socket, which Linux
+allows to the groups listed in `net.ipv4.ping_group_range`. The Compose file
+sets that sysctl inside the container's own network namespace:
 
 ```yaml
-    cap_add:
-      - NET_RAW
+    sysctls:
+      net.ipv4.ping_group_range: "0 2147483647"
 ```
 
-Without it, a ping monitor reports a configuration error (shown on the device,
-not notified), never a false "host down".
+Nothing on the host changes. Docker 20.10 and later set this range in every
+container on their own; the explicit lines make it hold on older engines and
+on Podman. Without it, the check reports a configuration error (shown on the
+device, not notified), never a false "host down". With `docker run`, pass
+`--sysctl net.ipv4.ping_group_range="0 2147483647"`.
 
 ## Testing without hardware
 
-The repository ships a development overlay with a lab SNMP agent:
+Add a [demo device](../devices/demo.md): it produces fake measurements with
+nothing to prepare, so the graphs, rules and notifications can be tried right
+away. For real SNMP data, the machine running Docker is often enough — install
+`snmpd` on it (`apt install snmpd`, allow the `public` community on the Docker
+bridge in `/etc/snmp/snmpd.conf`) and add an SNMP device with the host's
+address on that bridge (`172.17.0.1` by default): the profile is detected
+automatically and interfaces, memory and processes show up.
+
+Developers can add the `docker-compose.dev.yml` overlay to publish the embedded
+VictoriaMetrics on the host's `:8428` for direct MetricsQL queries:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 ```
-
-Add an SNMP device with address `snmp-lab` and community `public`: the profile
-is detected automatically and interfaces, memory and processes show up. The
-overlay also publishes the embedded VictoriaMetrics on the host's `:8428`
-(`DUMBMONIT_VM_LISTEN=0.0.0.0:8428`). Alternatively, add a
-[demo device](../devices/demo.md): it produces fake measurements with nothing to
-prepare.

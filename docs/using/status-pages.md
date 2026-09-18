@@ -1,5 +1,7 @@
 # Status pages
 
+![The Status page: your pages, and the announcements under them](../assets/screenshots/status-light.png){ loading=lazy }
+
 A status page is the public face of your monitoring: a page anyone can open —
 no sign-in, no cookie — that says whether your services are up, shows their
 uptime over the last 90 days, and carries your incident and maintenance
@@ -12,7 +14,10 @@ server.
 
 ## 1. Create a page
 
-Settings → **Status pages** → **New page**.
+**Status** in the top bar → **New page**. That page lists your status pages
+(open, edit, delete) with the announcements under them; the editor opens on
+its own route (`/status/new`, `/status/<id>`). The public rendering is at
+`/s/<address>`.
 
 | Field | What it does |
 | --- | --- |
@@ -63,7 +68,8 @@ before that.
 
 ## 3. Announce incidents and maintenance
 
-Under the page list, **Incidents and maintenance** → **New announcement**.
+On the **Status** page, under the list of pages, **Incidents and maintenance**
+→ **New announcement** (also ++ctrl+k++ → *Announce an incident*).
 
 - An **incident** has a title, an impact (**minor** shows the page as
   degraded, **major** as an outage) and moves through *Investigating →

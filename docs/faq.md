@@ -34,10 +34,11 @@ default) and writes reach VictoriaMetrics every 5 seconds
 
 ## Ping says "configuration error"
 
-The ping monitor needs to open a raw ICMP socket, and the image gets no
-capability by default. Uncomment the `cap_add: - NET_RAW` lines under the
-`dumbmonit` service in `docker-compose.yml` and run `docker compose up -d`. See
-[ICMP ping needs NET_RAW](install/docker.md#icmp-ping-needs-net_raw).
+The ping monitor needs an ICMP echo socket. The container runs without any
+capability, so the Compose file allows those sockets with the
+`net.ipv4.ping_group_range` sysctl under the `dumbmonit` service: make sure
+the `sysctls:` lines are still there, then `docker compose up -d`. See
+[ICMP ping without a capability](install/docker.md#icmp-ping-without-a-capability).
 
 ## The agent does not appear
 

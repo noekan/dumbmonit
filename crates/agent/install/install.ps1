@@ -146,6 +146,25 @@ if ($BinPath) {
     } finally {
         $ProgressPreference = $progression
     }
+
+    # Le serveur publie l'empreinte SHA-256 du binaire à côté (`<url>.sha256`) :
+    # un téléchargement tronqué ou remplacé en chemin n'est pas installé.
+    $sourceEmpreinte = "$source.sha256"
+    $attendu = $null
+    try {
+        $reponse = Invoke-WebRequest -Uri $sourceEmpreinte -UseBasicParsing
+        $attendu = ([string]$reponse.Content).Trim().Split(' ')[0].ToLowerInvariant()
+    } catch {
+        Write-Warning "No checksum published at ${sourceEmpreinte}: binary not verified"
+    }
+    if ($attendu) {
+        $obtenu = (Get-FileHash -Path $exeTemporaire -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($obtenu -ne $attendu) {
+            Remove-Item -Path $exeTemporaire -Force -ErrorAction SilentlyContinue
+            Stop-Sur "Checksum mismatch for ${source} (expected $attendu, got $obtenu): the download is corrupt or has been tampered with. Nothing was installed."
+        }
+        Write-Etape "Checksum verified ($obtenu)"
+    }
 }
 
 if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {

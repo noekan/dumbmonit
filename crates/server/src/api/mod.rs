@@ -12,10 +12,15 @@ mod mcp;
 mod metrics;
 mod notify_policy;
 mod oidc;
+mod pbs;
+mod proxmox;
+mod relay;
 mod spa;
 mod status_pages;
+mod synology;
 mod targets;
 mod tokens;
+mod totp;
 mod users;
 
 pub use error::{ApiError, ApiResult};
@@ -32,7 +37,7 @@ use crate::auth::AuthState;
 use crate::state::AppState;
 
 pub fn router(state: AppState) -> Router {
-    let auth_state = AuthState::from_env();
+    let auth_state = AuthState::from_env(&state.config);
 
     // Tout ce qui touche à l'instance — lecture comprise : la liste des
     // équipements d'un homelab est déjà une information à ne pas laisser traîner.
@@ -43,6 +48,8 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/logout", post(auth::logout))
         .route("/auth/password", post(auth::change_password))
         .route("/auth/me", get(auth::me))
+        // Second facteur et journal d'audit (`totp.rs`).
+        .merge(totp::routes())
         .route(
             "/auth/oidc/config",
             get(oidc::get_config).put(oidc::put_config).delete(oidc::delete_config),
@@ -75,10 +82,18 @@ pub fn router(state: AppState) -> Router {
         .route("/tokens/{id}", delete(tokens::revoke))
         // Actions sur les conteneurs d'une machine (`agent_commands.rs`).
         .merge(agent_commands::ui_routes())
+        // Panneau Synology : vue d'ensemble et appareils Active Backup (`synology.rs`).
+        .merge(synology::routes())
+        // Agents relais proposés par le formulaire d'équipement (`relay.rs`).
+        .merge(relay::ui_routes())
+        // Tableau des invités d'un hyperviseur Proxmox VE (`proxmox.rs`).
+        .merge(proxmox::routes())
         // Politique de notification et surcharges par équipement (`notify_policy.rs`).
         .merge(notify_policy::routes())
         // Pages de statut et incidents (`status_pages.rs`).
         .merge(status_pages::routes())
+        // Calendrier des sauvegardes et travaux d'un Proxmox Backup Server (`pbs.rs`).
+        .merge(pbs::routes())
         // `route_layer` plutôt que `layer` : le garde ne s'applique qu'aux routes
         // effectivement déclarées ici, jamais au repli qui sert l'interface.
         .route_layer(middleware::from_fn_with_state(
@@ -95,6 +110,7 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/status", get(auth::status))
         .route("/auth/setup", post(auth::setup))
         .route("/auth/login", post(auth::login))
+        .route("/auth/login/totp", post(totp::login_step))
         .route("/auth/oidc/start", get(oidc::start))
         .route("/auth/oidc/callback", get(oidc::callback))
         // Réception des mesures poussées par les agents. Volontairement hors du
@@ -109,6 +125,9 @@ pub fn router(state: AppState) -> Router {
         .route("/ingest", post(ingest::receive).layer(DefaultBodyLimit::max(16 * 1024 * 1024)))
         // Canal de commandes des agents : même jeton, même raison d'être ouvert.
         .merge(agent_commands::agent_routes())
+        // Sondes déléguées aux agents relais (`relay.rs`) : même canal, et un
+        // compte rendu peut peser autant qu'un lot de mesures.
+        .merge(relay::agent_routes().layer(DefaultBodyLimit::max(16 * 1024 * 1024)))
         // Pages de statut publiques : lecture seule, sans session, par conception.
         .merge(status_pages::public_routes());
 
@@ -136,7 +155,16 @@ pub fn router(state: AppState) -> Router {
         .fallback(spa::serve)
         .layer(Extension(auth_state))
         .layer(middleware::from_fn(security_headers))
-        .layer(TraceLayer::new_for_http())
+        // Le span ne porte que le chemin : la chaîne de requête d'une route peut
+        // contenir un code d'autorisation OIDC ou un jeton — rien de tout cela
+        // n'a sa place dans un journal, même en `debug`.
+        .layer(TraceLayer::new_for_http().make_span_with(|request: &Request| {
+            tracing::debug_span!(
+                "request",
+                method = %request.method(),
+                path = %request.uri().path(),
+            )
+        }))
         .with_state(state)
 }
 

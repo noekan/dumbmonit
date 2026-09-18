@@ -394,7 +394,7 @@ export function buildBriefing(input: BriefingInput): Sentence[] {
       notice = {
         text: "Nothing was sent: no notification channel is set up yet.",
         tone: "advisory",
-        href: "/settings",
+        href: "/alerts#notifications",
       };
     } else if (channels.length === 1) {
       notice = { text: `Nothing was sent to ${channels[0]}.`, tone: "ghost" };

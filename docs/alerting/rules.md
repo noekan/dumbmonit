@@ -20,7 +20,7 @@ Severities are shown with the UI word; the API value is in parentheses.
 | Backup too old | No successful Proxmox VE backup for more than seven days (`dumbmonit_proxmox_backup_last_age_seconds`). | > 7 d | 1 h | Advisory (`warning`) | 24 h |
 | PBS datastore almost full | PBS datastore more than 90% full. | > 90 % | 15 min | Advisory (`warning`), escalates after 24 h | 6 h |
 | PBS datastore filling up | At the current rate, PBS estimates the datastore full within seven days. | < 7 d | 1 h | Advisory (`warning`) | 24 h |
-| PBS backup too old | No new snapshot for this machine for more than two days. | > 2 d | 1 h | Advisory (`warning`) | 24 h |
+| PBS backup too old | No new snapshot for this backup group (one per machine) for more than two days (`dumbmonit_pbs_backup_last_age_seconds`). Edit the threshold for machines backed up weekly; the notification names the group and datastore. | > 2 d | 1 h | Advisory (`warning`) | 24 h |
 | PBS backup verification failed | Verification of the latest snapshot for this machine failed (`dumbmonit_pbs_backup_last_verified < 1`). | < 1 | 30 min | Warning (`critical`) | 24 h |
 | PBS task failed | At least one PBS task failed in the review window. | > 0 | 10 min | Advisory (`warning`) | 24 h |
 | PBS garbage collection too old | No successful garbage collection on this datastore for more than eight days. | > 8 d | 1 h | Advisory (`warning`) | 24 h |
@@ -41,8 +41,33 @@ Severities are shown with the UI word; the API value is in parentheses.
 | Ceph health warning | Ceph reports `HEALTH_WARN` for more than fifteen minutes (`dumbmonit_proxmox_ceph_health == 1`). | > 0 | 15 min | Advisory (`warning`) | 6 h |
 | Proxmox updates pending | More than twenty package updates are pending on a node (`dumbmonit_proxmox_node_updates_pending`). | > 20 | 1 h | Info (`info`) | 7 d |
 | Node certificate expiring | A Proxmox node certificate expires in less than fourteen days (`dumbmonit_proxmox_node_certificate_expiry_days`). | < 14 d | 1 h | Advisory (`warning`) | 24 h |
+| VM or container CPU high | A guest has used more than 90 % of its allocated cores for fifteen minutes (`dumbmonit_proxmox_guest_cpu_percent`). The notification names the guest, `nextcloud (202)`. | > 90 % | 15 min | Advisory (`warning`) | 6 h |
+| VM or container memory high | A guest has used more than 95 % of its memory for ten minutes (`dumbmonit_proxmox_guest_memory_percent`). | > 95 % | 10 min | Advisory (`warning`) | 6 h |
+| VM or container disk almost full | The root disk of a guest is more than 90 % full (`dumbmonit_proxmox_guest_disk_used_percent`): containers always, VMs only when the QEMU guest agent reports usage. | > 90 % | 15 min | Advisory (`warning`) | 24 h |
+| Proxmox disk wearing out | An SSD or NVMe of a node has used more than 90 % of its rated life (`dumbmonit_proxmox_node_disk_wearout_percent`). The notification reads `pve1 · /dev/nvme0n1`. | > 90 % | 1 h | Advisory (`warning`) | 7 d |
+| Proxmox disk SMART failure | A disk of a node reports SMART health `FAILED` (`dumbmonit_proxmox_node_disk_smart_failed`). | > 0 | 5 min | Warning (`critical`) | 24 h |
+| Proxmox ZFS pool degraded | A ZFS pool of a node is not `ONLINE` (`dumbmonit_proxmox_node_zfs_pool_degraded`). The notification reads `pve2 · tank`. | > 0 | 5 min | Warning (`critical`) | 6 h |
+| Proxmox security updates pending | At least one pending update comes from a security archive (`dumbmonit_proxmox_node_updates_security_pending`). | > 0 | 1 h | Advisory (`warning`) | 7 d |
+| Proxmox packages changed | The installed version of a Proxmox package changed between two probes — someone ran `apt upgrade` (`dumbmonit_proxmox_node_packages_changed`, published for one hour with the detail in its `changes` label: `pve1 · pve-manager 8.2.4→8.2.7`). Resolves by itself an hour later. | > 0 | 1 min | Info (`info`) | 24 h |
 | PBS sync job failed | The last run of a PBS sync job failed (`dumbmonit_pbs_sync_job_last_ok < 1`). | < 1 | 10 min | Warning (`critical`) | 24 h |
 | PBS updates pending | More than twenty package updates are pending on the backup server (`dumbmonit_pbs_node_updates_pending`). | > 20 | 1 h | Info (`info`) | 7 d |
+| PBS prune job failed | The last run of a PBS prune job failed: nothing is pruned and the datastore keeps filling up (`dumbmonit_pbs_job_last_ok{kind="prune"} < 1`). The notification names the job and datastore. | < 1 | 10 min | Advisory (`warning`) | 24 h |
+| PBS verification job failed | The last run of a PBS verification job failed (`dumbmonit_pbs_job_last_ok{kind="verify"} < 1`). | < 1 | 10 min | Advisory (`warning`) | 24 h |
+| PBS garbage collection failed | The last garbage collection on a datastore failed (`dumbmonit_pbs_gc_last_run_ok < 1`; from `/gc` on PBS 3.3+, from the latest GC task before). | < 1 | 10 min | Advisory (`warning`) | 24 h |
+| PBS disk SMART failure | A disk of the backup server reports SMART health `FAILED` (`dumbmonit_pbs_node_disk_smart_failed`). The notification reads `/dev/sdb`. | > 0 | 5 min | Warning (`critical`) | 24 h |
+| PBS SSD worn out | An SSD of the backup server has used more than 90 % of its rated endurance (`dumbmonit_pbs_node_disk_wearout_percent`). | > 90 % | 1 h | Advisory (`warning`) | 7 d |
+| PBS ZFS pool degraded | A ZFS pool of the backup server is not `ONLINE` (`dumbmonit_pbs_node_zfs_pool_degraded`). | > 0 | 5 min | Warning (`critical`) | 6 h |
+| Synology disk SMART warning | DSM no longer reports this disk's SMART status as `normal` (`dumbmonit_synology_disk_smart_status`: 1 attention, 2 critical, unknown words count as 1). | > 0 | 15 min | Advisory (`warning`) | 24 h |
+| Synology disk failed | DSM reports the disk as crashed or failed (`dumbmonit_synology_disk_status`). | ≥ 2 | 5 min | Warning (`critical`) | 6 h |
+| Synology disk bad sectors | The disk's bad-sector count exceeds the threshold set in DSM (`dumbmonit_synology_disk_bad_sector_exceeded`). | > 0 | 15 min | Warning (`critical`) | 24 h |
+| Synology disk bad sectors growing | New unreadable sectors appeared in the last 24 hours (`delta(dumbmonit_synology_disk_unc_count[24h])`). | > 0 | 15 min | Advisory (`warning`) | 24 h |
+| Synology SSD wearing out | An SSD has less than 10 % of its rated life left (`dumbmonit_synology_disk_remaining_life_percent`); clears above 12 %. | < 10 % | 1 h | Advisory (`warning`) | 7 d |
+| Synology volume degraded | A volume is degraded or crashed: its redundancy is gone (`dumbmonit_synology_volume_status`). | ≥ 2 | 5 min | Warning (`critical`) | 6 h |
+| Synology volume almost full | A volume is 90 % full or more (`dumbmonit_synology_volume_used_percent`); clears below 88 %. | ≥ 90 % | 15 min | Advisory (`warning`), escalates after 24 h | 6 h |
+| Synology temperature high | A disk is above 55 °C, or DSM raised its own temperature warning (`dumbmonit_synology_disk_temperature_celsius`, `dumbmonit_synology_temperature_warning`); clears below 52 °C. | > 55 °C | 15 min | Advisory (`warning`) | 6 h |
+| Synology memory high | Memory usage of the NAS above 95 % (`dumbmonit_synology_memory_usage_percent`); clears below 90 %. | > 95 % | 15 min | Advisory (`warning`) | 6 h |
+| Active Backup device overdue | A device has gone longer without a successful Active Backup for Business run than its own rhythm allows, off-days excluded (`dumbmonit_abb_device_overdue`, see [Synology](../devices/synology.md#how-overdue-is-judged)). | > 0 | 30 min | Advisory (`warning`) | 24 h |
+| Active Backup device failing | The last two or more attempts of a device failed (`dumbmonit_abb_device_consecutive_failures`); a cancelled run counts as neither. | ≥ 2 | 10 min | Warning (`critical`) | 24 h |
 
 Every built-in rule applies to all devices and to every enabled channel.
 

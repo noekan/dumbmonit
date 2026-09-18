@@ -89,8 +89,14 @@ async fn run(config: Config) -> Result<()> {
         collectors::SnmpCollector::new().with_request_timeout(config.probe_timeout),
     ));
     registry.register(Arc::new(collectors::ProxmoxCollector::new()));
-    registry.register(Arc::new(collectors::PbsCollector::new()));
-    registry.register(Arc::new(collectors::SynologyCollector::new()));
+    registry.register(Arc::new(
+        collectors::PbsCollector::new()
+            .with_observer(collectors::pbs_history::sqlite_observer(pool.clone())),
+    ));
+    registry.register(Arc::new(
+        collectors::SynologyCollector::new()
+            .with_abb_history(collectors::synology_history::sqlite_history(pool.clone())),
+    ));
 
     // Machines équipées de l'agent : les mesures arrivent en push, ce collecteur ne
     // fait que constater leur fraîcheur.
@@ -120,10 +126,15 @@ async fn run(config: Config) -> Result<()> {
         .with_context(|| format!("cannot listen on {bind}"))?;
     info!(%bind, "interface available");
 
-    axum::serve(listener, api::router(state))
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("HTTP server error")?;
+    // `ConnectInfo` : l'adresse du client, pour les compteurs de tentatives et
+    // le journal d'audit (voir `auth::client_ip`).
+    axum::serve(
+        listener,
+        api::router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .context("HTTP server error")?;
 
     // VictoriaMetrics s'arrête après nous : les derniers lots du tampon d'écriture
     // ont ainsi une chance d'être acceptés.

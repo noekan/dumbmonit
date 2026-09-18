@@ -80,10 +80,30 @@ without a demonstrated impact.
   on a provider-verified email matching that account's username, and never to
   a password-holding admin: if you want an SSO admin, put its group in *Admin
   groups* rather than reusing the local admin's name.
+- Turn on two-factor authentication (Settings → Account & security) on every
+  password account, admins first. The TOTP secret is encrypted with the
+  instance secret; recovery codes are hashed and single-use; an admin can
+  reset a user's second factor from *Users*, which also signs that user out.
+- Login attempts are counted per client address and per account. Behind a
+  reverse proxy, set `DUMBMONIT_TRUSTED_PROXIES` to the proxy's address so
+  the counters and the security log see the real client; `X-Forwarded-For` is
+  ignored from anywhere else.
+- Every state-changing request authenticated by the session cookie must carry
+  `X-Requested-With: DumbMonit` (the web UI does), or same-origin fetch
+  metadata; a cross-site request is refused with `403`. Scripts that reuse a
+  browser cookie need that header — or better, an API token on `/api/mcp`.
 - Back up `/data/secret.key` with the database, and keep it out of your
   screenshots.
 - Prefer SNMP v3 on shared networks: a v2c community travels in clear text.
 - Give agent tokens one per machine so a leaked token can be revoked alone.
+- The container runs as an unprivileged user with no capability, a read-only
+  root file system and `no-new-privileges` — keep those lines when you adapt
+  the Compose file. ICMP ping goes through the `ping_group_range` sysctl, not
+  `NET_RAW`.
+- The install scripts verify the downloaded agent binary against the SHA-256
+  the server publishes at `/download/<file>.sha256`; the checksums are also
+  shown next to the install command so you can compare them by hand when the
+  server is reached over plain HTTP.
 - The embedded VictoriaMetrics has no authentication. It listens on the
   container's loopback by default; leave `DUMBMONIT_VM_LISTEN` alone unless
   you publish the port on purpose.

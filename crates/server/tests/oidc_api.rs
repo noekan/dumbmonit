@@ -124,6 +124,8 @@ async fn app_with_sso(provider: &Shared, adjust: impl FnOnce(&mut OidcConfig)) -
         };
         adjust(&mut oidc);
         config.oidc = OidcEnv { config: oidc.normalized() };
+        // Le fournisseur factice écoute en clair sur la boucle locale.
+        config.oidc_allow_http = true;
     })
     .await;
     app.create_admin().await;

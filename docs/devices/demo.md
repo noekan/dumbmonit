@@ -14,5 +14,5 @@ no option. The demo device produces a `cpu_usage_percent` series, so the
 or a child in a [dependency chain](../alerting/index.md#dependency-suppression)
 to see suppression at work.
 
-For real SNMP data without hardware, the development overlay ships a lab SNMP
-agent: see [Testing without hardware](../install/docker.md#testing-without-hardware).
+For real measurements without dedicated hardware, point an SNMP device at any
+machine running `snmpd`: see [Testing without hardware](../install/docker.md#testing-without-hardware).

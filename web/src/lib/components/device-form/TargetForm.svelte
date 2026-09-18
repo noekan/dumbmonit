@@ -14,19 +14,20 @@
 		createTarget,
 		updateTarget,
 		type CollectorInfo,
-		type CredentialKind,
+		type CredentialView,
 		type Target,
 		type TargetPayload
 	} from '$lib/api';
+	import { listRelays } from '$lib/api/relay';
+	import type { RelayAgent } from '$lib/api/types';
 	import { Button, ClickSpark, ErrorNotice, Field, Toggle } from '$lib/ui';
 	import CredentialFields from './CredentialFields.svelte';
 	import OptionsFields from './OptionsFields.svelte';
 	import TagsEditor from './TagsEditor.svelte';
 	import {
-		allowedKinds,
 		draftTouched,
 		emptyDraft,
-		kindFromLabel,
+		initialView,
 		toCredential,
 		validateCredential,
 		type CredentialDraft,
@@ -47,25 +48,34 @@
 	let { collector, target, targets = [], onsaved, cancelHref }: Props = $props();
 
 	const editing = $derived(target !== undefined);
-	const allowed = $derived(allowedKinds(collector.credential_types));
+	/** The credential families this kind accepts, field by field, from the server. */
+	const views = $derived(collector.credentials);
 
 	// --- Seed once from the target -------------------------------------------
-	const initialKind: CredentialKind = untrack(() => {
-		const first = allowedKinds(collector.credential_types)[0] ?? 'none';
-		return target ? kindFromLabel(target.credential_kind, first) : first;
-	});
+	const initialCredential: CredentialView = untrack(() => initialView(collector.credentials, target?.credential_kind));
 
 	let name = $state(untrack(() => target?.name ?? ''));
 	let address = $state(untrack(() => target?.address ?? ''));
 	let intervalSecs = $state(untrack(() => target?.interval_secs ?? DEFAULT_INTERVAL));
 	let parentId = $state<number | null>(untrack(() => target?.parent_id ?? null));
+	let viaAgent = $state<number | null>(untrack(() => target?.via_agent ?? null));
 	let enabled = $state(untrack(() => target?.enabled ?? true));
 	let tags = $state<Record<string, string>>(untrack(() => ({ ...(target?.tags ?? {}) })));
-	let credentialKind = $state<CredentialKind>(initialKind);
+	let credential = $state<CredentialView>(initialCredential);
 	// "public" is the factory community of nearly every device: pre-filled on add.
 	let draft = $state<CredentialDraft>(
-		untrack(() => ({ ...emptyDraft(), community: !target && initialKind === 'snmp_community' ? 'public' : '' }))
+		untrack(() => ({
+			...emptyDraft(initialCredential),
+			...(!target && initialCredential.kind === 'snmp_community' ? { community: 'public' } : {})
+		}))
 	);
+
+	function changeCredential(kind: string) {
+		const next = views.find((view) => view.kind === kind);
+		if (!next || next.kind === credential.kind) return;
+		credential = next;
+		draft = emptyDraft(next);
+	}
 
 	let touched = $state<Set<string>>(new Set());
 	let attempted = $state(false);
@@ -78,6 +88,7 @@
 			() =>
 				!!target &&
 				(target.parent_id !== null ||
+					target.via_agent !== null ||
 					target.interval_secs !== DEFAULT_INTERVAL ||
 					!target.enabled ||
 					Object.keys(target.tags).some((key) => !collector.options.some((o) => o.key === key)))
@@ -105,13 +116,13 @@
 	}
 
 	// --- Validation -----------------------------------------------------------
-	const credentialChanged = $derived(credentialKind !== initialKind || draftTouched(credentialKind, draft));
+	const credentialChanged = $derived(credential.kind !== initialCredential.kind || draftTouched(credential, draft));
 	/** On edit an untouched credential is simply not sent: the server keeps it. */
 	const sendCredential = $derived(!editing || credentialChanged);
 
 	const nameError = $derived(name.trim() ? null : 'Give this device a name.');
 	const addressError = $derived(address.trim() ? null : 'Enter the address to reach it.');
-	const credentialErrors = $derived<CredentialErrors>(sendCredential ? validateCredential(credentialKind, draft) : {});
+	const credentialErrors = $derived<CredentialErrors>(sendCredential ? validateCredential(credential, draft) : {});
 	const optionErrors = $derived.by(() => {
 		const errors: Record<string, string> = {};
 		for (const option of options) {
@@ -132,7 +143,7 @@
 	const shownCredentialErrors = $derived.by(() => {
 		const out: CredentialErrors = {};
 		for (const [field, message] of Object.entries(credentialErrors)) {
-			if (attempted || touched.has(`cred.${field}`)) out[field as keyof CredentialDraft] = message;
+			if (attempted || touched.has(`cred.${field}`)) out[field] = message;
 		}
 		return out;
 	});
@@ -151,6 +162,27 @@
 		targets.filter((t) => t.id !== target?.id).sort((a, b) => a.name.localeCompare(b.name))
 	);
 
+	// --- Reached through (relay agents) --------------------------------------
+	// Agents are not relays for themselves: their metrics are pushed, not probed.
+	const canRelay = $derived(collector.kind !== 'agent');
+	let relays = $state<RelayAgent[]>([]);
+	$effect(() => {
+		if (!canRelay) return;
+		const controller = new AbortController();
+		listRelays(controller.signal)
+			.then((list) => (relays = list.filter((r) => r.id !== target?.id)))
+			.catch(() => (relays = []));
+		return () => controller.abort();
+	});
+	const relayCandidates = $derived(relays);
+	/** The chosen relay, when it has not declared `relay: true`: probes would wait forever. */
+	const relayNotReady = $derived(
+		viaAgent !== null && relays.some((r) => r.id === viaAgent && !r.relay)
+	);
+	function relayLabel(relay: RelayAgent): string {
+		return relay.site ? `${relay.name} (site ${relay.site})` : relay.name;
+	}
+
 	function buildPayload(): TargetPayload {
 		const payload: TargetPayload = {
 			name: name.trim(),
@@ -159,12 +191,13 @@
 			// The profile is detected by the server; on edit the detected one is kept.
 			profile_id: target?.profile_id ?? null,
 			parent_id: parentId,
+			via_agent: canRelay ? viaAgent : null,
 			interval_secs: intervalSecs,
 			enabled,
 			// No empty tag: a blank setting means "server default".
 			tags: Object.fromEntries(Object.entries(tags).filter(([, v]) => v.trim()))
 		};
-		if (sendCredential) payload.credential = toCredential(credentialKind, draft);
+		if (sendCredential) payload.credential = toCredential(credential, draft);
 		return payload;
 	}
 
@@ -230,14 +263,14 @@
 		</Field>
 	</div>
 
-	{#if !(allowed.length === 1 && allowed[0] === 'none')}
+	{#if !(views.length <= 1 && credential.fields.length === 0)}
 		<CredentialFields
-			kind={credentialKind}
+			{views}
+			selected={credential}
 			bind:draft
-			{allowed}
 			{editing}
 			errors={shownCredentialErrors}
-			onkindchange={(kind) => (credentialKind = kind)}
+			onkindchange={changeCredential}
 			onblur={(field) => touch(`cred.${field}`)}
 		/>
 	{/if}
@@ -293,6 +326,26 @@
 						{/each}
 					</select>
 				</Field>
+
+				{#if canRelay && (relayCandidates.length > 0 || viaAgent !== null)}
+					<Field
+						label="Reached through"
+						for="target-relay"
+						help={relayNotReady
+							? 'This agent has not enabled relay mode (relay: true): probes sent to it will time out until it does.'
+							: 'Direct: the server probes the device. An agent: the agent probes it from its own network and reports back — for devices on another site.'}
+					>
+						<select id="target-relay" class="input" bind:value={viaAgent}>
+							<option value={null}>Direct</option>
+							{#each relayCandidates as relay (relay.id)}
+								<option value={relay.id}>{relayLabel(relay)}{relay.relay ? '' : ' — relay off'}</option>
+							{/each}
+							{#if viaAgent !== null && !relayCandidates.some((r) => r.id === viaAgent)}
+								<option value={viaAgent}>Agent #{viaAgent}</option>
+							{/if}
+						</select>
+					</Field>
+				{/if}
 			</div>
 
 			<TagsEditor tags={freeTags} reserved={optionKeys} onchange={setFreeTags} />

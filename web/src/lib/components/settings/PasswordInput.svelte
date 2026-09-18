@@ -17,6 +17,9 @@
 		invalid?: boolean;
 		class?: string;
 		oninput?: (value: string) => void;
+		onblur?: () => void;
+		/** Intercept a paste (to clean it up); call `preventDefault` to replace it. */
+		onpaste?: (event: ClipboardEvent) => void;
 	}
 
 	let {
@@ -29,7 +32,9 @@
 		autofocus = false,
 		invalid = false,
 		class: className = '',
-		oninput
+		oninput,
+		onblur,
+		onpaste
 	}: Props = $props();
 
 	let shown = $state(false);
@@ -50,6 +55,8 @@
 		aria-invalid={invalid ? 'true' : undefined}
 		bind:value
 		oninput={() => oninput?.(value)}
+		{onblur}
+		{onpaste}
 	/>
 	<button
 		type="button"

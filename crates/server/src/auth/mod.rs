@@ -16,6 +16,8 @@
 //!   son écran de création, et refuser l'accès avant qu'un compte existe ne
 //!   protégerait rien.
 
+pub mod audit;
+pub mod client_ip;
 pub mod cookie;
 pub mod middleware;
 pub mod oidc;
@@ -24,6 +26,8 @@ pub mod rate_limit;
 pub mod session;
 pub mod settings;
 pub mod token;
+pub mod totp;
+pub mod totp_login;
 pub mod users;
 
 /// Réinitialise l'instance : plus aucun compte, plus aucune session.
@@ -44,7 +48,7 @@ use serde_json::json;
 use sqlx::SqlitePool;
 use tokio::sync::Mutex;
 
-use crate::auth::rate_limit::RateLimiter;
+use crate::auth::rate_limit::Buckets;
 
 /// Variable d'environnement pilotant l'attribut `Secure` du cookie de session.
 ///
@@ -72,7 +76,11 @@ struct Inner {
     configured: AtomicU8,
     /// La purge des sessions expirées n'a été faite qu'une fois par processus.
     purged: AtomicBool,
-    limiter: Mutex<RateLimiter>,
+    limiter: Mutex<Buckets>,
+    /// Mandataires dont on croit `X-Forwarded-For` (voir [`client_ip`]).
+    trusted_proxies: Vec<ipnet::IpNet>,
+    /// Connexions à mi-chemin : mot de passe accepté, second facteur attendu.
+    pending_totp: Mutex<totp_login::PendingLogins>,
     /// Client HTTP vers le fournisseur OIDC (découverte, JWKS, échange du code).
     http: reqwest::Client,
     /// Document de découverte et clés du fournisseur, mis en cache.
@@ -89,9 +97,16 @@ mod configured {
 }
 
 impl AuthState {
-    /// Construit l'état à partir de l'environnement.
-    pub fn from_env() -> Self {
-        Self::new(env_flag(COOKIE_SECURE_ENV))
+    /// Construit l'état à partir de l'environnement et de la configuration.
+    pub fn from_env(config: &crate::config::Config) -> Self {
+        Self::new(env_flag(COOKIE_SECURE_ENV)).with_trusted_proxies(config.trusted_proxies.clone())
+    }
+
+    pub fn with_trusted_proxies(mut self, trusted: Vec<ipnet::IpNet>) -> Self {
+        Arc::get_mut(&mut self.0)
+            .expect("état d'authentification pas encore partagé")
+            .trusted_proxies = trusted;
+        self
     }
 
     pub fn new(cookie_secure: bool) -> Self {
@@ -104,7 +119,9 @@ impl AuthState {
             cookie_secure,
             configured: AtomicU8::new(configured::UNKNOWN),
             purged: AtomicBool::new(false),
-            limiter: Mutex::new(RateLimiter::new()),
+            limiter: Mutex::new(Buckets::new()),
+            trusted_proxies: Vec::new(),
+            pending_totp: Mutex::new(totp_login::PendingLogins::default()),
             http,
             discovery: Mutex::new(None),
             pending: Mutex::new(oidc::flow::PendingLogins::default()),
@@ -115,8 +132,16 @@ impl AuthState {
         self.0.cookie_secure
     }
 
-    pub fn limiter(&self) -> &Mutex<RateLimiter> {
+    pub fn limiter(&self) -> &Mutex<Buckets> {
         &self.0.limiter
+    }
+
+    pub fn trusted_proxies(&self) -> &[ipnet::IpNet] {
+        &self.0.trusted_proxies
+    }
+
+    pub fn pending_totp(&self) -> &Mutex<totp_login::PendingLogins> {
+        &self.0.pending_totp
     }
 
     pub fn http(&self) -> &reqwest::Client {

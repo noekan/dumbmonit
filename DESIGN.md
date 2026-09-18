@@ -40,6 +40,7 @@ Radii: 14px panels and faceplates (`--radius-card`), 8px controls, 6px plates. S
 
 ## Composition rules
 
+- Navigation (September 2026): Overview · Devices · Alerts · Status · Settings — five text links on desktop, five tabs on phones. Alerts holds everything about alerting, notification channels and policy included (tab "Notifications"); Status holds the public status pages and their announcements (`/status`, editor at `/status/[id]`); Settings keeps only what is administrative (account, users, single sign-on, agent and assistant tokens, appearance, about), with a rail on desktop and a chip strip on phones. Old `/settings#…` anchors forward to the new place.
 - Overview: bulletin band (sentence + plate row + readouts left, weather window + the single primary right) → "Needs you" full width → one-line devices summary → "Forecasts" (7/12) + "Last 24 hours" (5/12, firing transitions only). No device list on the overview: the rack lives on /targets. Mobile stacks; the top bar becomes a bottom tab bar.
 - Adding anything: pick a type → the picker folds into one row → the form shows only that type's fields, advanced ones behind "More options"; the setup notice sits on the right.
 - One authored motion per page (entrance stagger via `.rise-in`, or the sentence/figures on the overview); hover lifts 1px; nothing else moves. `prefers-reduced-motion` freezes everything.

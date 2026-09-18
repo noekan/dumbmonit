@@ -258,7 +258,7 @@ const TARGET_LABELS: [&str; 7] =
 
 /// Étiquettes qui nomment le mieux une série, par ordre de préférence. Une VM
 /// se reconnaît à son nom, une sauvegarde à son groupe, un port à son nom.
-const IDENTITY_LABELS: [&str; 24] = [
+const IDENTITY_LABELS: [&str; 25] = [
     "name",
     "container",
     "service",
@@ -283,6 +283,8 @@ const IDENTITY_LABELS: [&str; 24] = [
     "process",
     "unit",
     "core",
+    // Résumé des paquets changés d'un nœud Proxmox : « pve1 · pve-manager 8.2.4→8.2.7 ».
+    "changes",
 ];
 
 /// Nombre maximal de valeurs d'étiquettes citées pour nommer une série.

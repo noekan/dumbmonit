@@ -12,6 +12,7 @@ mod collect;
 mod commands;
 mod config;
 mod identity;
+mod relay;
 mod run;
 mod shutdown;
 #[cfg(windows)]
@@ -157,6 +158,7 @@ ENVIRONMENT VARIABLES (override the file):
     DUMBMONIT_AGENT_DOCKER           Container inventory (true/false)
     DUMBMONIT_AGENT_DOCKER_UPDATE_CHECK  Compare images with their registry (true/false)
     DUMBMONIT_AGENT_COMMANDS         Accept container actions from the server (true/false)
+    DUMBMONIT_AGENT_PLAKAR           Watch Plakar backups when detected (true/false, default true)
     DUMBMONIT_AGENT_PLAKAR_KLOSETS   Plakar klosets to watch, comma-separated (default: discovered)
     DUMBMONIT_AGENT_PLAKAR_BIN       Path to the plakar binary (default: plakar on PATH)
     DUMBMONIT_AGENT_PLAKAR_HOME      HOME used when running plakar

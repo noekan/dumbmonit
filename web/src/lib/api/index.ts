@@ -32,6 +32,7 @@ import type {
 	OidcTestReport,
 	UpdateUserPayload,
 	User,
+	LoginOutcome,
 	CollectorInfo,
 	DiscoveredDevice,
 	DiscoveryResult,
@@ -370,11 +371,26 @@ export function setupAccount(username: string, password: string): Promise<void> 
 	});
 }
 
-/** Opens a session. The cookie set by the server is `HttpOnly`: the interface never reads it. */
-export function login(username: string, password: string): Promise<void> {
-	return request<void>('/auth/login', {
+/**
+ * Opens a session. The cookie set by the server is `HttpOnly`: the interface
+ * never reads it. When the account has two-factor authentication, the server
+ * answers `200 { totp_required: true, pending }` instead of `204`: the session
+ * is only opened by `loginTotp`.
+ */
+export async function login(username: string, password: string): Promise<LoginOutcome> {
+	const reply = await request<{ totp_required?: boolean; pending?: string } | undefined>('/auth/login', {
 		method: 'POST',
 		body: { username, password },
+		allowUnauthorized: true
+	});
+	return { totp_required: Boolean(reply?.totp_required), pending: reply?.pending ?? null };
+}
+
+/** Second step of the sign-in: a six-digit code or a recovery code. */
+export function loginTotp(pending: string, code: string): Promise<void> {
+	return request<void>('/auth/login/totp', {
+		method: 'POST',
+		body: { pending, code },
 		allowUnauthorized: true
 	});
 }
@@ -548,6 +564,10 @@ export function deleteRuleOverride(ruleId: number, targetId: TargetId): Promise<
 
 export function listStatusPages(signal?: AbortSignal): Promise<StatusPage[]> {
 	return request<StatusPage[]>('/status-pages', { signal });
+}
+
+export function getStatusPage(id: number, signal?: AbortSignal): Promise<StatusPage> {
+	return request<StatusPage>(`/status-pages/${id}`, { signal });
 }
 
 export function createStatusPage(payload: StatusPagePayload): Promise<StatusPage> {

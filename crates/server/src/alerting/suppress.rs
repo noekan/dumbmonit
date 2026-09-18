@@ -16,20 +16,38 @@ use crate::alerting::model::{TargetId, TargetNode};
 const MAX_DEPTH: usize = 64;
 
 /// Index de filiation, construit une fois par cycle.
+///
+/// Une cible a jusqu'à deux ascendants directs : son parent déclaré, et l'agent
+/// relais qui l'interroge — si ce dernier tombe, l'équipement n'est plus observé,
+/// et ses alertes n'ont pas plus de sens que derrière un routeur éteint.
 pub struct Topology {
-    parents: HashMap<TargetId, Option<TargetId>>,
+    parents: HashMap<TargetId, Vec<TargetId>>,
 }
 
 impl Topology {
     pub fn new(targets: &[TargetNode]) -> Self {
-        Self { parents: targets.iter().map(|t| (t.id, t.parent_id)).collect() }
+        Self {
+            parents: targets
+                .iter()
+                .map(|t| {
+                    let mut up: Vec<TargetId> = t.parent_id.into_iter().collect();
+                    if let Some(relay) = t.via_agent
+                        && !up.contains(&relay)
+                    {
+                        up.push(relay);
+                    }
+                    (t.id, up)
+                })
+                .collect(),
+        }
     }
 
     /// Premier ancêtre strict présent dans `down`, en remontant la filiation.
     ///
     /// Renvoie l'ancêtre le plus proche, et non la racine : c'est lui qui explique
     /// le mieux la panne à l'utilisateur (« derrière le switch d'étage », pas
-    /// « derrière la box »).
+    /// « derrière la box »). À distance égale, le parent déclaré passe avant le
+    /// relais.
     ///
     /// Un cycle dans les données — que la base autorise, `parent_id` n'étant qu'une
     /// clé étrangère vers la même table — ne fait jamais boucler : chaque nœud n'est
@@ -42,17 +60,26 @@ impl Topology {
         let mut visited = HashSet::new();
         visited.insert(target);
 
-        let mut current = *self.parents.get(&target)?;
+        // Parcours en largeur : la génération courante, puis la suivante.
+        let mut generation: Vec<TargetId> = self.parents.get(&target)?.clone();
         for _ in 0..MAX_DEPTH {
-            let parent = current?;
-            if !visited.insert(parent) {
-                // Cycle : on a déjà vu ce nœud, la remontée ne mènera nulle part.
+            if generation.is_empty() {
                 return None;
             }
-            if down.contains(&parent) {
-                return Some(parent);
+            let mut next = Vec::new();
+            for ancestor in generation {
+                if !visited.insert(ancestor) {
+                    // Déjà vu (cycle ou ascendant commun) : rien de neuf par là.
+                    continue;
+                }
+                if down.contains(&ancestor) {
+                    return Some(ancestor);
+                }
+                if let Some(up) = self.parents.get(&ancestor) {
+                    next.extend(up.iter().copied());
+                }
             }
-            current = self.parents.get(&parent).copied().flatten();
+            generation = next;
         }
         None
     }
@@ -116,6 +143,7 @@ mod tests {
             name: format!("device-{id}"),
             address: format!("10.0.0.{id}"),
             parent_id: parent,
+            via_agent: None,
             tags: BTreeMap::new(),
             enabled: true,
         }
@@ -128,6 +156,22 @@ mod tests {
 
     fn down(ids: &[TargetId]) -> HashSet<TargetId> {
         ids.iter().copied().collect()
+    }
+
+    #[test]
+    fn le_relais_tombe_supprime_les_cibles_qu_il_interroge() {
+        // agent(9) interroge nas(3) ; switch(2) est son parent déclaré.
+        let mut relayed = node(3, Some(2));
+        relayed.via_agent = Some(9);
+        let topo = Topology::new(&[node(2, None), node(9, None), relayed, node(4, Some(3))]);
+
+        assert_eq!(topo.first_ancestor_down(3, &down(&[9])), Some(9));
+        // Le parent déclaré garde son rôle, et passe devant à distance égale.
+        assert_eq!(topo.first_ancestor_down(3, &down(&[2])), Some(2));
+        assert_eq!(topo.first_ancestor_down(3, &down(&[2, 9])), Some(2));
+        // La descendance de la cible relayée est couverte aussi.
+        assert_eq!(topo.first_ancestor_down(4, &down(&[9])), Some(9));
+        assert_eq!(topo.first_ancestor_down(3, &down(&[])), None);
     }
 
     #[test]

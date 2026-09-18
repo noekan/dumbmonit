@@ -42,7 +42,7 @@ pub struct Rejection {
 }
 
 impl Rejection {
-    fn not_found(message: &str) -> Self {
+    pub fn not_found(message: &str) -> Self {
         Self { status: StatusCode::NOT_FOUND, message: message.to_string() }
     }
 }
@@ -162,11 +162,17 @@ pub struct AgentHostView {
     /// antérieur au canal, ou configuré avec `commands: false`, donne faux : les
     /// boutons Restart/Update n'ont alors aucun sens.
     pub commands_supported: bool,
+    /// Vrai si l'agent a déclaré relayer des sondes (`relay: true`).
+    pub relay: bool,
+    /// Site déclaré par l'agent.
+    pub site: Option<String>,
+    /// Nombre d'équipements interrogés à travers cet agent (`via_agent`).
+    pub relayed: usize,
     pub last_seen_at: Option<String>,
 }
 
-impl From<agent::HostInfo> for AgentHostView {
-    fn from(info: agent::HostInfo) -> Self {
+impl AgentHostView {
+    fn new(info: agent::HostInfo, relayed: usize) -> Self {
         Self {
             commands_supported: info.commands_supported(),
             hostname: info.hostname,
@@ -174,6 +180,9 @@ impl From<agent::HostInfo> for AgentHostView {
             os_version: info.os_version,
             arch: info.arch,
             agent_version: info.agent_version,
+            relay: info.relay,
+            site: info.site,
+            relayed,
             last_seen_at: info.last_seen_at,
         }
     }
@@ -522,7 +531,8 @@ async fn agent_host(
     let info = agent::host(&state.pool, id)
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("No agent has reported for device {id} yet.")))?;
-    Ok(Json(info.into()))
+    let relayed = db::targets::relayed_counts(&state.pool).await?.get(&id).copied().unwrap_or(0);
+    Ok(Json(AgentHostView::new(info, relayed)))
 }
 
 #[cfg(test)]
@@ -607,7 +617,7 @@ mod tests {
 
     #[test]
     fn container_names_are_checked_before_reaching_the_agent() {
-        assert!(validate_name("lab-victim").is_ok());
+        assert!(validate_name("nginx-victim").is_ok());
         assert!(validate_name("web_1.0").is_ok());
         assert!(validate_name("").is_err());
         assert!(validate_name("-web").is_err());

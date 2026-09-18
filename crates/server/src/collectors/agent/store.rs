@@ -144,6 +144,7 @@ pub async fn register(
                 kind: "agent".to_string(),
                 profile_id: None,
                 parent_id: None,
+                via_agent: None,
                 interval: std::time::Duration::from_secs(DEFAULT_INTERVAL_SECS),
                 enabled: true,
                 tags: identity.tags.clone(),
@@ -178,8 +179,8 @@ async fn insert_host(
     sqlx::query(
         "INSERT INTO agent_hosts
              (target_id, agent_key, hostname, os, os_version, kernel_version, arch,
-              agent_version, commands_enabled, token_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              agent_version, commands_enabled, relay, site, token_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(target_id)
     .bind(key)
@@ -190,6 +191,8 @@ async fn insert_host(
     .bind(&identity.arch)
     .bind(&identity.agent_version)
     .bind(identity.commands_enabled)
+    .bind(i64::from(identity.relay))
+    .bind(site_of(identity))
     .bind(token_id)
     .execute(pool)
     .await
@@ -209,7 +212,7 @@ async fn update_host(
     sqlx::query(
         "UPDATE agent_hosts
          SET hostname = ?, os = ?, os_version = ?, kernel_version = ?, arch = ?,
-             agent_version = ?, commands_enabled = ?
+             agent_version = ?, commands_enabled = ?, relay = ?, site = ?
          WHERE target_id = ?",
     )
     .bind(&identity.hostname)
@@ -219,11 +222,18 @@ async fn update_host(
     .bind(&identity.arch)
     .bind(&identity.agent_version)
     .bind(identity.commands_enabled)
+    .bind(i64::from(identity.relay))
+    .bind(site_of(identity))
     .bind(target_id)
     .execute(pool)
     .await
     .context("updating the machine")?;
     Ok(())
+}
+
+/// Site déclaré par l'agent, vidé de ses blancs ; `None` s'il n'en dit rien.
+fn site_of(identity: &AgentIdentity) -> Option<String> {
+    identity.site.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
 }
 
 /// Note la réception d'un lot. C'est cette trace que le collecteur relit pour
@@ -262,6 +272,10 @@ pub struct HostInfo {
     /// commandes). Il ne viendra pas chercher de commande, pas plus qu'avec
     /// `Some(false)`.
     pub commands_enabled: Option<bool>,
+    /// Vrai si l'agent a déclaré relayer des sondes (`relay: true`).
+    pub relay: bool,
+    /// Site déclaré par l'agent, s'il en a un.
+    pub site: Option<String>,
     pub last_seen_at: Option<String>,
 }
 
@@ -276,25 +290,46 @@ impl HostInfo {
 /// Description de la machine rattachée à une cible, si un agent s'y est présenté.
 pub async fn host(pool: &SqlitePool, target_id: TargetId) -> Result<Option<HostInfo>> {
     let row = sqlx::query(
-        "SELECT hostname, os, os_version, arch, agent_version, commands_enabled, last_seen_at
+        "SELECT hostname, os, os_version, arch, agent_version, commands_enabled, relay, site,
+                last_seen_at
          FROM agent_hosts WHERE target_id = ?",
     )
     .bind(target_id)
     .fetch_optional(pool)
     .await
     .context("reading the machine")?;
-    row.map(|row| {
-        Ok(HostInfo {
-            hostname: row.try_get("hostname")?,
-            os: row.try_get("os")?,
-            os_version: row.try_get("os_version")?,
-            arch: row.try_get("arch")?,
-            agent_version: row.try_get("agent_version")?,
-            commands_enabled: row.try_get::<Option<i64>, _>("commands_enabled")?.map(|v| v != 0),
-            last_seen_at: row.try_get("last_seen_at")?,
-        })
+    row.map(|row| row_to_host(&row)).transpose()
+}
+
+/// Toutes les machines à agent, avec le nom de leur cible : c'est ce que le
+/// formulaire d'équipement propose comme relais possibles.
+pub async fn list_hosts(pool: &SqlitePool) -> Result<Vec<(TargetId, String, HostInfo)>> {
+    let rows = sqlx::query(
+        "SELECT h.target_id, t.name, h.hostname, h.os, h.os_version, h.arch, h.agent_version,
+                h.commands_enabled, h.relay, h.site, h.last_seen_at
+         FROM agent_hosts h JOIN targets t ON t.id = h.target_id
+         ORDER BY t.name",
+    )
+    .fetch_all(pool)
+    .await
+    .context("listing the machines")?;
+    rows.iter()
+        .map(|row| Ok((row.try_get("target_id")?, row.try_get("name")?, row_to_host(row)?)))
+        .collect()
+}
+
+fn row_to_host(row: &sqlx::sqlite::SqliteRow) -> Result<HostInfo> {
+    Ok(HostInfo {
+        hostname: row.try_get("hostname")?,
+        os: row.try_get("os")?,
+        os_version: row.try_get("os_version")?,
+        arch: row.try_get("arch")?,
+        agent_version: row.try_get("agent_version")?,
+        commands_enabled: row.try_get::<Option<i64>, _>("commands_enabled")?.map(|v| v != 0),
+        relay: row.try_get::<i64, _>("relay")? != 0,
+        site: row.try_get("site")?,
+        last_seen_at: row.try_get("last_seen_at")?,
     })
-    .transpose()
 }
 
 /// Instant du dernier lot reçu, en millisecondes depuis l'époque Unix.
@@ -350,6 +385,8 @@ mod tests {
             arch: Some("x86_64".into()),
             agent_version: "0.1.0".into(),
             commands_enabled: Some(true),
+            relay: false,
+            site: None,
             machine_id: machine_id.map(str::to_string),
             tags: BTreeMap::new(),
         }
@@ -550,6 +587,7 @@ mod tests {
                 kind: "agent".into(),
                 profile_id: None,
                 parent_id: None,
+                via_agent: None,
                 interval: std::time::Duration::from_secs(60),
                 enabled: true,
                 tags: BTreeMap::new(),

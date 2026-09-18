@@ -1,24 +1,16 @@
-# Development overlay: adds a lab SNMP agent and exposes the embedded
-# VictoriaMetrics, so collection can be tested without hardware.
+# Developer overlay: publishes the embedded VictoriaMetrics on the host, so
+# MetricsQL can be queried directly while debugging.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-#
-# Then add a device of type SNMP with address `snmp-lab` and community `public`:
-# the profile is detected on its own and the graphs fill up.
+#   curl -s 'localhost:8428/api/v1/query?query=dumbmonit_up'
 
 services:
-  snmp-lab:
-    image: polinux/snmpd
-    hostname: snmp-lab
-    volumes:
-      - ./docker/snmpd-lab.conf:/etc/snmp/snmpd.conf:ro
-    restart: unless-stopped
-
   dumbmonit:
     environment:
       # The embedded VictoriaMetrics listens on the loopback by default; open it
       # inside the container so the port below reaches it.
       DUMBMONIT_VM_LISTEN: 0.0.0.0:8428
     ports:
-      # Handy for querying MetricsQL directly while debugging.
-      - "${DUMBMONIT_VM_PORT:-8428}:8428"
+      # Loopback only: the embedded VictoriaMetrics has no authentication, and
+      # its admin API (series deletion) must not be reachable from the LAN.
+      - "127.0.0.1:${DUMBMONIT_VM_PORT:-8428}:8428"

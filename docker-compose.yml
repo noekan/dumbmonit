@@ -17,6 +17,14 @@ services:
       - "${DUMBMONIT_PORT:-8080}:8080"
     volumes:
       # SQLite database, instance secret and the time series (/data/vm).
+      #
+      # The server runs as user 65532 (not root). A named volume created by
+      # Docker inherits that owner from the image: nothing to do. A bind mount
+      # (`./data:/data`) or a volume created before this change must be handed
+      # over once:
+      #   docker run --rm -v dumbmonit-data:/data alpine chown -R 65532:65532 /data
+      # or, to keep the files as they are, run the container as their owner
+      # with `user: "1000:1000"` (any uid works: the image has no /etc/passwd).
       - dumbmonit-data:/data
     environment:
       # Uncomment to set the secret yourself instead of letting DumbMonit
@@ -34,9 +42,20 @@ services:
       DUMBMONIT_VM_MEMORY: ${DUMBMONIT_VM_MEMORY:-256MB}
       # External VictoriaMetrics instead of the embedded one:
       # DUMBMONIT_VM_URL: http://victoriametrics:8428
-    # Only needed for "ping" (ICMP) monitors:
-    # cap_add:
-    #   - NET_RAW
+    # Least privilege: no capability at all, no privilege escalation, and the
+    # image's file system read-only — /data (volume) and /tmp (tmpfs) are the
+    # only writable places. ICMP "ping" monitors need no capability either: the
+    # sysctl below lets the (unprivileged) server open ICMP echo sockets inside
+    # the container's own network namespace. Remove it if you never use ping.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    sysctls:
+      net.ipv4.ping_group_range: "0 2147483647"
     # The server stops VictoriaMetrics after itself: leave it the time to do so.
     stop_grace_period: 30s
     restart: unless-stopped

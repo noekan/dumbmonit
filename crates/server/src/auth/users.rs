@@ -52,6 +52,10 @@ pub struct User {
     pub created_at: String,
     pub last_login_at: Option<String>,
     pub disabled: bool,
+    /// Secret TOTP chiffré, `None` sans enrôlement (voir [`crate::auth::totp`]).
+    pub totp_secret: Option<Vec<u8>>,
+    /// Second facteur exigé à la connexion : l'enrôlement a été confirmé.
+    pub totp_enabled: bool,
 }
 
 impl User {
@@ -80,6 +84,8 @@ fn read(row: SqliteRow) -> Result<User> {
         created_at: row.try_get("created_at")?,
         last_login_at: row.try_get("last_login_at")?,
         disabled: row.try_get::<i64, _>("disabled")? != 0,
+        totp_secret: row.try_get("totp_secret")?,
+        totp_enabled: row.try_get::<i64, _>("totp_enabled")? != 0,
     })
 }
 
@@ -94,7 +100,7 @@ pub async fn count(pool: &SqlitePool) -> Result<i64> {
 pub async fn list(pool: &SqlitePool) -> Result<Vec<User>> {
     let rows = sqlx::query(
         "SELECT id, username, display_name, role, password_hash, oidc_subject, oidc_issuer,
-                created_at, last_login_at, disabled
+                created_at, last_login_at, disabled, totp_secret, totp_enabled
          FROM users ORDER BY username COLLATE NOCASE",
     )
     .fetch_all(pool)
@@ -106,7 +112,7 @@ pub async fn list(pool: &SqlitePool) -> Result<Vec<User>> {
 pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<User>> {
     let row = sqlx::query(
         "SELECT id, username, display_name, role, password_hash, oidc_subject, oidc_issuer,
-                created_at, last_login_at, disabled
+                created_at, last_login_at, disabled, totp_secret, totp_enabled
          FROM users WHERE id = ?",
     )
     .bind(id)
@@ -119,7 +125,7 @@ pub async fn get(pool: &SqlitePool, id: i64) -> Result<Option<User>> {
 pub async fn by_username(pool: &SqlitePool, username: &str) -> Result<Option<User>> {
     let row = sqlx::query(
         "SELECT id, username, display_name, role, password_hash, oidc_subject, oidc_issuer,
-                created_at, last_login_at, disabled
+                created_at, last_login_at, disabled, totp_secret, totp_enabled
          FROM users WHERE username = ?",
     )
     .bind(username)
@@ -132,7 +138,7 @@ pub async fn by_username(pool: &SqlitePool, username: &str) -> Result<Option<Use
 pub async fn by_oidc(pool: &SqlitePool, issuer: &str, subject: &str) -> Result<Option<User>> {
     let row = sqlx::query(
         "SELECT id, username, display_name, role, password_hash, oidc_subject, oidc_issuer,
-                created_at, last_login_at, disabled
+                created_at, last_login_at, disabled, totp_secret, totp_enabled
          FROM users WHERE oidc_issuer = ? AND oidc_subject = ?",
     )
     .bind(issuer)
@@ -148,7 +154,7 @@ pub async fn by_oidc(pool: &SqlitePool, issuer: &str, subject: &str) -> Result<O
 pub async fn sole_password_user(pool: &SqlitePool) -> Result<Option<User>> {
     let rows = sqlx::query(
         "SELECT id, username, display_name, role, password_hash, oidc_subject, oidc_issuer,
-                created_at, last_login_at, disabled
+                created_at, last_login_at, disabled, totp_secret, totp_enabled
          FROM users WHERE password_hash IS NOT NULL LIMIT 2",
     )
     .fetch_all(pool)
@@ -263,6 +269,95 @@ pub async fn link_oidc(pool: &SqlitePool, id: i64, issuer: &str, subject: &str) 
         .await
         .context("rattachement de l'identité OIDC")?;
     Ok(())
+}
+
+/// Dépose un secret TOTP chiffré, en attente de confirmation : le second
+/// facteur n'est pas encore exigé.
+pub async fn set_totp_pending(pool: &SqlitePool, id: i64, secret: &[u8]) -> Result<()> {
+    sqlx::query("UPDATE users SET totp_secret = ?, totp_enabled = 0 WHERE id = ?")
+        .bind(secret)
+        .bind(id)
+        .execute(pool)
+        .await
+        .context("enrôlement du second facteur")?;
+    Ok(())
+}
+
+/// Confirme l'enrôlement : le second facteur est désormais exigé.
+pub async fn set_totp_enabled(pool: &SqlitePool, id: i64) -> Result<()> {
+    sqlx::query("UPDATE users SET totp_enabled = 1 WHERE id = ? AND totp_secret IS NOT NULL")
+        .bind(id)
+        .execute(pool)
+        .await
+        .context("activation du second facteur")?;
+    Ok(())
+}
+
+/// Retire le second facteur, secret et codes de secours compris.
+pub async fn clear_totp(pool: &SqlitePool, id: i64) -> Result<()> {
+    let mut tx = pool.begin().await.context("ouverture de la transaction")?;
+    sqlx::query("UPDATE users SET totp_secret = NULL, totp_enabled = 0 WHERE id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM totp_recovery_codes WHERE user_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await.context("désactivation du second facteur")?;
+    Ok(())
+}
+
+/// Remplace les codes de secours d'un compte par un nouveau jeu d'empreintes.
+pub async fn replace_recovery_codes(pool: &SqlitePool, id: i64, hashes: &[Vec<u8>]) -> Result<()> {
+    let mut tx = pool.begin().await.context("ouverture de la transaction")?;
+    sqlx::query("DELETE FROM totp_recovery_codes WHERE user_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    for hash in hashes {
+        sqlx::query("INSERT INTO totp_recovery_codes (user_id, code_hash) VALUES (?, ?)")
+            .bind(id)
+            .bind(hash)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await.context("enregistrement des codes de secours")?;
+    Ok(())
+}
+
+/// Consomme un code de secours s'il est inutilisé : `true` quand il a servi.
+///
+/// La condition est dans la requête : deux connexions simultanées avec le même
+/// code ne peuvent pas passer toutes les deux.
+pub async fn consume_recovery_code(pool: &SqlitePool, id: i64, hash: &[u8]) -> Result<bool> {
+    let result = sqlx::query(
+        "UPDATE totp_recovery_codes
+         SET used_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+         WHERE id = (
+             SELECT id FROM totp_recovery_codes
+             WHERE user_id = ? AND code_hash = ? AND used_at IS NULL
+             LIMIT 1
+         )",
+    )
+    .bind(id)
+    .bind(hash)
+    .execute(pool)
+    .await
+    .context("consommation d'un code de secours")?;
+    Ok(result.rows_affected() == 1)
+}
+
+/// Nombre de codes de secours encore utilisables.
+pub async fn recovery_codes_left(pool: &SqlitePool, id: i64) -> Result<i64> {
+    let row = sqlx::query(
+        "SELECT COUNT(*) AS n FROM totp_recovery_codes WHERE user_id = ? AND used_at IS NULL",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .context("comptage des codes de secours")?;
+    Ok(row.try_get("n")?)
 }
 
 pub async fn touch_login(pool: &SqlitePool, id: i64) -> Result<()> {

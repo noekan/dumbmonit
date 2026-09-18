@@ -19,6 +19,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::api::{ApiError, ApiResult};
+use crate::auth::audit;
+use crate::auth::client_ip::ClientIp;
+use crate::auth::middleware::Authenticated;
 use crate::collectors::agent;
 use crate::state::AppState;
 
@@ -135,6 +138,8 @@ pub async fn list_tokens(State(state): State<AppState>) -> ApiResult<Json<Vec<To
 
 pub async fn create_token(
     State(state): State<AppState>,
+    Authenticated(me): Authenticated,
+    ClientIp(ip): ClientIp,
     Json(payload): Json<TokenPayload>,
 ) -> ApiResult<(StatusCode, Json<CreatedToken>)> {
     let name = payload.name.trim().to_string();
@@ -143,6 +148,7 @@ pub async fn create_token(
     }
 
     let (record, secret) = agent::create_token(&state.pool, &name).await?;
+    audit::record(&state.pool, Some(&me.username), "agent_token.created", Some(&name), ip).await;
     let base_url = normalise_base_url(payload.base_url.as_deref(), state.config.bind);
 
     Ok((
@@ -158,9 +164,14 @@ pub async fn create_token(
 
 pub async fn revoke_token(
     State(state): State<AppState>,
+    Authenticated(me): Authenticated,
+    ClientIp(ip): ClientIp,
     Path(id): Path<i64>,
 ) -> ApiResult<StatusCode> {
     if agent::revoke_token(&state.pool, id).await? {
+        let subject = id.to_string();
+        audit::record(&state.pool, Some(&me.username), "agent_token.revoked", Some(&subject), ip)
+            .await;
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::NotFound(format!("Token {id} not found or already revoked.")))

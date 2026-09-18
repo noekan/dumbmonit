@@ -13,7 +13,7 @@ makes an availability percentage possible: `avg_over_time(dumbmonit_probe_succes
 
 | Situation | What happens |
 |---|---|
-| Invalid option or address, missing `NET_RAW` capability | Configuration error: nothing is written, the device page shows the error, no "down" alert. |
+| Invalid option or address, ICMP sockets not allowed (see Ping) | Configuration error: nothing is written, the device page shows the error, no "down" alert. |
 | Connection refused, timeout, TLS refused, `500`, keyword absent, total packet loss | `probe_success = 0`: the outage is recorded, dated and counted. |
 | All good | `probe_success = 1`. |
 
@@ -94,6 +94,7 @@ Credentials: none, username / password (basic authentication) or API token
 | `follow_redirects` | Follow redirects | `true` | Disable to monitor the redirect itself, for example a 301 to HTTPS. |
 | `max_redirects` | Maximum redirects followed | `10` | Between 1 and 20. No effect if redirects are not followed. |
 | `insecure_tls` | Accept an unverifiable certificate | `false` | The check no longer fails on a self-signed certificate or one issued by a private authority. |
+| `allow_private_targets` | Allow loopback and link-local targets | `false` | By default the check refuses addresses only the DumbMonit host itself can reach (127.0.0.1, ::1, 169.254.x.x). Enable this to monitor a service running on the DumbMonit host. Private LAN addresses (10.x, 192.168.x) are always allowed. |
 | `check_certificate` | Read the certificate | `true` | Over HTTPS, also records the certificate expiry date so you can be warned before it expires. |
 | `max_body_bytes` | Maximum bytes read | `524288` | Beyond this, the rest of the page is not downloaded. The keyword and JSON path are only searched in this part. |
 | `user_agent` | Announced identity (User-Agent) | `DumbMonit/<version>` | Name the check gives to the server. Change it if the server filters robots. |
@@ -123,6 +124,7 @@ file share, game server, network printer.
 | Key | Label | Default | Help |
 |---|---|---|---|
 | `port` | Port | *(empty)* | Port to open, if the address does not already give it as "host:port". One of the two is required. |
+| `allow_private_targets` | Allow loopback and link-local targets | `false` | By default the check refuses addresses only the DumbMonit host itself can reach (127.0.0.1, ::1, 169.254.x.x). Enable this to monitor a service running on the DumbMonit host. Private LAN addresses (10.x, 192.168.x) are always allowed. |
 | `timeout_seconds` | Timeout (seconds) | `5` | Time after which the service is reported down if it has not answered. Between 1 and 60. |
 
 ## DNS
@@ -169,24 +171,24 @@ machine without agent or SNMP, remote host.
    along with the share of lost packets.
 3. By default, only a total loss counts as down; partial loss stays visible in
    the charts. Lower "Tolerated loss" to be warned earlier.
-4. If DumbMonit runs in Docker, add the NET_RAW capability to the container: in
-   docker-compose.yml, uncomment the "cap_add: - NET_RAW" lines under the
-   dumbmonit service, then restart it.
+4. If DumbMonit runs in Docker, keep the `sysctls:` lines of the shipped
+   docker-compose.yml under the dumbmonit service: they allow the container's
+   unprivileged user to open ICMP echo sockets. No capability is needed.
 
 !!! warning
-    Without the NET_RAW capability, the check cannot open an ICMP socket: it
-    reports this as a configuration error, not as a host failure. Some devices
-    also ignore pings on purpose: check that before drawing conclusions.
+    Without that sysctl, the check cannot open an ICMP socket: it reports this
+    as a configuration error, not as a host failure. Some devices also ignore
+    pings on purpose: check that before drawing conclusions.
 
 ```yaml
 services:
   dumbmonit:
-    cap_add:
-      - NET_RAW
+    sysctls:
+      net.ipv4.ping_group_range: "0 2147483647"
 ```
 
-Alternatively, `sysctl -w net.ipv4.ping_group_range="0 2147483647"` on the
-host allows unprivileged echoes.
+Outside Docker, `sysctl -w net.ipv4.ping_group_range="0 2147483647"` on the
+host does the same, and a raw socket (`NET_RAW`, root) works too.
 
 ### Options
 
@@ -234,15 +236,47 @@ verdict of the verification is in `probe_ssl_cert_valid`.
 |---|---|---|---|
 | `server_name` | Server name (SNI) | *(empty)* | Domain name announced to the server and checked in the certificate. Set it when the address is an IP behind a reverse proxy. |
 | `insecure_tls` | Accept an unverifiable certificate | `false` | An unverifiable chain no longer counts as a failure: the expiry date is still recorded. |
+| `allow_private_targets` | Allow loopback and link-local targets | `false` | By default the check refuses addresses only the DumbMonit host itself can reach (127.0.0.1, ::1, 169.254.x.x). Enable this to monitor a service running on the DumbMonit host. Private LAN addresses (10.x, 192.168.x) are always allowed. |
 | `timeout_seconds` | Timeout (seconds) | `5` | Time after which the service is reported down if it has not answered. Between 1 and 60. |
+
+## Addresses the checks refuse
+
+The HTTP, TCP and TLS checks connect to whatever address you give them and
+report what they see — which is also, word for word, what a server-side request
+forgery does. To keep a monitoring admin from reading services that only the
+DumbMonit host can reach (the embedded metrics database on `127.0.0.1:8428`,
+a cloud provider's metadata service on `169.254.169.254`), the checks refuse
+by default:
+
+- loopback addresses (`127.0.0.0/8`, `::1`);
+- link-local addresses (`169.254.0.0/16`, `fe80::/10`), including the cloud
+  metadata address, and the unspecified address (`0.0.0.0`, `::`).
+
+Private LAN ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`)
+are always allowed: monitoring them is the point of a homelab.
+
+The rule applies to the address you typed, to every address a host name
+resolves to (checked again at connection time, so a name that changes its
+answer cannot slip through), and to every redirect the HTTP check follows. A
+refused address shows as a configuration error on the target — no down alert is
+sent — naming the option to enable: `allow_private_targets`. Turn it on for a
+target that really monitors a service on the DumbMonit host itself.
+
+A redirect to a refused address is reported as a failed measurement
+(`reason="connect"`), because it is the monitored service that changed, not the
+configuration.
+
+Values found at a `json_path` are never echoed beyond 32 characters in a
+failure message.
 
 ## Common errors
 
 | Symptom | Likely cause |
 |---|---|
-| Ping shows a configuration error | `NET_RAW` missing on the container. See above. |
+| Ping shows a configuration error | The `net.ipv4.ping_group_range` sysctl is missing from the Compose file. See above. |
 | HTTP down with `reason="keyword"` | The keyword is searched in the first `max_body_bytes` only, case-insensitively unless `keyword_case_sensitive` is set. |
 | HTTP down with `reason="tls"` | Self-signed or private authority: set `insecure_tls`. |
+| HTTP, TCP or TLS shows a configuration error naming `allow_private_targets` | The address is loopback or link-local. See "Addresses the checks refuse" above. |
 | TCP down although `telnet host port` works from your laptop | The DumbMonit container cannot reach the host (Docker network, firewall). Test from inside the container's network. |
 | DNS down with `reason="record"` | The answer does not contain every value listed in `expect`. |
 | Ping down with `reason="packet_loss"` | Loss above `loss_threshold_percent`; some devices rate-limit ICMP. |

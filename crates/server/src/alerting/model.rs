@@ -283,6 +283,10 @@ pub struct TargetNode {
     pub name: String,
     pub address: String,
     pub parent_id: Option<TargetId>,
+    /// Agent relais qui interroge cette cible. Il compte comme un parent pour
+    /// la suppression : sans lui, l'équipement n'est plus observé du tout.
+    #[serde(default)]
+    pub via_agent: Option<TargetId>,
     pub tags: BTreeMap<String, String>,
     /// Une cible désactivée reste dans la topologie — elle peut être le parent
     /// d'une cible active — mais n'a plus le droit de porter une alerte.
@@ -373,6 +377,7 @@ mod tests {
             name: format!("device-{id}"),
             address: format!("10.0.0.{id}"),
             parent_id: None,
+            via_agent: None,
             tags: tags.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect(),
             enabled: true,
         }

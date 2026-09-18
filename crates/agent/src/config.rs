@@ -64,10 +64,13 @@ struct FileConfig {
     docker_update_check: Option<bool>,
     docker_max_containers: Option<usize>,
     commands: Option<bool>,
+    relay: Option<bool>,
+    site: Option<String>,
     interfaces_ignore: Option<Patterns>,
     interfaces_only: Option<Patterns>,
     mounts_ignore: Option<Patterns>,
     cpu_per_core: Option<bool>,
+    plakar: Option<bool>,
     plakar_bin: Option<String>,
     plakar_klosets: Option<Vec<String>>,
     plakar_home: Option<String>,
@@ -135,6 +138,13 @@ pub struct Config {
     /// Accepter les actions envoyées par le serveur (redémarrage, mise à jour
     /// de conteneur). Faux : l'agent ne fait que mesurer.
     pub commands: bool,
+    /// Relayer les interrogations que le serveur délègue à cet agent : il
+    /// exécute alors lui-même les collecteurs (SNMP, Proxmox, HTTP…) contre les
+    /// équipements de son propre réseau. Désactivé par défaut : un agent
+    /// ordinaire n'a pas à sortir de sa machine.
+    pub relay: bool,
+    /// Site où l'agent est posé, tel qu'affiché dans l'interface.
+    pub site: Option<String>,
     /// Périmètre de la collecte système : interfaces, montages, détail par cœur.
     pub probe: ProbeConfig,
     /// Santé du système : mises à jour, redémarrage, unités en échec, SELinux.
@@ -167,6 +177,8 @@ impl fmt::Debug for Config {
             .field("docker_update_check", &self.docker_update_check)
             .field("docker_max_containers", &self.docker_max_containers)
             .field("commands", &self.commands)
+            .field("relay", &self.relay)
+            .field("site", &self.site)
             .field("probe", &self.probe)
             .field("max_buffered_samples", &self.max_buffered_samples)
             .field("log_level", &self.log_level)
@@ -272,6 +284,12 @@ impl Config {
         let docker_update_check =
             flag("DUMBMONIT_AGENT_DOCKER_UPDATE_CHECK", file.docker_update_check, true)?;
         let commands = flag("DUMBMONIT_AGENT_COMMANDS", file.commands, true)?;
+        let relay = flag("DUMBMONIT_AGENT_RELAY", file.relay, false)?;
+        let site = env
+            .get("DUMBMONIT_AGENT_SITE")
+            .or(file.site)
+            .map(|site| site.trim().to_string())
+            .filter(|site| !site.is_empty());
         let cpu_per_core = flag("DUMBMONIT_AGENT_CPU_PER_CORE", file.cpu_per_core, false)?;
 
         let docker_max_containers = match env.get("DUMBMONIT_AGENT_DOCKER_MAX_CONTAINERS") {
@@ -330,6 +348,7 @@ impl Config {
             );
         }
         let plakar = PlakarConfig {
+            enabled: flag("DUMBMONIT_AGENT_PLAKAR", file.plakar, true)?,
             bin: env
                 .get("DUMBMONIT_AGENT_PLAKAR_BIN")
                 .or(file.plakar_bin)
@@ -392,6 +411,8 @@ impl Config {
             docker_update_check,
             docker_max_containers,
             commands,
+            relay,
+            site,
             probe,
             system_health,
             plakar,
@@ -542,6 +563,32 @@ mod tests {
     }
 
     #[test]
+    fn relay_mode_and_site_come_from_the_file_or_the_environment() {
+        let file = FileConfig {
+            relay: Some(true),
+            site: Some("  Agence de Lyon ".into()),
+            ..file_with_url_and_token()
+        };
+        let config = Config::merge(file, env(&[])).expect("configuration");
+        assert!(config.relay);
+        assert_eq!(config.site.as_deref(), Some("Agence de Lyon"));
+
+        let config = Config::merge(
+            file_with_url_and_token(),
+            env(&[("DUMBMONIT_AGENT_RELAY", "true"), ("DUMBMONIT_AGENT_SITE", "Datacenter")]),
+        )
+        .expect("configuration");
+        assert!(config.relay);
+        assert_eq!(config.site.as_deref(), Some("Datacenter"));
+
+        // Un site vide n'est pas un site.
+        let config =
+            Config::merge(file_with_url_and_token(), env(&[("DUMBMONIT_AGENT_SITE", "  ")]))
+                .expect("configuration");
+        assert_eq!(config.site, None);
+    }
+
+    #[test]
     fn a_minimal_file_is_enough() {
         let config = Config::merge(file_with_url_and_token(), env(&[])).expect("configuration");
         // La barre oblique finale est retirée : sans cela l'URL construite
@@ -551,6 +598,8 @@ mod tests {
         assert!(config.docker, "la découverte Docker est active par défaut");
         assert!(config.docker_update_check);
         assert!(config.commands, "les actions du serveur sont acceptées par défaut");
+        assert!(!config.relay, "un agent ne relaie rien tant qu'on ne le lui demande pas");
+        assert_eq!(config.site, None);
         assert_eq!(config.plakar, PlakarConfig::default());
         assert_eq!(config.probe, ProbeConfig::default());
         assert_eq!(config.docker_max_containers, DEFAULT_MAX_CONTAINERS);
@@ -694,6 +743,7 @@ docker_max_containers: 20
             ..serde_yaml_ng::from_str(yaml).expect("YAML valide")
         };
         let config = Config::merge(file, env(&[])).expect("configuration");
+        assert!(config.plakar.enabled, "la détection est active par défaut");
         assert_eq!(config.plakar.klosets, vec!["/srv/backups/main"]);
         assert_eq!(config.plakar.bin, "/opt/plakar");
         assert_eq!(config.plakar.home.as_deref(), Some("/root"));
@@ -705,6 +755,26 @@ docker_max_containers: 20
         )
         .expect("configuration");
         assert_eq!(config.plakar.klosets, vec!["/a", "ptar:/b"]);
+    }
+
+    #[test]
+    fn plakar_can_be_switched_off_from_the_file_or_the_environment() {
+        let file = FileConfig {
+            server_url: Some("http://s:8080".into()),
+            token: Some("dmon_abc".into()),
+            ..serde_yaml_ng::from_str("plakar: false\n").expect("YAML valide")
+        };
+        let config = Config::merge(file, env(&[])).expect("configuration");
+        assert!(!config.plakar.enabled);
+
+        let config =
+            Config::merge(file_with_url_and_token(), env(&[("DUMBMONIT_AGENT_PLAKAR", "0")]))
+                .expect("configuration");
+        assert!(!config.plakar.enabled);
+        assert!(
+            Config::merge(file_with_url_and_token(), env(&[("DUMBMONIT_AGENT_PLAKAR", "maybe")]))
+                .is_err()
+        );
     }
 
     #[test]

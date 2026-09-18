@@ -69,6 +69,7 @@ nav:
   - Install:
       - Docker: install/docker.md
       - Add your first device: install/first-device.md
+      - Monitor a remote site: install/remote-site.md
   - Devices:
       - Overview: devices/index.md
       - SNMP: devices/snmp.md
@@ -87,9 +88,10 @@ nav:
   - Using DumbMonit:
       - Overview page: using/overview.md
       - Devices page: using/devices.md
+      - Alerts page: using/alerts.md
+      - Status pages: using/status-pages.md
       - Settings: using/settings.md
       - Connect an assistant (MCP): using/assistant.md
-      - Status pages: using/status-pages.md
   - Reference:
       - HTTP API: reference/api.md
       - Configuration: reference/configuration.md

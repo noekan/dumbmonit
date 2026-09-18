@@ -1,7 +1,7 @@
 //! Accès aux cibles. C'est ici — et nulle part ailleurs — que les identifiants sont
 //! chiffrés et déchiffrés, pour qu'aucun autre module n'ait à y penser.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -18,6 +18,9 @@ pub struct TargetInput {
     pub kind: String,
     pub profile_id: Option<String>,
     pub parent_id: Option<TargetId>,
+    /// Agent relais qui interroge cette cible à la place du serveur. `None` :
+    /// le serveur s'en charge lui-même, comme pour toute cible ordinaire.
+    pub via_agent: Option<TargetId>,
     pub interval: Duration,
     pub enabled: bool,
     pub tags: BTreeMap<String, String>,
@@ -71,8 +74,9 @@ pub async fn get(pool: &SqlitePool, cipher: &Cipher, id: TargetId) -> Result<Opt
 pub async fn create(pool: &SqlitePool, cipher: &Cipher, input: &TargetInput) -> Result<TargetId> {
     let row = sqlx::query(
         "INSERT INTO targets
-             (name, address, kind, profile_id, parent_id, interval_secs, enabled, tags, credential_enc)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             (name, address, kind, profile_id, parent_id, via_agent, interval_secs, enabled, tags,
+              credential_enc)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          RETURNING id",
     )
     .bind(&input.name)
@@ -80,6 +84,7 @@ pub async fn create(pool: &SqlitePool, cipher: &Cipher, input: &TargetInput) -> 
     .bind(&input.kind)
     .bind(&input.profile_id)
     .bind(input.parent_id)
+    .bind(input.via_agent)
     .bind(input.interval.as_secs() as i64)
     .bind(i64::from(input.enabled))
     .bind(serde_json::to_string(&input.tags)?)
@@ -105,7 +110,7 @@ pub async fn update(
             sqlx::query(
                 "UPDATE targets SET
                      name = ?, address = ?, kind = ?, profile_id = ?, parent_id = ?,
-                     interval_secs = ?, enabled = ?, tags = ?, credential_enc = ?,
+                     via_agent = ?, interval_secs = ?, enabled = ?, tags = ?, credential_enc = ?,
                      updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  WHERE id = ?",
             )
@@ -114,6 +119,7 @@ pub async fn update(
             .bind(&input.kind)
             .bind(&input.profile_id)
             .bind(input.parent_id)
+            .bind(input.via_agent)
             .bind(input.interval.as_secs() as i64)
             .bind(i64::from(input.enabled))
             .bind(serde_json::to_string(&input.tags)?)
@@ -126,7 +132,7 @@ pub async fn update(
             sqlx::query(
                 "UPDATE targets SET
                      name = ?, address = ?, kind = ?, profile_id = ?, parent_id = ?,
-                     interval_secs = ?, enabled = ?, tags = ?,
+                     via_agent = ?, interval_secs = ?, enabled = ?, tags = ?,
                      updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  WHERE id = ?",
             )
@@ -135,6 +141,7 @@ pub async fn update(
             .bind(&input.kind)
             .bind(&input.profile_id)
             .bind(input.parent_id)
+            .bind(input.via_agent)
             .bind(input.interval.as_secs() as i64)
             .bind(i64::from(input.enabled))
             .bind(serde_json::to_string(&input.tags)?)
@@ -235,18 +242,55 @@ fn decrypt_credential(cipher: &Cipher, data: Option<&[u8]>) -> Result<Credential
     }
 }
 
+/// Relais des cibles : identifiant de la cible → identifiant de l'agent qui
+/// l'interroge. Les cibles interrogées par le serveur n'y figurent pas.
+///
+/// Tenu à part de [`Target`] : le relais est une affaire d'acheminement propre au
+/// serveur, et les collecteurs — qu'ils tournent ici ou sur l'agent — n'ont pas à
+/// le connaître.
+pub async fn relay_map(pool: &SqlitePool) -> Result<HashMap<TargetId, TargetId>> {
+    let rows = sqlx::query("SELECT id, via_agent FROM targets WHERE via_agent IS NOT NULL")
+        .fetch_all(pool)
+        .await
+        .context("lecture des relais")?;
+    rows.into_iter().map(|row| Ok((row.try_get("id")?, row.try_get("via_agent")?))).collect()
+}
+
+/// Agent relais d'une cible, s'il y en a un.
+pub async fn relay_of(pool: &SqlitePool, id: TargetId) -> Result<Option<TargetId>> {
+    let row = sqlx::query("SELECT via_agent FROM targets WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .context("lecture du relais")?;
+    Ok(row.and_then(|row| row.try_get::<Option<TargetId>, _>("via_agent").ok().flatten()))
+}
+
+/// Nombre de cibles relayées par chaque agent.
+pub async fn relayed_counts(pool: &SqlitePool) -> Result<HashMap<TargetId, usize>> {
+    let rows = sqlx::query(
+        "SELECT via_agent, COUNT(*) AS n FROM targets WHERE via_agent IS NOT NULL GROUP BY via_agent",
+    )
+    .fetch_all(pool)
+    .await
+    .context("décompte des cibles relayées")?;
+    rows.into_iter()
+        .map(|row| Ok((row.try_get("via_agent")?, row.try_get::<i64, _>("n")?.max(0) as usize)))
+        .collect()
+}
+
 /// Issue de la dernière interrogation d'une cible, pour l'affichage.
 #[derive(Debug, Clone)]
 pub struct TargetStatus {
     pub last_probe_at: Option<String>,
     pub last_error: Option<String>,
+    /// Agent relais, recopié ici pour que l'API l'expose sans relire la cible.
+    pub via_agent: Option<TargetId>,
 }
 
 /// Statut de toutes les cibles, indexé par identifiant.
-pub async fn statuses(
-    pool: &SqlitePool,
-) -> Result<std::collections::HashMap<TargetId, TargetStatus>> {
-    let rows = sqlx::query("SELECT id, last_probe_at, last_error FROM targets")
+pub async fn statuses(pool: &SqlitePool) -> Result<HashMap<TargetId, TargetStatus>> {
+    let rows = sqlx::query("SELECT id, last_probe_at, last_error, via_agent FROM targets")
         .fetch_all(pool)
         .await
         .context("lecture des statuts")?;
@@ -258,6 +302,7 @@ pub async fn statuses(
                 TargetStatus {
                     last_probe_at: row.try_get("last_probe_at")?,
                     last_error: row.try_get("last_error")?,
+                    via_agent: row.try_get("via_agent")?,
                 },
             ))
         })

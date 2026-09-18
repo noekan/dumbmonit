@@ -62,6 +62,14 @@ pub struct AgentIdentity {
     /// commandes : le serveur en déduit qu'il ne les exécutera pas.
     #[serde(default)]
     pub commands_enabled: Option<bool>,
+    /// Vrai si l'agent accepte de relayer des interrogations (`relay: true`) :
+    /// le serveur peut alors lui déléguer les sondes des équipements de son site.
+    #[serde(default)]
+    pub relay: bool,
+    /// Site où l'agent est posé (« agence de Lyon »), déclaré dans sa
+    /// configuration ; sert à regrouper les équipements relayés dans l'interface.
+    #[serde(default)]
+    pub site: Option<String>,
     /// Identifiant stable de la machine, indépendant du nom d'hôte.
     ///
     /// Renommer une machine ne doit pas créer une seconde cible et couper ses
@@ -140,6 +148,8 @@ mod tests {
             arch: Some("x86_64".into()),
             agent_version: "0.1.0".into(),
             commands_enabled: Some(true),
+            relay: false,
+            site: None,
             machine_id: Some("9f4c…".into()),
             tags: BTreeMap::from([("salle".to_string(), "cave".to_string())]),
         }

@@ -15,7 +15,7 @@ and uses the same words: *reporting*, *unreachable*, *waiting*, *advisory*,
 
 ## 1. Create a token
 
-Settings → **Connect an assistant** → name the token ("Claude on my laptop") and
+Settings → **Connect an assistant** (`/settings#assistant`) → name the token ("Claude on my laptop") and
 pick a scope:
 
 | Scope | What the assistant can do |

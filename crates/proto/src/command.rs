@@ -7,6 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::{Sample, Target};
+
 /// Route de récupération (`GET`) et de compte rendu (`POST …/{id}`) des commandes.
 pub const COMMANDS_PATH: &str = "/api/agent/commands";
 
@@ -23,6 +25,78 @@ pub const CMD_CONTAINER_RESTART: &str = "container.restart";
 /// Remplace un conteneur par la même image, tirée à nouveau. Arguments :
 /// `{"name": "…", "prune": bool}`.
 pub const CMD_CONTAINER_UPDATE: &str = "container.update";
+
+/// Interroge un équipement à la place du serveur (agent relais). Arguments :
+/// un [`ProbeJob`] sérialisé.
+pub const CMD_PROBE: &str = "probe";
+
+/// Route des sondes déléguées : `GET` (attente longue) pour les recevoir,
+/// `POST …/{id}` pour en rendre compte. Distincte de [`COMMANDS_PATH`] : les
+/// sondes voyagent avec l'identifiant de l'équipement en clair et ne sont jamais
+/// écrites en base, là où les commandes sont journalisées.
+pub const RELAY_PATH: &str = "/api/agent/relay";
+
+/// Durée pendant laquelle le serveur retient une demande de sondes sans rien
+/// avoir à donner, avant de répondre « rien ». L'agent renvoie aussitôt une
+/// nouvelle demande : le délai entre l'échéance d'une cible et son interrogation
+/// se compte ainsi en millisecondes, sans que l'agent ne martèle le serveur.
+pub const RELAY_POLL_HOLD_SECS: u64 = 25;
+
+/// Une sonde à exécuter par un agent relais, telle qu'elle voyage dans les
+/// arguments d'une commande [`CMD_PROBE`].
+///
+/// La cible est transmise entière, secret compris : c'est l'agent qui va se
+/// présenter à l'équipement. Le canal est celui des mesures (jeton porteur, et
+/// TLS dès que le serveur est publié derrière un mandataire), et rien de tout
+/// cela n'est jamais écrit sur disque, ni côté serveur ni côté agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProbeJob {
+    pub target: Target,
+    /// Délai maximal de la sonde, en secondes, le même que sur le serveur.
+    pub timeout_secs: u64,
+    /// Identifier l'équipement (profil SNMP) plutôt que le mesurer.
+    #[serde(default)]
+    pub discover: bool,
+}
+
+impl ProbeJob {
+    /// Construit la commande à remettre à l'agent.
+    pub fn into_command(self, id: i64, created_at_ms: i64) -> AgentCommand {
+        AgentCommand {
+            id,
+            kind: CMD_PROBE.to_string(),
+            args: serde_json::to_value(self).unwrap_or(serde_json::Value::Null),
+            created_at_ms,
+        }
+    }
+
+    /// Relit la sonde dans une commande reçue.
+    pub fn from_command(command: &AgentCommand) -> Result<Self, String> {
+        if command.kind != CMD_PROBE {
+            return Err(format!("not a probe command: {}", command.kind));
+        }
+        serde_json::from_value(command.args.clone())
+            .map_err(|error| format!("unreadable probe job: {error}"))
+    }
+}
+
+/// Compte rendu d'une sonde déléguée.
+///
+/// Les échantillons voyagent avec le verdict : un seul aller-retour, et le
+/// serveur les range sous l'équipement sondé exactement comme s'il l'avait
+/// interrogé lui-même. `error` reprend le texte de `ProbeError` : son préfixe
+/// dit au serveur si l'équipement est injoignable ou mal configuré.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProbeOutcome {
+    pub duration_ms: u64,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub samples: Vec<Sample>,
+    /// Profil reconnu, pour une demande d'identification.
+    #[serde(default)]
+    pub profile_id: Option<String>,
+}
 
 /// Une commande en attente, telle que le serveur la remet à l'agent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -156,6 +230,40 @@ mod tests {
         assert!(CommandStatus::Expired.is_final());
         assert!(!CommandStatus::Running.is_final());
         assert_eq!(CommandStatus::parse("bogus"), None);
+    }
+
+    #[test]
+    fn a_probe_job_survives_the_command_envelope() {
+        let job = ProbeJob {
+            target: Target {
+                id: 12,
+                name: "site-web".into(),
+                address: "https://example.org".into(),
+                kind: "http".into(),
+                profile_id: None,
+                parent_id: None,
+                interval: std::time::Duration::from_secs(60),
+                enabled: true,
+                tags: Default::default(),
+                credential: crate::Credential::ApiToken { token: "s3cr3t".into() },
+            },
+            timeout_secs: 10,
+            discover: false,
+        };
+        let command = job.into_command(7, 1_000);
+        assert_eq!(command.kind, CMD_PROBE);
+        let back = ProbeJob::from_command(&command).expect("relecture");
+        assert_eq!(back.target.id, 12);
+        assert_eq!(back.timeout_secs, 10);
+        assert_eq!(back.target.credential, crate::Credential::ApiToken { token: "s3cr3t".into() });
+
+        let other = AgentCommand {
+            id: 1,
+            kind: CMD_CONTAINER_RESTART.into(),
+            args: serde_json::json!({}),
+            created_at_ms: 0,
+        };
+        assert!(ProbeJob::from_command(&other).is_err());
     }
 
     #[test]

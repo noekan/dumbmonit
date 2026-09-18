@@ -23,6 +23,8 @@ pub fn detect(config: &Config) -> AgentIdentity {
         arch: Some(std::env::consts::ARCH.to_string()),
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
         commands_enabled: Some(config.commands),
+        relay: config.relay,
+        site: config.site.clone(),
         machine_id: machine_id(),
         tags: config.tags.clone(),
     }
@@ -69,6 +71,8 @@ mod tests {
             docker_update_check: false,
             docker_max_containers: 200,
             commands: false,
+            relay: false,
+            site: None,
             probe: crate::collect::ProbeConfig::default(),
             system_health: crate::collect::system_health::SystemHealthConfig::default(),
             plakar: crate::collect::plakar::PlakarConfig::default(),

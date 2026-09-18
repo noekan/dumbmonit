@@ -543,6 +543,8 @@ mod tests {
             arch: None,
             agent_version: "0.1.0".into(),
             commands_enabled: Some(true),
+            relay: false,
+            site: None,
             machine_id: Some(key.into()),
             tags: BTreeMap::new(),
         };

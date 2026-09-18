@@ -227,15 +227,50 @@ install_binaire() {
 
     source_url="$URL/download/dumbmonit-agent-linux-$ARCH"
     info "downloading $source_url"
+    telecharger "$source_url" "$destination" || echec "download failed from $source_url"
+    verifier_empreinte "$source_url" "$destination"
+}
+
+telecharger() {
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$source_url" -o "$destination" \
-            || echec "download failed from $source_url"
+        curl -fsSL "$1" -o "$2"
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$destination" "$source_url" \
-            || echec "download failed from $source_url"
+        wget -qO "$2" "$1"
     else
         echec "neither curl nor wget found: install one of them, or use --bin=PATH"
     fi
+}
+
+# Le serveur publie l'empreinte SHA-256 de chaque binaire à côté de celui-ci
+# (`<url>.sha256`, au format de `sha256sum`). Un binaire qui ne lui correspond
+# pas — remplacé en chemin, téléchargement tronqué — n'est pas installé. Sans
+# outil pour la calculer, on prévient et on continue : un système minimal ne doit
+# pas être privé d'agent pour autant.
+verifier_empreinte() {
+    source_url="$1"
+    fichier="$2"
+    attendu_fichier="$fichier.sha256"
+    if ! telecharger "$source_url.sha256" "$attendu_fichier" 2>/dev/null; then
+        rm -f "$attendu_fichier"
+        echo "Warning: no checksum published at $source_url.sha256, binary not verified" >&2
+        return 0
+    fi
+    attendu="$(cut -d' ' -f1 "$attendu_fichier" | tr -d '[:space:]')"
+    rm -f "$attendu_fichier"
+    if command -v sha256sum >/dev/null 2>&1; then
+        obtenu="$(sha256sum "$fichier" | cut -d' ' -f1)"
+    elif command -v shasum >/dev/null 2>&1; then
+        obtenu="$(shasum -a 256 "$fichier" | cut -d' ' -f1)"
+    else
+        echo "Warning: neither sha256sum nor shasum found, binary not verified" >&2
+        return 0
+    fi
+    if [ -z "$attendu" ] || [ "$attendu" != "$obtenu" ]; then
+        rm -f "$fichier"
+        echec "checksum mismatch for $source_url (expected $attendu, got $obtenu):
+       the download is corrupt or has been tampered with. Nothing was installed."
+    fi
+    info "checksum verified ($obtenu)"
 }
 
 # Écriture à côté puis renommage : un `cp` sur un binaire en cours d'exécution

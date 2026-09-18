@@ -11,6 +11,7 @@
 import {
 	getAuthStatus,
 	login as apiLogin,
+	loginTotp as apiLoginTotp,
 	logout as apiLogout,
 	setUnauthorizedHandler,
 	setupAccount as apiSetupAccount,
@@ -184,16 +185,34 @@ class AuthStore {
 		await this.login(username, password);
 	}
 
-	/** Opens a session. Propagates the error so the screen can show the right message. */
-	async login(username: string, password: string): Promise<void> {
-		await apiLogin(username, password);
+	/**
+	 * Opens a session. Propagates the error so the screen can show the right
+	 * message. Returns the pending token when the account needs a second
+	 * factor: the session is not open yet, `loginTotp` finishes the job.
+	 */
+	async login(username: string, password: string): Promise<string | null> {
+		const outcome = await apiLogin(username, password);
+		if (outcome.totp_required) return outcome.pending ?? '';
+		this.sessionOpened();
+		await this.refresh();
+		return null;
+	}
+
+	/** Second step of the sign-in: the one-time code. */
+	async loginTotp(pending: string, code: string): Promise<void> {
+		await apiLoginTotp(pending, code);
+		this.sessionOpened();
+		await this.refresh();
+	}
+
+	private sessionOpened(): void {
 		this.available = true;
 		this.configured = true;
 		this.authenticated = true;
 		this.error = null;
 		this.checked = true;
-		// The role decides what the pages show: read it before the guard navigates.
-		await this.refresh();
+		// The role decides what the pages show: the caller refreshes before the
+		// guard navigates.
 	}
 
 	/**

@@ -1,10 +1,11 @@
 name: Release
 
-# Builds the multi-arch image with the repository Dockerfile and pushes it to
-# ghcr.io/noekan/dumbmonit:
+# Builds the multi-arch images with the repository Dockerfile and pushes them to
+# ghcr.io/noekan/dumbmonit (server) and ghcr.io/noekan/dumbmonit-agent (agent,
+# `--target agent-image`), with the same tags:
 #   - every push to main   -> :edge
 #   - every tag v*         -> :X.Y.Z, :X.Y, :X and :latest
-# CI (ci.yml) builds the same image without pushing, on every push and PR.
+# CI (ci.yml) builds the same images without pushing, on every push and PR.
 
 on:
   push:
@@ -17,6 +18,7 @@ permissions:
 
 env:
   IMAGE: ghcr.io/noekan/dumbmonit
+  AGENT_IMAGE: ghcr.io/noekan/dumbmonit-agent
 
 jobs:
   image:
@@ -59,5 +61,34 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - id: agent-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.AGENT_IMAGE }}
+          tags: |
+            type=edge,branch=main
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          flavor: |
+            latest=${{ startsWith(github.ref, 'refs/tags/v') }}
+          labels: |
+            org.opencontainers.image.title=DumbMonit agent
+            org.opencontainers.image.description=DumbMonit agent, for Docker hosts and remote sites (relay mode)
+            org.opencontainers.image.licenses=Apache-2.0
+
+      # Same Dockerfile, second target: the layers above are reused from cache.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: agent-image
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.agent-meta.outputs.tags }}
+          labels: ${{ steps.agent-meta.outputs.labels }}
+          annotations: ${{ steps.agent-meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

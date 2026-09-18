@@ -19,14 +19,14 @@ evaluate (hysteresis, per-device overrides)
 |---|---|---|
 | Clear threshold (hysteresis) | Rule editor → *Clear below / above* | none (CPU: 85 %, disk: 88 % on the shipped rules) |
 | Per-device overrides | Rule editor → *Per-device overrides* | none |
-| Flap detection | Settings → Notification policy → More options | 4 changes in 30 min, hold 30 min |
+| Flap detection | Alerts → Notifications → Notification policy → More options | 4 changes in 30 min, hold 30 min |
 | Minimum severity | Channel → Delivery options → *Send* | everything |
 | Tell me when it clears | Channel → Delivery options | on |
 | Minimum interval per alert | Channel → Delivery options | none |
 | Quiet hours | Channel → Delivery options | off |
-| Batch window | Settings → Notification policy | 60 s |
-| Messages per channel per hour | Settings → Notification policy | 20 |
-| Public URL (deep links) | Settings → Notification policy, or `DUMBMONIT_PUBLIC_URL` | empty |
+| Batch window | Alerts → Notifications → Notification policy | 60 s |
+| Messages per channel per hour | Alerts → Notifications → Notification policy | 20 |
+| Public URL (deep links) | Alerts → Notifications → Notification policy, or `DUMBMONIT_PUBLIC_URL` | empty |
 
 ## Hysteresis and per-device overrides
 
@@ -57,7 +57,7 @@ Regardless of the rule, an alert whose fingerprint fired or resolved 4 times
 within 30 minutes is *flapping*: one notice goes out ("flapping: 4 changes in
 30 min, notifications held for 30 min") and nothing else about that alert is
 sent until the hold ends. A resolution after the hold is still announced.
-Tune or switch it off in Settings → Notification policy → More options
+Tune or switch it off in Alerts → Notifications → Notification policy → More options
 (`flap_events`, `flap_window_secs`, `flap_hold_secs`; `flap_events: 0`
 disables it).
 

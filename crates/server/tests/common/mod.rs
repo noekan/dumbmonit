@@ -82,6 +82,10 @@ pub async fn build(dir: tempfile::TempDir, config: Config, pool: sqlx::SqlitePoo
 
     let mut registry = collectors::Registry::new();
     registry.register(Arc::new(collectors::DummyCollector));
+    // Le type `http` sert aux tests du relais : une sonde vers un serveur local ;
+    // le type `agent` y est le relais lui-même.
+    registry.register(Arc::new(collectors::HttpCollector::new()));
+    registry.register(Arc::new(collectors::AgentCollector::new(pool.clone())));
 
     let state = AppState::new(Inner { config, pool, cipher, victoria, sink, collectors: registry });
 
@@ -98,7 +102,10 @@ impl TestApp {
     ) -> Reply {
         let mut builder = Request::builder().method(method).uri(uri);
         if let Some(cookie) = cookie {
-            builder = builder.header(header::COOKIE, cookie);
+            // Comme le fait l'interface : le cookie, et l'en-tête qui prouve que
+            // l'écriture vient de chez nous (anti-CSRF).
+            builder =
+                builder.header(header::COOKIE, cookie).header("x-requested-with", "DumbMonit");
         }
         let request = match body {
             Some(value) => builder

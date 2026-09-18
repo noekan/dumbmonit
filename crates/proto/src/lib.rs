@@ -14,8 +14,9 @@ mod target;
 
 pub use collector::{Collector, ProbeError};
 pub use command::{
-    AgentCommand, CMD_CONTAINER_RESTART, CMD_CONTAINER_UPDATE, COMMAND_MAX_AGE_SECS, COMMANDS_PATH,
-    CommandReport, CommandStatus,
+    AgentCommand, CMD_CONTAINER_RESTART, CMD_CONTAINER_UPDATE, CMD_PROBE, COMMAND_MAX_AGE_SECS,
+    COMMANDS_PATH, CommandReport, CommandStatus, ProbeJob, ProbeOutcome, RELAY_PATH,
+    RELAY_POLL_HOLD_SECS,
 };
 pub use credential::{
     Credential, SnmpV3Auth, SnmpV3AuthProtocol, SnmpV3Privacy, SnmpV3PrivacyProtocol,

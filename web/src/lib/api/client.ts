@@ -142,7 +142,12 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 		response = await fetch(buildUrl(path, query), {
 			method,
 			signal,
-			headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+			headers: {
+				// Proof of origin for cookie-authenticated writes (anti-CSRF): a
+				// third-party page cannot add this header without CORS consent.
+				'x-requested-with': 'DumbMonit',
+				...(body === undefined ? {} : { 'content-type': 'application/json' })
+			},
 			body: body === undefined ? undefined : JSON.stringify(body)
 		});
 	} catch (cause) {

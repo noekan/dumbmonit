@@ -3,12 +3,16 @@
 	 * Alerts — what is firing now, what is scheduled to stay quiet, and the rules
 	 * behind it.
 	 *
-	 * Four sections behind a segmented control kept in the URL hash so a view is
+	 * Five sections behind a segmented control kept in the URL hash so a view is
 	 * linkable: Now (the live "Needs you" list, grouped by device), Scheduled
-	 * (maintenance windows), Rules, and History. Active alerts come from the
-	 * shared store; the rest is loaded here and refreshed after each action.
+	 * (maintenance windows), Rules, Notifications (channels and the policy that
+	 * keeps them quiet — they belong with alerting, not with administration),
+	 * and History. Active alerts come from the shared store; the rest is loaded
+	 * here and refreshed after each action. The notification sections load
+	 * their own data.
 	 */
 	import { browser } from '$app/environment';
+	import { tick } from 'svelte';
 	import {
 		listTargets,
 		listAlertRules,
@@ -39,15 +43,21 @@
 	import SilencesSection from '$lib/components/alerts/SilencesSection.svelte';
 	import RulesSection from '$lib/components/alerts/RulesSection.svelte';
 	import HistorySection from '$lib/components/alerts/HistorySection.svelte';
+	import ChannelsSection from '$lib/components/notifications/ChannelsSection.svelte';
+	import NotificationPolicySection from '$lib/components/notifications/NotificationPolicySection.svelte';
 	import { rulesByUid, targetsById, quickSilencePayload } from '$lib/components/alerts/helpers';
 
-	type Tab = 'now' | 'scheduled' | 'rules' | 'history';
+	type Tab = 'now' | 'scheduled' | 'rules' | 'notifications' | 'history';
 	const TABS: { id: Tab; label: string }[] = [
 		{ id: 'now', label: 'Now' },
 		{ id: 'scheduled', label: 'Scheduled' },
 		{ id: 'rules', label: 'Rules' },
+		{ id: 'notifications', label: 'Notifications' },
 		{ id: 'history', label: 'History' }
 	];
+	// Anchors inside the Notifications tab: `#notifications-policy` opens the
+	// tab and scrolls to that panel (the old Settings deep links land here).
+	const NOTIFICATION_ANCHORS = ['notifications-channels', 'notifications-policy'];
 
 	let tab = $state<Tab>('now');
 	let targets = $state<Target[]>([]);
@@ -182,8 +192,13 @@
 	// The active tab lives in the URL hash, so a section is linkable.
 	function readHash() {
 		if (!browser) return;
-		const raw = window.location.hash.replace('#', '') as Tab;
-		if (TABS.some((t) => t.id === raw)) tab = raw;
+		const raw = window.location.hash.replace('#', '');
+		if (TABS.some((t) => t.id === raw)) {
+			tab = raw as Tab;
+		} else if (NOTIFICATION_ANCHORS.includes(raw)) {
+			tab = 'notifications';
+			void tick().then(() => document.getElementById(raw)?.scrollIntoView({ block: 'start' }));
+		}
 	}
 	function selectTab(next: Tab) {
 		tab = next;
@@ -206,11 +221,11 @@
 	});
 </script>
 
-<svelte:head><title>Alerts — DumbMonit</title></svelte:head>
+<svelte:head><title>Alerts · DumbMonit</title></svelte:head>
 
 <PageHeader
 	title="Alerts"
-	description="What is firing now, what is scheduled to stay quiet, and the rules behind it."
+	description="What is firing now, what is scheduled to stay quiet, the rules behind it, and where you are told."
 >
 	{#snippet actions()}
 		{#if auth.isAdmin}
@@ -278,7 +293,7 @@
 			void loadAll();
 		}}
 	/>
-{:else if loading}
+{:else if loading && tab !== 'notifications'}
 	<div class="space-y-2.5">
 		{#each { length: 4 } as _, i (i)}
 			<Skeleton class="h-20 w-full" />
@@ -302,6 +317,11 @@
 		ondelete={removeRule}
 		oncreate={createRule}
 	/>
+{:else if tab === 'notifications'}
+	<div class="grid gap-6 [&_section[id]]:scroll-mt-4">
+		<div class="rise-in" style="--rise-delay: 0ms"><ChannelsSection /></div>
+		<div class="rise-in" style="--rise-delay: 40ms"><NotificationPolicySection /></div>
+	</div>
 {:else if tab === 'history'}
 	<HistorySection entries={history} targets={targetsMap} rules={rulesMap} />
 {/if}

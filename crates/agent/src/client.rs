@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use dumbmonit_proto::{
-    AgentCommand, COMMANDS_PATH, CommandReport, INGEST_PATH, PushAck, PushBatch,
+    AgentCommand, COMMANDS_PATH, CommandReport, INGEST_PATH, ProbeOutcome, PushAck, PushBatch,
+    RELAY_PATH,
 };
 
 /// Ce qui peut arriver à un envoi, et surtout ce qu'il faut en faire.
@@ -139,6 +140,67 @@ impl PushClient {
     }
 }
 
+impl PushClient {
+    /// Sondes que le serveur nous délègue (agent relais).
+    ///
+    /// Le serveur retient la réponse jusqu'à `wait` secondes s'il n'a rien à
+    /// donner : `timeout` doit dépasser cette attente, sans quoi chaque tour
+    /// vide finirait en erreur de transport.
+    pub async fn fetch_probes(
+        &self,
+        key: &str,
+        wait: Duration,
+        timeout: Duration,
+    ) -> Result<Vec<AgentCommand>, PushError> {
+        let url = format!("{}&wait={}", relay_url(&self.base_url, None, key), wait.as_secs());
+        let response = self
+            .http
+            .get(url)
+            .timeout(timeout)
+            .bearer_auth(&self.token)
+            .send()
+            .await
+            .map_err(|error| PushError::Transport(sanitise(&error.to_string(), &self.token)))?;
+        if response.status().is_success() {
+            return response
+                .json::<Vec<AgentCommand>>()
+                .await
+                .map_err(|error| PushError::Transport(format!("unreadable response: {error}")));
+        }
+        Err(rejection(response).await)
+    }
+
+    /// Mesures et verdict d'une sonde déléguée.
+    pub async fn report_probe(
+        &self,
+        key: &str,
+        id: i64,
+        outcome: &ProbeOutcome,
+    ) -> Result<(), PushError> {
+        let response = self
+            .http
+            .post(relay_url(&self.base_url, Some(id), key))
+            .bearer_auth(&self.token)
+            .json(outcome)
+            .send()
+            .await
+            .map_err(|error| PushError::Transport(sanitise(&error.to_string(), &self.token)))?;
+        if response.status().is_success() {
+            return Ok(());
+        }
+        Err(rejection(response).await)
+    }
+}
+
+/// URL des sondes déléguées, ou du compte rendu de l'une d'elles.
+fn relay_url(base_url: &str, id: Option<i64>, key: &str) -> String {
+    let key = percent_encode(key);
+    match id {
+        Some(id) => format!("{base_url}{RELAY_PATH}/{id}?key={key}"),
+        None => format!("{base_url}{RELAY_PATH}?key={key}"),
+    }
+}
+
 /// Qualifie une réponse d'erreur du serveur.
 async fn rejection(response: reqwest::Response) -> PushError {
     let status = response.status();
@@ -232,6 +294,20 @@ mod tests {
         assert_eq!(
             commands_url(&client.base_url, Some(42), "nas salon"),
             "http://serveur:8080/api/agent/commands/42?key=nas%20salon"
+        );
+    }
+
+    #[test]
+    fn the_relay_urls_follow_the_shared_contract() {
+        let client = PushClient::new("http://serveur:8080/", "dmon_x", Duration::from_secs(1))
+            .expect("client");
+        assert_eq!(
+            relay_url(&client.base_url, None, "9f4c"),
+            "http://serveur:8080/api/agent/relay?key=9f4c"
+        );
+        assert_eq!(
+            relay_url(&client.base_url, Some(3), "nas salon"),
+            "http://serveur:8080/api/agent/relay/3?key=nas%20salon"
         );
     }
 

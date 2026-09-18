@@ -5,15 +5,19 @@
 	 * straight from the latest metrics — the agent refreshes them every ten
 	 * minutes, so a sixty-second poll here is plenty.
 	 *
-	 * Three quiet states before any kloset shows: Plakar is not installed, it
-	 * is installed but no kloset was found, or an older agent that reports
-	 * neither. The agent tells them apart with `backup_plakar_present` and
-	 * `backup_klosets_found`.
+	 * Plakar is detected, never assumed: the agent emits `dumbmonit_backup_*`
+	 * series only once it finds the binary or a kloset, so without any series
+	 * this component renders nothing at all — no frame, no empty state. The
+	 * one quiet state left is "installed but no kloset yet"
+	 * (`backup_plakar_present = 1`, `backup_klosets_found = 0`). A
+	 * `backup_plakar_present = 0` with no kloset is either an agent older than
+	 * the detection or a bare trace of Plakar: hidden too. With klosets but no
+	 * binary, the klosets show as unreadable with a hint about `plakar_bin`.
 	 */
 	import { untrack } from 'svelte';
 	import { ExternalLink } from 'lucide-svelte';
 	import { queryInstant, type Target } from '$lib/api';
-	import { ErrorNotice, Panel, Plate, Skeleton, type Tone } from '$lib/ui';
+	import { ErrorNotice, Panel, Plate, type Tone } from '$lib/ui';
 	import { formatAge, formatBytes } from './api';
 
 	const GUIDE_URL = 'https://dumbmonit.readthedocs.io/en/latest/devices/agent/#plakar-backups';
@@ -39,11 +43,13 @@
 	}
 
 	let klosets = $state<KlosetStat[]>([]);
-	/** `null` until an agent new enough to say so has reported. */
+	/** `null` when the agent reported no presence gauge at all. */
 	let installed = $state<boolean | null>(null);
-	let found = $state<number | null>(null);
 	let loading = $state(true);
 	let error = $state<unknown>(null);
+
+	/** Nothing Plakar-related for this target: the panel stays out of the page. */
+	const absent = $derived(!loading && !error && klosets.length === 0 && installed !== true);
 
 	/** Newest snapshot across the kloset's sources, for the kloset's own plate. */
 	function newestAge(k: KlosetStat): number | null {
@@ -85,11 +91,10 @@
 		return { tone: 'warning', label: `No backup for ${formatAge(s.ageSeconds)}` };
 	}
 
-	/** Folds the flat series list into klosets and sources; the two presence gauges are read on the side. */
+	/** Folds the flat series list into klosets and sources; the presence gauge is read on the side. */
 	function fold(series: { metric: Record<string, string>; values: [number, string][] }[]): KlosetStat[] {
 		const byKloset = new Map<string, KlosetStat>();
 		installed = null;
-		found = null;
 		const sourceOf = (k: KlosetStat, name: string): SourceStat => {
 			let s = k.sources.find((x) => x.source === name);
 			if (!s) {
@@ -104,10 +109,6 @@
 			if (!Number.isFinite(value)) continue;
 			if (name === 'dumbmonit_backup_plakar_present') {
 				installed = value >= 1;
-				continue;
-			}
-			if (name === 'dumbmonit_backup_klosets_found') {
-				found = value;
 				continue;
 			}
 			const kloset = serie.metric.kloset ?? '';
@@ -135,7 +136,7 @@
 		error = null;
 		try {
 			const series = await queryInstant(
-				`{__name__=~"dumbmonit_backup_(last_success_seconds|snapshot_count|size_bytes|last_status|plakar_present|klosets_found)", target="${target.id}"}`,
+				`{__name__=~"dumbmonit_backup_(last_success_seconds|snapshot_count|size_bytes|last_status|plakar_present)", target="${target.id}"}`,
 				signal
 			);
 			klosets = fold(series);
@@ -161,30 +162,24 @@
 	});
 </script>
 
+{#if !loading && !absent}
 <Panel title="Backups" description={klosets.length > 0 ? 'Plakar klosets the agent reads.' : undefined} padded={false} class="rise-in">
 	{#if error}
 		<div class="px-5 py-4">
 			<ErrorNotice {error} title="Could not load the backups" onretry={() => void load()} />
 		</div>
-	{:else if loading}
-		<div class="flex flex-col gap-3 px-5 py-4" aria-busy="true" aria-label="Loading backups">
-			<Skeleton class="h-10 w-full" rows={2} />
-		</div>
 	{:else if klosets.length === 0}
-		{#if installed === false}
-			<p class="px-5 py-4 text-sm text-ink-2">Plakar is not installed on this machine.</p>
-		{:else if installed === true && (found ?? 0) === 0}
-			<p class="px-5 py-4 text-sm text-ink-2">
-				Plakar is installed but no kloset was found. Create one and run a first backup —
-				<a href={GUIDE_URL} class="inline-flex items-center gap-1 text-ink underline decoration-line-strong underline-offset-2 hover:text-signal-ink" target="_blank" rel="noreferrer">
-					see the guide
-					<ExternalLink class="size-3.5" aria-hidden="true" />
-				</a>.
-			</p>
-		{:else}
-			<p class="px-5 py-4 text-sm text-ink-2">No Plakar kloset reported by this agent yet.</p>
-		{/if}
+		<p class="px-5 py-4 text-sm text-ink-2">
+			Plakar is installed but no kloset was found. Create one and run a first backup —
+			<a href={GUIDE_URL} class="inline-flex items-center gap-1 text-ink underline decoration-line-strong underline-offset-2 hover:text-signal-ink" target="_blank" rel="noreferrer">
+				see the guide
+				<ExternalLink class="size-3.5" aria-hidden="true" />
+			</a>.
+		</p>
 	{:else}
+		{#if installed === false}
+			<p class="px-5 pt-4 text-sm text-warning-ink">The agent found these klosets but cannot run <span class="font-mono">plakar</span>: set <span class="font-mono">plakar_bin</span> in agent.yaml, or <span class="font-mono">plakar: false</span> to stop watching them.</p>
+		{/if}
 		<ul class="divide-y divide-line">
 			{#each klosets as k, i (k.kloset)}
 				{@const newest = newestAge(k)}
@@ -215,7 +210,9 @@
 					{#if oldest !== null && oldest > 2 * DAY}
 						<p class="mt-1 text-sm text-warning-ink">Backup too old: the newest snapshot of at least one source is {formatAge(oldest)} old. Check the schedule that runs <span class="font-mono">plakar backup</span> on this machine.</p>
 					{/if}
-					{#if unreadable(k)}
+					{#if unreadable(k) && installed === false}
+						<p class="mt-1 text-sm text-ink-2">Not read: the plakar binary is missing from the agent's PATH.</p>
+					{:else if unreadable(k)}
 						<p class="mt-1 text-sm text-ink-2">The agent cannot open this kloset: check its passphrase (PLAKAR_PASSPHRASE or the store entry) and that the agent's user can read it.</p>
 					{:else if k.sources.length === 0}
 						<p class="mt-1 text-sm text-ink-2">No snapshot in this kloset yet.</p>
@@ -238,3 +235,4 @@
 		</ul>
 	{/if}
 </Panel>
+{/if}

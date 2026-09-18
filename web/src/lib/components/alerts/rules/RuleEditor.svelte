@@ -277,7 +277,7 @@
 			</p>
 		{:else if channels.length === 0}
 			<p class="text-[0.8125rem] text-ink-2">
-				No channel yet — nothing is sent. <a href="/settings" class="text-ink hover:underline">Add one in Settings</a>.
+				No channel yet — nothing is sent. <a href="/alerts#notifications" class="text-ink hover:underline">Add one under Notifications</a>.
 			</p>
 		{:else}
 			<div class="flex flex-wrap gap-x-4 gap-y-1.5">

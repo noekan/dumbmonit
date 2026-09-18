@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * Settings → Security: change your own password, sign out.
+	 * Settings → Account & security: change your own password, sign out.
 	 * Accounts that sign in through the identity provider have no password
 	 * here; when the server runs unprotected there is nothing to change either.
 	 */
@@ -9,6 +9,7 @@
 	import { auth, PASSWORD_MIN_LENGTH, validatePassword } from '$lib/stores/auth.svelte';
 	import { Button, ErrorNotice, Field, Panel, Plate } from '$lib/ui';
 	import PasswordInput from './PasswordInput.svelte';
+	import TwoFactorSection from './TwoFactorSection.svelte';
 
 	let current = $state('');
 	let next = $state('');
@@ -58,7 +59,7 @@
 	}
 </script>
 
-<Panel id="security" title="Security" description={auth.user ? `Your account: ${auth.user.username}.` : 'Your account and this session.'}>
+<Panel id="security" title="Account &amp; security" description={auth.user ? `Your account: ${auth.user.username}.` : 'Your account and this session.'}>
 	{#if !auth.available}
 		<Plate tone="info" size="md" label="This instance has no password protection." />
 	{:else if auth.user?.auth === 'oidc'}
@@ -111,6 +112,8 @@
 			</div>
 		</form>
 	{/if}
+
+	<TwoFactorSection />
 
 	{#if auth.available}
 		<div class="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">

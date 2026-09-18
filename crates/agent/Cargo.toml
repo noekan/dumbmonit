@@ -15,6 +15,9 @@ path = "src/main.rs"
 
 [dependencies]
 dumbmonit-proto = { path = "../proto" }
+# Les collecteurs du serveur, pour le mode relais : un agent posé dans un autre
+# réseau interroge les équipements de son site à la place du serveur.
+dumbmonit-collectors = { path = "../collectors" }
 
 anyhow.workspace = true
 chrono.workspace = true

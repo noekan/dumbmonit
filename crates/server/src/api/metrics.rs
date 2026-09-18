@@ -17,6 +17,31 @@ use crate::state::AppState;
 /// rien : on élargit le pas plutôt que de tout transmettre.
 const MAX_POINTS: i64 = 2_000;
 
+/// Longueur maximale d'une expression MetricsQL, en octets.
+///
+/// Les requêtes de l'interface tiennent en quelques centaines d'octets ; au-delà
+/// de quelques kilo-octets, c'est une expression construite pour occuper
+/// VictoriaMetrics, pas pour lire un graphe.
+const MAX_QUERY_LEN: usize = 4 * 1024;
+
+/// Plage maximale d'une requête sur intervalle : un peu plus d'un an, la
+/// rétention par défaut. Plus large, la requête parcourrait des séries qui
+/// n'existent pas et le pas serait de toute façon élargi jusqu'à l'absurde.
+const MAX_RANGE_MS: i64 = 400 * 24 * 3_600_000;
+
+fn validate_query(query: &str) -> ApiResult<()> {
+    if query.trim().is_empty() {
+        return Err(ApiError::BadRequest("The query is empty.".into()));
+    }
+    if query.len() > MAX_QUERY_LEN {
+        return Err(ApiError::BadRequest(format!(
+            "The query is too long ({} bytes, maximum {MAX_QUERY_LEN}).",
+            query.len()
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RangeQuery {
     /// Expression MetricsQL.
@@ -40,11 +65,14 @@ pub async fn query_range(
     State(state): State<AppState>,
     Query(params): Query<RangeQuery>,
 ) -> ApiResult<Json<Vec<SeriesView>>> {
-    if params.query.trim().is_empty() {
-        return Err(ApiError::BadRequest("The query is empty.".into()));
-    }
+    validate_query(&params.query)?;
     if params.end <= params.start {
         return Err(ApiError::BadRequest("The end of the range must be after its start.".into()));
+    }
+    if params.end - params.start > MAX_RANGE_MS {
+        return Err(ApiError::BadRequest(
+            "The range is too wide: query at most 400 days at a time.".into(),
+        ));
     }
 
     let step = resolve_step(params.start, params.end, params.step);
@@ -69,9 +97,7 @@ pub async fn query(
     State(state): State<AppState>,
     Query(params): Query<InstantQuery>,
 ) -> ApiResult<Json<Vec<SeriesView>>> {
-    if params.query.trim().is_empty() {
-        return Err(ApiError::BadRequest("The query is empty.".into()));
-    }
+    validate_query(&params.query)?;
 
     let series = state
         .victoria
@@ -125,6 +151,13 @@ mod tests {
     #[test]
     fn picks_a_step_on_its_own_when_none_is_given() {
         assert_eq!(resolve_step(0, HOUR, None), 1);
+    }
+
+    #[test]
+    fn an_oversized_query_is_refused() {
+        assert!(validate_query("up").is_ok());
+        assert!(validate_query("   ").is_err());
+        assert!(validate_query(&"a".repeat(MAX_QUERY_LEN + 1)).is_err());
     }
 
     #[test]

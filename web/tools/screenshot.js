@@ -9,7 +9,8 @@ const ONLY = process.argv.slice(2);
 const pages = [
   ['overview', '/'], ['devices', '/targets'], ['device-4', '/targets/4'], ['device-6', '/targets/6'], ['device-1', '/targets/1'],
   ['new', '/targets/new'], ['new-snmp', '/targets/new?kind=snmp'], ['edit-4', '/targets/4/edit'],
-  ['alerts', '/alerts'], ['settings', '/settings'], ['login', '/login'], ['setup', '/setup']
+  ['alerts', '/alerts'], ['alerts-notifications', '/alerts#notifications'], ['status', '/status'], ['status-new', '/status/new'],
+  ['settings', '/settings'], ['login', '/login'], ['setup', '/setup']
 ];
 (async () => {
   const browser = await puppeteer.launch({ executablePath: '/usr/bin/chromium-browser', args: ['--no-sandbox', '--disable-gpu'] });

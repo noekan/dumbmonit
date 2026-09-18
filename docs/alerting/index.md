@@ -50,6 +50,11 @@ levels.
 Set the parent on the device form. On the Devices page, children stack under
 their parent and dim when it is unreachable.
 
+A [relay agent](../install/remote-site.md) counts as a parent of every device
+it probes (*Reached through* on the device form), in addition to the parent
+set explicitly: when the relay is unreachable, its devices are suppressed with
+the relay named as the cause. At equal distance, the explicit parent wins.
+
 ## Grouping, deduplication, reminders
 
 Without grouping, a NAS whose RAID degrades would send one message per disk,
@@ -93,7 +98,7 @@ plain threshold on PBS's own forecast.
 
 Built-in rules have no channel attached, which means **every enabled channel**.
 A rule you edit can name specific channels. Channels are configured in
-Settings → Notifications; see [Notification channels](../notifications.md).
+Alerts → Notifications; see [Notification channels](../notifications.md).
 
 ## Smart notifications
 
@@ -129,5 +134,5 @@ gets spammed. The full path of one alert, in order:
 11. **Send** — with an "Open in DumbMonit" link per device when a public URL
     is known.
 
-Steps 6 to 10 are configured in Settings → Notification policy (global) and
+Steps 6 to 10 are configured in Alerts → Notifications → Notification policy (global) and
 on each channel (Delivery options). See [Notification policy](notifications.md).

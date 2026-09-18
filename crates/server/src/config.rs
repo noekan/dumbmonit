@@ -69,6 +69,19 @@ pub struct Config {
     /// efface tous les comptes et toutes les sessions au démarrage (les réglages
     /// SSO restent), puis l'interface repropose l'écran de première configuration.
     pub reset_password: bool,
+    /// Mandataires inverses dont `X-Forwarded-For` est cru
+    /// (`DUMBMONIT_TRUSTED_PROXIES`, adresses ou CIDR séparés par des virgules).
+    ///
+    /// Vide par défaut : l'adresse de la connexion TCP fait foi pour les
+    /// compteurs de tentatives et le journal d'audit. Derrière un mandataire,
+    /// tout le monde partagerait sinon le même seau — le sien.
+    pub trusted_proxies: Vec<ipnet::IpNet>,
+    /// Accepte un fournisseur OIDC en `http://` (`DUMBMONIT_OIDC_ALLOW_HTTP`).
+    ///
+    /// Un émetteur en clair livre le code d'autorisation et le secret client à
+    /// quiconque écoute le réseau ; ce n'est acceptable que pour un fournisseur
+    /// de test sur la boucle locale.
+    pub oidc_allow_http: bool,
     /// Connexion OpenID Connect décrite par l'environnement (`DUMBMONIT_OIDC_*`,
     /// `DUMBMONIT_PUBLIC_URL`). Un réglage enregistré depuis l'interface l'emporte.
     pub oidc: OidcEnv,
@@ -98,6 +111,11 @@ impl Config {
             db_pool_size: env_parsed::<u32>("DUMBMONIT_DB_POOL", "4")?.clamp(1, 64),
             agent_dir: PathBuf::from(env_or("DUMBMONIT_AGENT_DIR", "/agents")),
             reset_password: env_flag("DUMBMONIT_RESET_PASSWORD"),
+            trusted_proxies: crate::auth::client_ip::parse_trusted_proxies(&env_or(
+                "DUMBMONIT_TRUSTED_PROXIES",
+                "",
+            )),
+            oidc_allow_http: env_flag("DUMBMONIT_OIDC_ALLOW_HTTP"),
             oidc: OidcEnv::from_env(),
         })
     }

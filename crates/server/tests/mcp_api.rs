@@ -92,7 +92,10 @@ impl TestApp {
     ) -> Reply {
         let mut builder = Request::builder().method(method).uri(uri);
         if !self.cookie.is_empty() {
-            builder = builder.header(header::COOKIE, &self.cookie);
+            builder = builder
+                .header(header::COOKIE, &self.cookie)
+                // L'en-tête que l'interface pose sur chaque écriture (anti-CSRF).
+                .header("x-requested-with", "DumbMonit");
         }
         if let Some(token) = bearer {
             builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));

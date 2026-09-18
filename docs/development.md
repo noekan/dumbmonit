@@ -33,7 +33,7 @@ Compilation happens in Docker; nothing Rust needs to be installed on the host.
 ```bash
 # Full stack (builds the image: about 10 min cold) — UI on http://localhost:8080
 docker compose up -d --build
-# + lab SNMP agent (address `snmp-lab`, community `public`); the embedded VictoriaMetrics is published on :8428
+# developer overlay: the embedded VictoriaMetrics is published on :8428 for direct MetricsQL queries
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 # Rust, inside the builder stage (musl/alpine)
@@ -153,49 +153,4 @@ This site is built with MkDocs and Material for MkDocs from `docs/`
 pip install -r docs/requirements.txt
 mkdocs serve
 mkdocs build --strict   # what Read the Docs runs; must pass with no warnings
-```
-
-## Test lab
-
-`docker-compose.lab.yml` adds a third overlay that simulates every integration,
-so a collector, the OIDC login or a notification channel can be tried on a
-laptop without any hardware. Everything lives under `docker/lab/`, whose
-`README.md` has the full reference (credentials, what each simulated device
-shows, failure scenarios); this is the short version.
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.lab.yml up -d
-docker/lab/seed.sh     # DUMBMONIT_PASSWORD (default dumbmonit-dev-2026), DUMBMONIT_URL, DUMBMONIT_USER
-```
-
-What comes up, all reachable from the server by service name on the compose
-network:
-
-| Service | What it simulates | Device to create (done by `seed.sh`) |
-|---|---|---|
-| `snmp-ups`, `snmp-printer`, `snmp-switch` | snmpsim replaying hand-written `.snmprec` files: an APC UPS (UPS-MIB), an HP LaserJet (PRINTER-MIB), an 8-port Netgear switch (IF-MIB, one port down with errors). Counters increase in real time. Community = file name (`ups`, `printer`, `switch`); `public` works too, so the discovery scan finds them. | kind `snmp`, address `snmp-ups` / `snmp-printer` / `snmp-switch`, community as above |
-| `fake-pve`, `fake-pbs`, `fake-synology` | Python (stdlib) HTTP servers answering exactly the endpoints the `proxmox`, `pbs` and `synology` collectors call, with realistic JSON, API-token / ticket / session authentication, plain HTTP. | `proxmox` → `http://fake-pve:8006`, token `monitoring@pve!dumbmonit=8f3a1c9e-1ab0-4000-8000-d0bb0000c0de`; `pbs` → `http://fake-pbs:8007`, token `monitoring@pbs!dumbmonit=5c1d2e3f-1ab0-4000-8000-d0bb0000c0de`; `synology` → `fake-synology`, tags `scheme=http` `port=5000`, user `monitoring` / `lab-password` |
-| `dex` + `glauth` | OpenID Connect provider with two LDAP users: `admin@lab.local` (group `dumbmonit-admins` → admin) and `viewer@lab.local` (viewer), password `password`. Client `dumbmonit` / `dumbmonit-lab-secret`. | The overlay sets `DUMBMONIT_OIDC_*` on the server; see the issuer note below |
-| `mailpit`, `ntfy` | SMTP sink with a web UI on <http://localhost:8025>; ntfy on <http://localhost:8090> | channels `smtp` (host `mailpit`, port 1025, security `none`) and `ntfy` (server `http://ntfy:80`, topic `dumbmonit-lab`) |
-| `lab-victim` | `nginx:1.25-alpine` with the label `dumbmonit.autorestart=true`, for the agent's Docker restart / update actions (the update pulls `nginx:1.27-alpine`) | `http` → `http://lab-victim/` |
-
-Failure scenarios are toggled per fake with a comma-separated list, then the
-container is recreated: `LAB_PVE_SCENARIO=vm-stopped,backup-old`,
-`LAB_PBS_SCENARIO=verify-failed,backup-old`,
-`LAB_SYNOLOGY_SCENARIO=disk-warning,backup-old`. The UPS outage is a second
-recording: change the device's community to `ups-onbattery`.
-
-**OIDC issuer.** The issuer URL is fetched by the server container *and* opened
-by the browser, so it must resolve for both. The default `http://dex:5556/dex`
-works once the host's `/etc/hosts` contains `127.0.0.1 dex` (port 5556 is
-published). On a LAN, `LAB_DEX_ISSUER=http://<host-ip>:5556/dex` for both
-`dex` and `dumbmonit` avoids the hosts entry. Dex requests the `groups` scope
-through `DUMBMONIT_OIDC_SCOPES`; without it the role mapping has nothing to read.
-
-Checking the lab from the command line, after a minute:
-
-```bash
-curl -s -b cookie localhost:8080/api/targets | jq '.[] | select(.name | startswith("Lab ")) | {name, profile_id, last_error}'
-curl -s -b cookie --get --data-urlencode 'query=dumbmonit_up{host=~"Lab .*"}' localhost:8080/api/metrics/query
-docker run --rm --network dumbmonit_default alpine sh -c 'apk add -q net-snmp-tools && snmpwalk -v2c -c ups snmp-ups 1.3.6.1.2.1.33'
 ```

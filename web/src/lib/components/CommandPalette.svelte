@@ -16,6 +16,7 @@
 		Gauge,
 		Server,
 		BellRing,
+		Globe,
 		Settings2,
 		Tv,
 		BookOpen,
@@ -23,6 +24,7 @@
 		Radar,
 		CalendarClock,
 		BellPlus,
+		Megaphone,
 		SunMoon,
 		CornerDownLeft
 	} from 'lucide-svelte';
@@ -59,13 +61,17 @@
 		{ id: 'page:/', group: 'Pages', label: 'Overview', keywords: 'home bulletin sky', icon: Gauge, run: go('/') },
 		{ id: 'page:/targets', group: 'Pages', label: 'Devices', keywords: 'rack targets hosts', icon: Server, run: go('/targets') },
 		{ id: 'page:/alerts', group: 'Pages', label: 'Alerts', keywords: 'needs you warnings advisories', icon: BellRing, run: go('/alerts') },
-		{ id: 'page:/settings', group: 'Pages', label: 'Settings', keywords: 'preferences agents notifications', icon: Settings2, run: go('/settings') },
+		{ id: 'page:/alerts#notifications', group: 'Pages', label: 'Notifications', detail: 'Channels, policy and quiet hours', keywords: 'channels policy quiet hours alerts', icon: BellRing, run: go('/alerts#notifications') },
+		{ id: 'page:/status', group: 'Pages', label: 'Status pages', detail: 'Public pages and announcements', keywords: 'public incidents maintenance announcements uptime', icon: Globe, run: go('/status') },
+		{ id: 'page:/settings', group: 'Pages', label: 'Settings', keywords: 'preferences account password users sso agents tokens assistant appearance theme about', icon: Settings2, run: go('/settings') },
 		{ id: 'page:/wall', group: 'Pages', label: 'Wall mode', detail: 'Full-screen bulletin for a wall display', keywords: 'kiosk tv screen', icon: Tv, run: go('/wall') },
 		{ id: 'page:docs', group: 'Pages', label: 'Documentation', keywords: 'docs help manual notifications channels', icon: BookOpen, run: () => window.open('https://dumbmonit.readthedocs.io/en/latest/', '_blank', 'noopener') },
 		{ id: 'action:add', group: 'Actions', label: 'Add a device', keywords: 'new target create host', icon: Plus, run: go('/targets/new') },
 		{ id: 'action:scan', group: 'Actions', label: 'Scan my network', keywords: 'discover cidr snmp', icon: Radar, run: go('/targets/new') },
 		{ id: 'action:maintenance', group: 'Actions', label: 'Schedule maintenance', keywords: 'silence window quiet', icon: CalendarClock, run: go('/alerts#scheduled') },
-		{ id: 'action:channel', group: 'Actions', label: 'Add notification channel', keywords: 'slack discord telegram email webhook', icon: BellPlus, run: go('/settings#notifications') },
+		{ id: 'action:channel', group: 'Actions', label: 'Add notification channel', keywords: 'slack discord telegram email webhook', icon: BellPlus, run: go('/alerts#notifications') },
+		{ id: 'action:status-page', group: 'Actions', label: 'New status page', keywords: 'public status page create', icon: Globe, run: go('/status/new') },
+		{ id: 'action:incident', group: 'Actions', label: 'Announce an incident', keywords: 'status page maintenance announcement outage', icon: Megaphone, run: go('/status#incidents') },
 		{ id: 'action:theme', group: 'Actions', label: 'Toggle theme', keywords: 'dark light night day', icon: SunMoon, run: () => theme.toggle() }
 	];
 

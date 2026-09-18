@@ -43,11 +43,11 @@ Three principles apply to every channel:
 
 ## Creating and testing a channel
 
-1. Open **Notifications → Channels → New channel**.
+1. Open **Alerts → Notifications → Add channel** (`/alerts#notifications`).
 2. Give it a meaningful name ("Discord — family", "SMS — on-call"). This is the
    name you will pick later in your alert rules.
 3. Choose the channel type, then fill in the fields described below.
-4. Save, then click **Send a test message**.
+4. Save, then click **Send test**.
 
 The test message takes **exactly the same path** as a real alert: same request,
 same token, same formatting. If it arrives, the channel works. If it fails, the

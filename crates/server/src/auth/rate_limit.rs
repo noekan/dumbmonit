@@ -1,22 +1,22 @@
 //! Limitation des tentatives de connexion.
 //!
-//! Un mot de passe unique sans limitation se casse par force brute : rien
-//! n'empêcherait un script de tenter des milliers de combinaisons par minute. Le
-//! coût d'Argon2id ralentit déjà l'attaquant ; ce compteur le bloque.
+//! Un mot de passe sans limitation se casse par force brute : rien n'empêcherait
+//! un script de tenter des milliers de combinaisons par minute. Le coût
+//! d'Argon2id ralentit déjà l'attaquant ; ces compteurs le bloquent.
 //!
-//! Le compteur est **global et en mémoire**, et c'est délibéré :
+//! Chaque tentative est comptée dans **deux seaux** : celui de l'adresse du
+//! client et celui du compte visé. Le premier arrête un script qui balaie des
+//! comptes depuis une adresse ; le second protège un compte visé depuis
+//! plusieurs adresses — au prix, assumé, qu'un inconnu qui atteint le port peut
+//! tenir un compte précis dehors quelques minutes en échouant exprès. Le blocage
+//! est donc plafonné, et il s'efface sur une connexion réussie.
 //!
-//! - global, parce qu'il n'y a qu'un secret à protéger. Compter par adresse IP
-//!   n'aurait pas de sens — un attaquant en changerait, alors que le mot de passe
-//!   attaqué, lui, reste le même ;
-//! - en mémoire, parce qu'une instance est un processus unique et qu'écrire chaque
-//!   échec en base pour survivre à un redémarrage n'apporterait rien : redémarrer
-//!   le serveur est déjà hors de portée de l'attaquant qu'on vise ici.
-//!
-//! Contrepartie assumée : quelqu'un qui atteint le port peut tenir le propriétaire
-//! dehors quelques minutes en échouant exprès. Le blocage est donc plafonné, et il
-//! n'expire jamais sur une connexion réussie plutôt que sur un délai figé.
+//! Tout est **en mémoire** : une instance est un processus unique, et écrire
+//! chaque échec en base pour survivre à un redémarrage n'apporterait rien —
+//! redémarrer le serveur est déjà hors de portée de l'attaquant qu'on vise ici.
 
+use std::collections::HashMap;
+use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
 /// Nombre d'échecs tolérés avant le premier blocage. Une faute de frappe, un
@@ -75,6 +75,85 @@ impl Default for RateLimiter {
     }
 }
 
+/// Ce sur quoi porte un compteur.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Key {
+    /// Adresse du client, telle que [`crate::auth::client_ip`] l'a établie.
+    Ip(IpAddr),
+    /// Compte visé, en minuscules — les identifiants ne distinguent pas la casse.
+    User(String),
+}
+
+impl Key {
+    pub fn user(username: &str) -> Self {
+        Self::User(username.trim().to_lowercase())
+    }
+}
+
+/// Seaux indépendants, un par [`Key`], purgés au fil de l'eau.
+///
+/// Un seau qui ne bloque plus et n'a pas d'échec récent est oublié : la table ne
+/// grossit pas avec le nombre d'adresses qui ont un jour frappé au port.
+pub struct Buckets {
+    buckets: HashMap<Key, (RateLimiter, Instant)>,
+}
+
+/// Au-delà, un seau inactif est retiré à la prochaine purge.
+const IDLE: Duration = Duration::from_secs(15 * 60);
+/// Nombre de seaux au-delà duquel une purge est tentée à chaque écriture.
+const PURGE_ABOVE: usize = 4_096;
+
+impl Buckets {
+    pub fn new() -> Self {
+        Self { buckets: HashMap::new() }
+    }
+
+    /// Autorise ou refuse une tentative : il suffit qu'un des seaux bloque.
+    pub fn check(&mut self, keys: &[Key], now: Instant) -> Result<(), u64> {
+        let mut wait = 0;
+        for key in keys {
+            if let Some((bucket, _)) = self.buckets.get_mut(key)
+                && let Err(seconds) = bucket.check(now)
+            {
+                wait = wait.max(seconds);
+            }
+        }
+        if wait > 0 { Err(wait) } else { Ok(()) }
+    }
+
+    pub fn record_failure(&mut self, keys: &[Key], now: Instant) {
+        for key in keys {
+            let entry =
+                self.buckets.entry(key.clone()).or_insert_with(|| (RateLimiter::new(), now));
+            entry.0.record_failure(now);
+            entry.1 = now;
+        }
+        self.purge(now);
+    }
+
+    /// Une connexion réussie efface l'ardoise des seaux concernés.
+    pub fn record_success(&mut self, keys: &[Key]) {
+        for key in keys {
+            self.buckets.remove(key);
+        }
+    }
+
+    fn purge(&mut self, now: Instant) {
+        if self.buckets.len() < PURGE_ABOVE {
+            return;
+        }
+        self.buckets.retain(|_, (bucket, last)| {
+            bucket.check(now).is_err() || now.duration_since(*last) < IDLE
+        });
+    }
+}
+
+impl Default for Buckets {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,6 +193,42 @@ mod tests {
         }
         let wait = limiter.check(now).expect_err("toujours bloqué");
         assert!(wait <= MAX_DELAY.as_secs() + 1, "le blocage doit rester plafonné : {wait}");
+    }
+
+    #[test]
+    fn buckets_are_independent_per_address_and_per_account() {
+        let mut buckets = Buckets::new();
+        let now = Instant::now();
+        let attacker = Key::Ip("203.0.113.7".parse().unwrap());
+        let owner = Key::Ip("192.168.1.10".parse().unwrap());
+        let admin = Key::user("Admin");
+        let jane = Key::user("jane");
+
+        for _ in 0..=FREE_ATTEMPTS {
+            buckets.record_failure(&[attacker.clone(), jane.clone()], now);
+        }
+        // L'adresse de l'attaquant est bloquée, quel que soit le compte visé.
+        assert!(buckets.check(&[attacker.clone(), admin.clone()], now).is_err());
+        // Le compte visé est bloqué, quelle que soit l'adresse.
+        assert!(buckets.check(&[owner.clone(), jane.clone()], now).is_err());
+        // Le propriétaire, depuis chez lui, sur son compte : rien à signaler.
+        assert!(buckets.check(&[owner.clone(), admin.clone()], now).is_ok());
+
+        buckets.record_success(&[owner, jane.clone()]);
+        assert!(buckets.check(&[jane], now).is_ok());
+        assert!(buckets.check(&[attacker], now).is_err());
+    }
+
+    #[test]
+    fn idle_buckets_are_forgotten_once_the_table_grows() {
+        let mut buckets = Buckets::new();
+        let start = Instant::now();
+        for i in 0..PURGE_ABOVE {
+            buckets.record_failure(&[Key::user(&format!("u{i}"))], start);
+        }
+        assert!(buckets.buckets.len() >= PURGE_ABOVE);
+        buckets.record_failure(&[Key::user("late")], start + IDLE + Duration::from_secs(1));
+        assert!(buckets.buckets.len() < 10, "{}", buckets.buckets.len());
     }
 
     #[test]

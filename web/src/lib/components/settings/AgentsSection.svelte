@@ -10,6 +10,7 @@
 	import { formatDateTime, formatRelative } from '$lib/format';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { Button, Confirm, CopyBlock, EmptyState, ErrorNotice, Field, Panel, Plate, Skeleton } from '$lib/ui';
+	import AgentChecksums from '$lib/components/device-form/AgentChecksums.svelte';
 
 	let tokens = $state<AgentToken[]>([]);
 	let loading = $state(true);
@@ -145,6 +146,7 @@
 								<CopyBlock value={created.install_windows} label="Copy command" />
 							</div>
 						{/if}
+						<AgentChecksums />
 					</div>
 				</div>
 			{/if}
