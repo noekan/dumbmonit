@@ -1,5 +1,12 @@
 # DumbMonit — rapport du 16 septembre 2026
 
+**Mise à jour 21/09** — retour collègue (round 6) livré : `v0.1.0-alpha.2` (commit `98e75d2`) puis `v0.1.0-alpha.3` (`0cf8cbc`, correctifs ci-dessous). Image `ghcr.io/noekan/dumbmonit:latest` = alpha.3 dès que le workflow Release finit (~2 h) ; en attendant, `:edge`.
+
+- **Vérifié en live sur :8080** (fakes PVE/PBS/DSM du labo local) : panneau Invités PVE (7 VM/CT, statut, CPU, RAM, disque, réseau, uptime, dernière sauvegarde, HA), page PBS (échecs 30 j, calendrier à points, jobs sync/verify/prune/GC, santé), page Synology (CPU/RAM/température/uptime, volumes, disques SMART/usure, Active Backup avec cadence apprise), formulaire Proxmox « Token ID + Secret » avec tuto utilisateur dédié en lecture seule, nouvelle navigation Overview · Devices · Alerts · Status · Settings, 2FA dans Réglages, CSRF (`X-Requested-With`), en-têtes de sécurité, alertes intégrées PVE/ABB qui montent. Captures README/docs régénérées.
+- **Cassé dans alpha.2, corrigé en alpha.3** : (1) **mise à jour depuis alpha.1 plantait en boucle** — le conteneur tourne en utilisateur 65532 et le volume créé par alpha.1 appartient à root ; il faut une fois `docker run --rm -v dumbmonit-data:/data alpine chown -R 65532:65532 /data` (le serveur le dit maintenant au démarrage ; doc « Upgrading »). (2) **Telegram rejetait chaque message** (Markdown legacy : `**gras**` et `_` dans les noms de machines) → envoi en HTML échappé. (3) Résumés d'alertes qui listaient `tag_port`, `device_id`… → masqués.
+- **Pas vérifié en live** : mode relais (agent `relay: true` + image `dumbmonit-agent`) — seulement tests unitaires/intégration ; Plakar auto-détecté ; 2FA de bout en bout (enrôlement/QR) ; Windows.
+- **À faire par toi** : rendre le package ghcr public ; réinstaller l'agent sur nuci3/Windows (vieux binaire) ; sauvegarder le volume `dumbmonit-data` avant de mettre à jour.
+
 **Mise à jour 16/09 soir** : les points 1, 2, 3, 4, 5, 6 ci-dessous et la faille OIDC sont **corrigés** (commit `47fb461`, vérifiés en live : 0 alerte fantôme, commandes expirées, agent ancien signalé, mobile OK). Tag `v0.1.0-alpha.1` posé → image `ghcr.io/noekan/dumbmonit:latest` (à rendre publique sur GitHub → Packages → dumbmonit → Change visibility).
 
 Tout ce qui était demandé est construit, testé et poussé (`main`, image mono-conteneur sur http://localhost:8080, login `admin` / `dumbmonit-dev-2026`).
