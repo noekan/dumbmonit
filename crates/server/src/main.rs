@@ -31,6 +31,7 @@ async fn run(config: Config) -> Result<()> {
     tokio::fs::create_dir_all(&config.data_dir)
         .await
         .with_context(|| format!("creating directory {}", config.data_dir.display()))?;
+    ensure_data_dir_writable(&config.data_dir).await?;
 
     let secret = resolve_secret(&config).await?;
     db::adopt_legacy_database(&config.data_dir).await?;
@@ -163,6 +164,40 @@ fn init_tracing() {
 ///
 /// Le fichier permet à `docker compose up` de fonctionner sans configuration, tout
 /// en gardant les identifiants déchiffrables après un redémarrage.
+/// Vérifie tout de suite que le répertoire de données est accessible, avec un
+/// message qui dit quoi faire : depuis 0.1.0-alpha.2 le conteneur ne tourne plus
+/// en root, et un volume créé par une version antérieure (ou un bind mount)
+/// appartient encore à root. Sans ce contrôle, l'erreur arrive plus loin, sur
+/// `secret.key` ou sur la base, sous une forme qui n'explique rien.
+async fn ensure_data_dir_writable(data_dir: &std::path::Path) -> Result<()> {
+    let probe = data_dir.join(".write-test");
+    let outcome = match tokio::fs::write(&probe, b"").await {
+        Ok(()) => tokio::fs::remove_file(&probe).await,
+        Err(error) => Err(error),
+    };
+    match outcome {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            #[cfg(unix)]
+            let uid = unsafe { libc::geteuid() };
+            #[cfg(not(unix))]
+            let uid = 0;
+            anyhow::bail!(
+                "{} is not writable by the server (running as uid {uid}). The container \
+                 runs as user 65532 since 0.1.0-alpha.2: a volume created by an older \
+                 version or a bind mount must be handed over once with\n  docker run --rm \
+                 -v dumbmonit-data:/data alpine chown -R 65532:65532 /data\nor start the \
+                 container as the owner of the files (`user: \"1000:1000\"` in \
+                 docker-compose.yml).",
+                data_dir.display()
+            );
+        }
+        Err(error) => {
+            Err(anyhow::Error::from(error).context(format!("writing to {}", data_dir.display())))
+        }
+    }
+}
+
 async fn resolve_secret(config: &Config) -> Result<String> {
     if let Some(secret) = &config.secret {
         info!("instance secret provided by the environment");

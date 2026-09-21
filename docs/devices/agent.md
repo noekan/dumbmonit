@@ -178,7 +178,7 @@ a container without mounting a file:
 | `DUMBMONIT_AGENT_CPU_PER_CORE` | `true` to also send one CPU series per core (default `false`) |
 | `DUMBMONIT_AGENT_MAX_BUFFERED_SAMPLES` | Size of the catch-up buffer |
 | `DUMBMONIT_AGENT_LOG` | `trace`, `debug`, `info`, `warn`, `error` |
-| `DUMBMONIT_AGENT_RELAY` | `true` to run, for the server, the probes of the devices assigned to this agent (see [Run the agent in Docker / on another network](#run-the-agent-in-docker-on-another-network)) |
+| `DUMBMONIT_AGENT_RELAY` | `true` to run, for the server, the probes of the devices assigned to this agent (see [Run the agent in Docker / on another network](#run-the-agent-in-docker--on-another-network)) |
 | `DUMBMONIT_AGENT_SITE` | Site label shown next to the agent when it is offered as a relay |
 
 ## Run the agent in Docker / on another network

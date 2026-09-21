@@ -64,9 +64,22 @@ function titleFor(name: string): string {
  */
 function labelFor(metric: Record<string, string>): string {
 	const distinctive = Object.entries(metric)
-		.filter(([key]) => key !== '__name__' && key !== 'target' && key !== 'host')
+		.filter(([key]) => isDistinctiveLabel(key))
 		.map(([, value]) => value);
 	return distinctive.length > 0 ? distinctive.join(' · ') : (metric.host ?? 'value');
+}
+
+/**
+ * Does this label tell one series of a device apart from another, in a way a
+ * person reads? Labels that identify the whole device (`target`, `host`,
+ * `instance`), the device's own tags copied on every series (`tag_*`) and
+ * numeric identifiers that double a name (`device_id` next to `device`,
+ * `task_id` next to `task`) say nothing new in a one-line summary.
+ */
+export function isDistinctiveLabel(key: string): boolean {
+	if (['__name__', 'target', 'host', 'instance', 'job', 'index'].includes(key)) return false;
+	if (key.startsWith('tag_')) return false;
+	return !key.endsWith('_id');
 }
 
 /** Converts a Prometheus series into numeric points, dropping unreadable values. */

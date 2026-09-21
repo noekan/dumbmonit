@@ -21,7 +21,7 @@ Disabled) and a kind filter. **Add a device** is the primary action.
 
 ## A device
 
-![A device page: state, actions, alerts, metrics](../assets/screenshots/device-light.png){ loading=lazy }
+![A device page: state, actions, alerts, the kind-specific panel, metrics](../assets/screenshots/device-light.png){ loading=lazy }
 
 The device page shows its state plate, address, kind, detected profile, tags,
 last probe, and for services the certificate status. Actions:

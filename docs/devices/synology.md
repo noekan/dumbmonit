@@ -42,6 +42,8 @@ condemns the whole probe.
 
 ## The device page
 
+![A Synology device: at a glance, volumes, disks and Active Backup](../assets/screenshots/device-synology-light.png){ loading=lazy }
+
 A Synology device gets its own panel above the charts:
 
 * **At a glance** — CPU, memory (used of total), temperature and uptime, with

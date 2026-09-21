@@ -171,6 +171,8 @@ See `docker-compose.agent.yml` and [Monitor a remote site](docs/install/remote-s
 | Devices, stacked like a rack | Add a device: type, notice, relevant fields only |
 | <img src=".github/assets/screenshots/alerts-light.png" alt="Alerts page, light theme: firing alerts grouped by host" width="440"> | <img src=".github/assets/screenshots/wall-dark.png" alt="Wall mode, dark theme: the bulletin full screen for a room monitor" width="440"> |
 | Alerts, grouped by host | Wall mode for a room monitor |
+| <img src=".github/assets/screenshots/device-proxmox-light.png" alt="A Proxmox VE device, light theme: the Guests panel lists every VM and container with status, CPU, memory, disk, network, uptime, last backup and HA state" width="440"> | <img src=".github/assets/screenshots/device-proxmox-dark.png" alt="The same Proxmox VE device page in the dark theme" width="440"> |
+| Proxmox VE: every guest at a glance | The same page, dark theme |
 
 More screenshots, in both themes, in [`.github/assets/screenshots/`](.github/assets/screenshots/).
 

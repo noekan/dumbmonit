@@ -7,6 +7,7 @@
  * pages read an alert the same way.
  */
 import type { Alert, AlertRule, AlertSeverity, Silence, SilenceSchedule, Target } from '$lib/api';
+import { isDistinctiveLabel } from '$lib/metrics';
 import type { Tone } from '$lib/ui';
 import { formatDateTime, formatDuration } from '$lib/format';
 
@@ -55,7 +56,7 @@ export function isForecast(alert: Alert, rule: AlertRule | undefined): boolean {
 export function alertDetail(alert: Alert, rule: AlertRule | undefined): string {
 	const parts: string[] = [];
 	for (const [key, value] of Object.entries(alert.labels)) {
-		if (key === 'target' || key === 'host' || key === 'instance' || key === '__name__') continue;
+		if (!isDistinctiveLabel(key)) continue;
 		parts.push(value);
 	}
 	if (alert.value !== null && Number.isFinite(alert.value)) {

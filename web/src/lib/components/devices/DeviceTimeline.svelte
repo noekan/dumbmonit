@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { isDistinctiveLabel } from '$lib/metrics';
 	/**
 	 * The story of this device's alerts: what is firing now, then the moments
 	 * that mattered — a rule starting to fire, a rule going quiet. The dot
@@ -115,7 +116,7 @@
 		const map = new Map<string, string>();
 		for (const alert of alerts) {
 			const parts = Object.entries(alert.labels)
-				.filter(([key]) => !['target', 'host', 'instance', '__name__'].includes(key))
+				.filter(([key]) => isDistinctiveLabel(key))
 				.map(([, value]) => value);
 			if (parts.length > 0) map.set(alert.fingerprint, parts.join(' · '));
 		}

@@ -187,6 +187,22 @@ docker compose up -d
 
 Database migrations run at startup. VictoriaMetrics data is untouched.
 
+### From 0.1.0-alpha.1
+
+Since 0.1.0-alpha.2 the container runs as user 65532 instead of root. A
+volume created by alpha.1 still belongs to root, and the server refuses to
+start (`/data is not writable by the server`). Hand the volume over once:
+
+```bash
+docker compose down
+docker run --rm -v dumbmonit-data:/data alpine chown -R 65532:65532 /data
+docker compose up -d
+```
+
+Or keep the files as they are and run the container as their owner, with
+`user: "0:0"` (or the uid of a bind mount) under the service in
+`docker-compose.yml`.
+
 ### From EzyMonit, and from the two-container setup
 
 DumbMonit was called EzyMonit until September 2026, and ran as two containers,

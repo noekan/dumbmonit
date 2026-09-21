@@ -6,18 +6,21 @@ const puppeteer = require('/usr/src/app/node_modules/puppeteer');
 const COOKIE = process.env.COOKIE || '';
 const BASE = process.env.BASE || 'http://localhost:4173';
 const ONLY = process.argv.slice(2);
+// FULL=0 shoots the viewport only (1440×900): the size of the README / docs assets.
+const FULL = process.env.FULL !== '0';
+const SIZES = process.env.DESKTOP_ONLY ? [[1440, 900, 'desktop']] : [[1440, 900, 'desktop'], [390, 844, 'mobile']];
 const pages = [
-  ['overview', '/'], ['devices', '/targets'], ['device-4', '/targets/4'], ['device-6', '/targets/6'], ['device-1', '/targets/1'],
-  ['new', '/targets/new'], ['new-snmp', '/targets/new?kind=snmp'], ['edit-4', '/targets/4/edit'],
+  ['overview', '/'], ['devices', '/targets'], ['device-pve', '/targets/27'], ['device-pbs', '/targets/28'], ['device-nas', '/targets/29'],
+  ['device-agent', '/targets/6'], ['new', '/targets/new'], ['new-snmp', '/targets/new?kind=snmp'], ['new-proxmox', '/targets/new?kind=proxmox'],
   ['alerts', '/alerts'], ['alerts-notifications', '/alerts#notifications'], ['status', '/status'], ['status-new', '/status/new'],
-  ['settings', '/settings'], ['login', '/login'], ['setup', '/setup']
+  ['settings', '/settings'], ['login', '/login'], ['setup', '/setup'], ['wall', '/wall']
 ];
 (async () => {
   const browser = await puppeteer.launch({ executablePath: '/usr/bin/chromium-browser', args: ['--no-sandbox', '--disable-gpu'] });
   const page = await browser.newPage();
   if (COOKIE) await page.setCookie({ name: 'dumbmonit_session', value: COOKIE, domain: 'localhost', path: '/', httpOnly: true });
   for (const theme of ['light', 'dark']) {
-    for (const [w, h, tag] of [[1440, 900, 'desktop'], [390, 844, 'mobile']]) {
+    for (const [w, h, tag] of SIZES) {
       await page.setViewport({ width: w, height: h, deviceScaleFactor: 1 });
       // Entry screens redirect when a session cookie is present: shoot them without COOKIE.
       const gated = new Set(['login', 'setup']);
@@ -26,7 +29,7 @@ const pages = [
         await page.goto(BASE + path, { waitUntil: 'networkidle0', timeout: 30000 }).catch(e => console.log('goto', path, e.message));
         await new Promise(r => setTimeout(r, 1500));
         try {
-          await page.screenshot({ path: `/work/shots/${name}-${theme}-${tag}.png`, fullPage: true });
+          await page.screenshot({ path: `/work/shots/${name}-${theme}-${tag}.png`, fullPage: FULL });
           console.log('shot', name, theme, tag);
         } catch (e) {
           console.log('failed', name, theme, tag, e.message);

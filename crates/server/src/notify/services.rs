@@ -285,6 +285,24 @@ impl Telegram {
         }
     }
 
+    /// Corps en HTML Telegram, la seule syntaxe qui n'a pas de caractère réservé
+    /// dans le texte courant. Le Markdown « legacy » de Telegram n'a ni `**gras**`
+    /// ni `_` dans un nom de machine (`DESKTOP_01`) : le moindre nom d'hôte
+    /// faisait rejeter le message avec « can't parse entities ».
+    fn html(message: &Message) -> String {
+        let escape =
+            |text: &str| text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        let mut out = format!("<b>{} {}</b>", message.emoji(), escape(&message.title));
+        for line in message.text.lines() {
+            if message.link.as_deref() == Some(line) {
+                out.push_str(&format!("\n<a href=\"{}\">Open in DumbMonit</a>", escape(line)));
+            } else {
+                out.push_str(&format!("\n• {}", escape(line)));
+            }
+        }
+        out
+    }
+
     fn explain(status: u16, body: &str) -> Option<String> {
         Some(
             match status {
@@ -316,8 +334,8 @@ impl Notifier for Telegram {
     async fn send(&self, message: &Message) -> Result<(), NotifyError> {
         let mut body = json!({
             "chat_id": self.chat_id,
-            "text": message.markdown,
-            "parse_mode": "Markdown",
+            "text": Self::html(message),
+            "parse_mode": "HTML",
             "disable_web_page_preview": true,
         });
         if let Some(thread) = self.message_thread_id {
@@ -412,6 +430,23 @@ mod tests {
         assert_eq!(notifier.token.expose(), "123456:AAEjeton");
         assert_eq!(format!("{:?}", notifier.token), "SecretString(***)");
         assert_eq!(notifier.message_thread_id, None);
+    }
+
+    #[test]
+    fn telegram_envoie_du_html_echappe_avec_le_lien_cliquable() {
+        let mut message = crate::notify::message::sample_message(false);
+        message.title = "NAS <prod> — Disk & RAM".to_string();
+        message.text = "DESKTOP_01 (_x_) > 90%".to_string();
+        message.attach_link("http://monit.lan/");
+        let html = Telegram::html(&message);
+        assert!(html.starts_with("<b>"), "{html}");
+        assert!(html.contains("NAS &lt;prod&gt; — Disk &amp; RAM</b>"), "{html}");
+        assert!(html.contains("\n• DESKTOP_01 (_x_) &gt; 90%"), "{html}");
+        assert!(
+            html.ends_with("<a href=\"http://monit.lan/targets/42\">Open in DumbMonit</a>"),
+            "{html}"
+        );
+        assert!(!html.contains("**"), "{html}");
     }
 
     #[test]

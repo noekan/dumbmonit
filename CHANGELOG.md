@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.1.0-alpha.3 — 2026-09-21
+
+### Fixed
+
+- Telegram rejected every notification whose device name contained an
+  underscore (legacy Markdown mode); messages are now sent as escaped HTML.
+- Upgrading a volume created by alpha.1: the server now stops with the
+  exact `chown` command to run instead of a bare "Permission denied".
+- Alert summaries no longer list the device's own tags and internal ids.
+- Screenshots regenerated; new ones for the Proxmox VE, PBS and Synology
+  panels.
+
 ## 0.1.0-alpha.2 — 2026-09-18
 
 ### Added
@@ -32,6 +44,10 @@ All notable changes to this project are documented here. The format follows
 - Plakar is detected automatically on the agent host and stays invisible
   when absent.
 - Copy buttons work on plain-http (LAN) deployments.
+- The container runs as user 65532 with no capability and a read-only root
+  file system. **Upgrading from alpha.1**: the data volume must be handed over
+  once — `docker run --rm -v dumbmonit-data:/data alpine chown -R 65532:65532 /data`
+  (the server says so at startup).
 
 ### Added
 

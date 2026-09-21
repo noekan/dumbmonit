@@ -6,6 +6,7 @@
  * Pure: the page gathers the readings and hands them in with the clock.
  */
 import type { Alert, AlertRule, Silence, Target, TargetId } from "$lib/api";
+import { isDistinctiveLabel } from "$lib/metrics";
 import type { Tone } from "$lib/ui";
 import { parseServerDate } from "$lib/format";
 import { isForecast } from "$lib/components/alerts/helpers";
@@ -111,10 +112,7 @@ export function daysToFull(
 /** The series labels that tell alerts of one rule apart: a disk, a datastore. */
 function seriesLabel(alert: Alert): string {
   return Object.entries(alert.labels)
-    .filter(
-      ([key]) =>
-        !["target", "host", "instance", "__name__", "index"].includes(key),
-    )
+    .filter(([key]) => isDistinctiveLabel(key))
     .map(([, value]) => value)
     .join(" ");
 }

@@ -6,6 +6,8 @@ datastores, disks and ZFS pools, pending updates.
 
 ## The device page
 
+![A PBS device: failures, the 30-day backup calendar, jobs and health](../assets/screenshots/device-pbs-light.png){ loading=lazy }
+
 Beyond the generic charts, a PBS device shows four panels, read from what the
 probe stored — opening the page never queries PBS itself:
 
