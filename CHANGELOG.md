@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.1.0-alpha.4 — 2026-09-22
+
 ### Added
 
 - Acknowledge an alert ("I know, stop reminding me"): **Ack** on every
