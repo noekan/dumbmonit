@@ -105,6 +105,9 @@ LAN or behind a VPN; if you expose it, use a reverse proxy with TLS and set
 
 ## Is there an API token?
 
-Not yet. The API is protected by the session cookie only: log in with the
-password through `POST /api/auth/login` and send the cookie. See the
+Yes. Settings → **API & assistants** creates `dmt_…` tokens with a `read` or
+`write` scope; send one as `Authorization: Bearer dmt_…` on any route and
+no cookie or CSRF header is needed. The same token connects an
+[assistant](using/assistant.md) through MCP. Tokens never manage accounts,
+sign-in settings or other tokens. See the
 [HTTP API reference](reference/api.md#authentication).

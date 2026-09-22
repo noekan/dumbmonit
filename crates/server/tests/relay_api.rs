@@ -10,7 +10,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use axum::routing::get;
-use dumbmonit_proto::{ProbeJob, ProbeOutcome};
+use dumbmonit_proto::{AgentCommand, ProbeJob, ProbeOutcome};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -83,7 +83,48 @@ async fn create_http_target(app: &TestApp, admin: &str, url: &str, via_agent: Op
         )
         .await;
     assert_eq!(reply.status, StatusCode::CREATED, "cible : {}", reply.body);
+    // La réponse de création annonce déjà le relais : l'interface s'en sert
+    // sans relire la cible.
+    assert_eq!(reply.body["via_agent"], json!(via_agent), "relais dans la réponse");
     reply.body["id"].as_i64().expect("id")
+}
+
+/// Vient chercher, comme l'agent, la prochaine *mesure* confiée à `key`.
+///
+/// Une cible créée sans profil lance aussi une identification, qui passe par
+/// le même canal et peut arriver avant ou après la mesure : elle est rendue
+/// avec un compte rendu vide, comme le ferait l'agent pour un type sans profil.
+async fn take_probe(app: &TestApp, token: &str, key: &str) -> (AgentCommand, ProbeJob) {
+    for _ in 0..3 {
+        let (status, jobs) =
+            as_agent(app, "GET", &format!("/api/agent/relay?key={key}&wait=5"), token, Value::Null)
+                .await;
+        assert_eq!(status, StatusCode::OK, "{jobs}");
+        let mut probe = None;
+        for job in jobs.as_array().expect("liste") {
+            let command: AgentCommand = serde_json::from_value(job.clone()).unwrap();
+            let job = ProbeJob::from_command(&command).expect("sonde");
+            if !job.discover {
+                probe = Some((command, job));
+                continue;
+            }
+            let outcome =
+                ProbeOutcome { duration_ms: 1, error: None, samples: Vec::new(), profile_id: None };
+            let (status, body) = as_agent(
+                app,
+                "POST",
+                &format!("/api/agent/relay/{}?key={key}", command.id),
+                token,
+                serde_json::to_value(&outcome).unwrap(),
+            )
+            .await;
+            assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+        }
+        if let Some(found) = probe {
+            return found;
+        }
+    }
+    panic!("aucune mesure confiée à l'agent");
 }
 
 /// Instance dont le registre connaît le collecteur `http`, comme le serveur réel.
@@ -139,14 +180,7 @@ async fn an_http_probe_is_relayed_through_the_agent_and_recorded_on_the_target()
     };
 
     // Le faux agent vient chercher la sonde (attente longue bornée).
-    let (status, jobs) =
-        as_agent(&app, "GET", "/api/agent/relay?key=machine-lyon&wait=5", &token, Value::Null)
-            .await;
-    assert_eq!(status, StatusCode::OK, "{jobs}");
-    let jobs = jobs.as_array().expect("liste");
-    assert_eq!(jobs.len(), 1, "{jobs:?}");
-    let command: dumbmonit_proto::AgentCommand = serde_json::from_value(jobs[0].clone()).unwrap();
-    let job = ProbeJob::from_command(&command).expect("sonde");
+    let (command, job) = take_probe(&app, &token, "machine-lyon").await;
     assert_eq!(job.target.id, target_id);
     assert_eq!(job.target.kind, "http");
     assert!(!job.discover);
@@ -219,10 +253,8 @@ async fn a_failed_relayed_probe_lands_in_last_error() {
             app.oneshot(request).await.expect("réponse").status()
         })
     };
-    let (_, jobs) =
-        as_agent(&app, "GET", "/api/agent/relay?key=machine-lyon&wait=5", &token, Value::Null)
-            .await;
-    let id = jobs[0]["id"].as_i64().expect("id");
+    let (command, _) = take_probe(&app, &token, "machine-lyon").await;
+    let id = command.id;
     let outcome = ProbeOutcome {
         duration_ms: 3,
         error: Some("Device unreachable: connection refused".into()),
@@ -314,7 +346,7 @@ async fn via_agent_is_validated_and_kept_when_omitted() {
     assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{}", reply.body);
     assert!(reply.body["error"].as_str().unwrap().contains("not an agent"));
 
-    // Une machine à agent ne peut pas être relayée.
+    // Une machine ne se relaie pas elle-même…
     let reply = app
         .put(
             &format!("/api/targets/{agent_id}"),
@@ -323,7 +355,22 @@ async fn via_agent_is_validated_and_kept_when_omitted() {
         )
         .await;
     assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{}", reply.body);
-    assert!(reply.body["error"].as_str().unwrap().contains("pushes its own metrics"));
+    assert!(reply.body["error"].as_str().unwrap().contains("relay itself"), "{}", reply.body);
+    // … et une machine à agent ne peut pas être relayée, même par un autre agent.
+    let other_agent = register_relay(&app, &token, "machine-paris", true).await;
+    let reply = app
+        .put(
+            &format!("/api/targets/{agent_id}"),
+            json!({ "name": "relay-lyon", "address": "machine-lyon", "kind": "agent", "via_agent": other_agent }),
+            Some(&admin),
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{}", reply.body);
+    assert!(
+        reply.body["error"].as_str().unwrap().contains("pushes its own metrics"),
+        "{}",
+        reply.body
+    );
 
     // Un relais qui n'a pas déclaré `relay: true` est accepté : l'interface le
     // signale, la liste le marque.

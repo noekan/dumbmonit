@@ -68,18 +68,33 @@ fn vue(probed_at: i64) -> ProbeView {
                 },
             ],
         }],
-        jobs: vec![JobView {
-            kind: "sync".into(),
-            id: "s-offsite".into(),
-            datastore: "archive".into(),
-            remote: Some("offsite:archive".into()),
-            enabled: true,
-            schedule: Some("daily".into()),
-            last_run_state: Some("TASK ERROR: sync failed: connection refused".into()),
-            last_run_end: Some(last_night + 5 * HOUR),
-            next_run: Some(last_night + 29 * HOUR),
-            ..Default::default()
-        }],
+        // La GC d'un datastore est rangée parmi les travaux par la sonde
+        // elle-même (`gc_jobs` du collecteur) : la vue enregistrée la contient déjà.
+        jobs: vec![
+            JobView {
+                kind: "sync".into(),
+                id: "s-offsite".into(),
+                datastore: "archive".into(),
+                remote: Some("offsite:archive".into()),
+                enabled: true,
+                schedule: Some("daily".into()),
+                last_run_state: Some("TASK ERROR: sync failed: connection refused".into()),
+                last_run_end: Some(last_night + 5 * HOUR),
+                next_run: Some(last_night + 29 * HOUR),
+                ..Default::default()
+            },
+            JobView {
+                kind: "gc".into(),
+                id: "main".into(),
+                datastore: "main".into(),
+                enabled: true,
+                schedule: Some("daily".into()),
+                last_run_state: Some("OK".into()),
+                last_run_end: Some(last_night + 2 * HOUR),
+                next_run: Some(last_night + 26 * HOUR),
+                ..Default::default()
+            },
+        ],
         tasks: vec![
             TaskView {
                 upid: "UPID:pbs:1:1:1:1:backup:main\\x3ans-pve-vm-100:pve@pbs!pve1:".into(),

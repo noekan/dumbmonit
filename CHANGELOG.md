@@ -5,6 +5,41 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- Acknowledge an alert ("I know, stop reminding me"): **Ack** on every
+  alert card — Overview, Alerts, device page — for 1 h, 4 h, 24 h or until
+  resolved, with an optional note. Reminders and escalations pause, the
+  resolution is still notified, and the ack clears when the alert resolves.
+  Acked alerts move to a quieter "Acknowledged" group and leave the
+  "Needs you" count. `POST`/`DELETE /api/alerts/{fingerprint}/ack`, the
+  `acknowledge_alert` assistant tool, and an audit-log entry.
+- Heartbeat (push) monitors: a cron job, backup script or automation calls
+  `GET|POST /api/push/<token>` each time it runs; a missed call (expected
+  interval + grace, set per device) or a `?status=down` report raises the new
+  "Heartbeat missed" rule. Token shown and regenerable on the device page.
+- API tokens (`dmt_…`) now authenticate the whole REST API as
+  `Authorization: Bearer`, not only the MCP endpoint: `read` acts as a
+  viewer, `write` as an administrator, without cookie or CSRF header. Tokens
+  never manage accounts, sign-in settings or other tokens. The settings
+  section becomes "API & assistants"; the API reference documents every
+  route.
+- Device page: a relayed device says *via <agent>* next to *Behind <parent>*.
+
+### Fixed
+
+- Two-factor sign-in: a code is accepted once (RFC 6238) — the code that just
+  signed you in, or enabled the second factor, no longer works again within
+  its clock window with a fresh password step; and the sign-in rate limit is
+  no longer reset by the password step of a two-step sign-in, so wrong codes
+  keep counting across attempts.
+- Dependency suppression: a parent or relay agent whose probe already says
+  *unreachable* suppresses its descendants at once, instead of only once its
+  own "Device unreachable" alert fires — a stopped relay agent used to make
+  each of its devices notify a cycle or two before the relay itself.
+- `POST /api/targets` answered `via_agent: null` for a device created with a
+  relay (the relay was stored; `GET` showed it).
+
 ## 0.1.0-alpha.3 — 2026-09-21
 
 ### Fixed

@@ -45,7 +45,7 @@
 				]
 			: []),
 		{ id: 'agents', label: 'Agents' },
-		{ id: 'assistant', label: 'Connect an assistant' },
+		{ id: 'assistant', label: 'API & assistants' },
 		{ id: 'appearance', label: 'Appearance' },
 		{ id: 'about', label: 'About' }
 	]);

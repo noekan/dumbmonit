@@ -233,14 +233,17 @@ pub async fn login(
             "Wrong password.".into()
         }));
     };
-    auth.limiter().lock().await.record_success(&keys);
-
     if user.totp_enabled && user.totp_secret.is_some() {
+        // La connexion n'est qu'à mi-chemin : l'ardoise des tentatives n'est
+        // effacée qu'une fois le code accepté. Sinon, qui tient le mot de passe
+        // repartirait de zéro à chaque jeton usé, et essaierait les codes sans
+        // jamais être ralenti.
         let pending = auth.pending_totp().lock().await.start(user.id, Instant::now());
         return Ok(
             Json(serde_json::json!({ "totp_required": true, "pending": pending })).into_response()
         );
     }
+    auth.limiter().lock().await.record_success(&keys);
 
     open_session(&state, &auth, &user, ip).await
 }

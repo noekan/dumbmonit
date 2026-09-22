@@ -76,6 +76,9 @@ back for a paid edition.
 - **Service monitors**, Uptime Kuma style — HTTP(S) (status code, keyword, JSON
   path, certificate), TCP port, DNS resolution, ping and TLS certificate expiry,
   each with its history bar, response time and availability percentage.
+- **Heartbeats** (dead man's switch) — a cron job, backup script or Home
+  Assistant automation calls a secret URL each time it runs; if it stops
+  calling, you are told. Uptime Kuma push-compatible (`?status=down&msg=`).
 - **Network discovery** — sweep a CIDR and add everything that answers in one go.
 
 **Alerting**

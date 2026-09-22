@@ -19,7 +19,9 @@ use serde_json::{Value, json};
 
 use crate::alerting::model::Severity;
 use crate::alerting::silence::Schedule;
-use crate::api::alerts::{self, ActiveAlertView, EnablePayload, HistoryQuery, SilencePayload};
+use crate::api::alerts::{
+    self, AckPayload, ActiveAlertView, EnablePayload, HistoryQuery, SilencePayload,
+};
 use crate::api::metrics::{self, RangeQuery};
 use crate::api::{ApiError, targets};
 use crate::auth::token::Scope;
@@ -33,14 +35,15 @@ Start with get_status to answer \"is everything fine?\". Device states are repor
 unreachable, waiting (no data yet), disabled, down (service check failing). Alert \
 severities, from mild to serious, are info, advisory and warning; an alert \"building \
 up\" is not firing yet; \"suppressed by parent\" means the device's parent is \
-unreachable, so the alert is expected. Tools that change anything (silence_device, \
-remove_silence, probe_device, set_device_enabled, set_rule_enabled) need a token with \
+unreachable, so the alert is expected; \"acknowledged\" means someone knows and reminders \
+are paused. Tools that change anything (silence_device, remove_silence, \
+acknowledge_alert, probe_device, set_device_enabled, set_rule_enabled) need a token with \
 the write scope; a read token can never change anything. Devices can be named by id or \
 by name. Times are UTC, RFC 3339.";
 
 /// Types de cibles qui surveillent un *service* : leur état vient du résultat de
 /// la sonde (`dumbmonit_probe_success`), pas de la dernière interrogation.
-const UPTIME_KINDS: [&str; 5] = ["http", "tcp", "dns", "ping", "tls"];
+const UPTIME_KINDS: [&str; 6] = ["http", "tcp", "dns", "ping", "tls", "push"];
 
 /// Fenêtre de fraîcheur d'un résultat de sonde, alignée sur l'interface.
 const PROBE_WINDOW: &str = "10m";
@@ -57,6 +60,9 @@ const DEFAULT_HISTORY_LIMIT: i64 = 50;
 /// Durée maximale d'un silence posé par un assistant : au-delà d'une semaine,
 /// c'est une règle à désactiver, pas une maintenance.
 const MAX_SILENCE_HOURS: f64 = 24.0 * 7.0;
+
+/// Durée d'un acquittement posé par un assistant quand il ne précise rien.
+const DEFAULT_ACK_HOURS: f64 = 4.0;
 
 // --------------------------------------------------------------------------
 // Catalogue
@@ -219,6 +225,25 @@ fn specs() -> Vec<ToolSpec> {
                 "type": "object",
                 "required": ["id"],
                 "properties": { "id": { "type": "integer", "description": "Silence id." } },
+                "additionalProperties": false
+            }),
+        },
+        ToolSpec {
+            name: "acknowledge_alert",
+            scope: Scope::Write,
+            description: "Acknowledges one alert by fingerprint (see list_alerts): \"I know, \
+                          stop reminding me\". Reminders and escalations pause for the given \
+                          hours (default 4, at most 720); the alert keeps being evaluated and \
+                          its resolution is still notified. Pass hours 0 to lift an \
+                          acknowledgement. To mute a whole device, use silence_device.",
+            input_schema: json!({
+                "type": "object",
+                "required": ["fingerprint"],
+                "properties": {
+                    "fingerprint": { "type": "string", "description": "Alert fingerprint (see list_alerts)." },
+                    "hours": { "type": "number", "description": "Duration in hours (default 4, max 720); 0 lifts the acknowledgement.", "minimum": 0 },
+                    "note": { "type": "string", "description": "Why — shown in the UI next to the alert." }
+                },
                 "additionalProperties": false
             }),
         },
@@ -397,6 +422,7 @@ pub async fn call(state: &AppState, name: &str, arguments: Value) -> ToolResult 
         "list_silences" => list_silences(state).await,
         "silence_device" => silence_device(state, &args).await,
         "remove_silence" => remove_silence(state, &args).await,
+        "acknowledge_alert" => acknowledge_alert(state, &args).await,
         "probe_device" => probe_device(state, &args).await,
         "set_device_enabled" => set_device_enabled(state, &args).await,
         "list_rules" => list_rules(state).await,
@@ -606,7 +632,10 @@ async fn load_devices(state: &AppState) -> Result<Vec<Device>, ToolError> {
                         probe_reason = reason.clone();
                         DeviceState::Down
                     }
-                    (false, None) if classic == DeviceState::Waiting => DeviceState::Waiting,
+                    // Un heartbeat sans verdict n'a pas encore été appelé : il attend.
+                    (false, None) if classic == DeviceState::Waiting || target.kind == "push" => {
+                        DeviceState::Waiting
+                    }
                     (false, None) => DeviceState::Unknown,
                 }
             } else {
@@ -710,6 +739,10 @@ fn alert_json(alert: &ActiveAlertView, devices: &HashMap<TargetId, String>) -> V
         "device": alert.target_id.and_then(|id| devices.get(&id)),
         "suppressed_by": alert.suppressed_by.and_then(|id| devices.get(&id)),
         "silenced": alert.silenced,
+        "acknowledged": alert.acked,
+        "acked_by": alert.acked.then_some(alert.acked_by.as_deref()).flatten(),
+        "acked_until": alert.acked.then_some(alert.acked_until.map(rfc3339)).flatten(),
+        "ack_note": alert.acked.then_some(alert.ack_note.as_deref()).flatten(),
         "value": alert.value,
         "since": alert.firing_since.or(alert.condition_since).map(rfc3339),
         "labels": alert.labels,
@@ -745,6 +778,18 @@ fn alert_line(alert: &ActiveAlertView, devices: &HashMap<TargetId, String>) -> S
     }
     if alert.silenced {
         line.push_str("; silenced");
+    }
+    if alert.acked {
+        line.push_str("; acknowledged");
+        if let Some(who) = &alert.acked_by {
+            line.push_str(&format!(" by {who}"));
+        }
+        if let Some(until) = alert.acked_until {
+            line.push_str(&format!(" until {}", rfc3339(until)));
+        }
+        if let Some(note) = &alert.ack_note {
+            line.push_str(&format!(" ({note})"));
+        }
     }
     line
 }
@@ -1347,6 +1392,48 @@ async fn remove_silence(state: &AppState, args: &Args) -> ToolResult {
     ))
 }
 
+async fn acknowledge_alert(state: &AppState, args: &Args) -> ToolResult {
+    let fingerprint = args
+        .str("fingerprint")
+        .ok_or_else(|| failed("\"fingerprint\" (see list_alerts) is required."))?
+        .to_string();
+    let hours = args.f64("hours").unwrap_or(DEFAULT_ACK_HOURS);
+    if !hours.is_finite() || hours < 0.0 {
+        return Err(failed("\"hours\" must be a number greater than or equal to 0."));
+    }
+    let payload = if hours == 0.0 {
+        AckPayload { until: Some(None), duration_secs: None, note: None }
+    } else {
+        AckPayload {
+            until: None,
+            duration_secs: Some((hours * 3600.0).round() as i64),
+            note: args.str("note").map(str::to_string),
+        }
+    };
+    let request = payload.validate(Utc::now())?;
+    let lifted = request == alerts::AckRequest::Clear;
+    let alert = alerts::acknowledge(state, &fingerprint, request, "assistant").await?;
+
+    let devices = load_devices(state).await?;
+    let names: HashMap<TargetId, String> =
+        devices.iter().map(|device| (device.id(), device.name().to_string())).collect();
+    let text = if lifted {
+        format!("Acknowledgement lifted on {}: reminders resume.", alert.rule_name)
+    } else {
+        format!(
+            "Acknowledged {} ({}) until {}: no reminder until then; the resolution will still \
+             be notified. Lift it earlier with hours 0.",
+            alert.rule_name,
+            alert
+                .target_id
+                .and_then(|id| names.get(&id).cloned())
+                .unwrap_or_else(|| "no device".into()),
+            alert.acked_until.map(rfc3339).unwrap_or_default()
+        )
+    };
+    Ok(ToolOutput::new(text, alert_json(&alert, &names)))
+}
+
 async fn probe_device(state: &AppState, args: &Args) -> ToolResult {
     let devices = load_devices(state).await?;
     let device = resolve_arg(&devices, args)?;
@@ -1550,7 +1637,7 @@ mod tests {
     #[test]
     fn every_tool_has_a_schema_and_a_scope() {
         let specs = specs();
-        assert_eq!(specs.len(), 13);
+        assert_eq!(specs.len(), 14);
         for spec in &specs {
             assert_eq!(spec.input_schema["type"], "object", "{}", spec.name);
             assert!(!spec.description.is_empty(), "{}", spec.name);
@@ -1562,6 +1649,7 @@ mod tests {
             [
                 "silence_device",
                 "remove_silence",
+                "acknowledge_alert",
                 "probe_device",
                 "set_device_enabled",
                 "set_rule_enabled"

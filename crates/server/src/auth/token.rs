@@ -10,8 +10,10 @@
 //! que dans chaque outil : un outil d'écriture demande la portée avant d'agir.
 //!
 //! Le garde [`require_token`] ne s'applique qu'aux routes qui le déclarent
-//! explicitement (le point d'entrée MCP). Les routes de gestion des jetons, elles,
-//! restent des routes d'administration ordinaires, protégées par la session.
+//! explicitement (le point d'entrée MCP). Le garde de session
+//! (`middleware::require_session`) accepte aussi ces jetons, via [`check`], sur
+//! toute l'API REST — sauf la gestion des comptes et des jetons, qui reste
+//! réservée à une session de navigateur.
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -105,7 +107,7 @@ impl ApiToken {
         } else {
             Err(format!(
                 "This action needs a token with the \"{}\" scope; the token \"{}\" is \
-                 \"{}\" only. Create a write token in Settings → Connect an assistant.",
+                 \"{}\" only. Create a write token in Settings → API & assistants.",
                 wanted.as_str(),
                 self.name,
                 self.scope.as_str()

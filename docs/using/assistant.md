@@ -15,7 +15,7 @@ and uses the same words: *reporting*, *unreachable*, *waiting*, *advisory*,
 
 ## 1. Create a token
 
-Settings → **Connect an assistant** (`/settings#assistant`) → name the token ("Claude on my laptop") and
+Settings → **API & assistants** (`/settings#assistant`) → name the token ("Claude on my laptop") and
 pick a scope:
 
 | Scope | What the assistant can do |
@@ -29,6 +29,12 @@ and create another one.
 
 Prefer a read token unless you actually want the assistant to act. Every action
 taken with a write token is logged with the token's name.
+
+The same token also opens the [REST API](../reference/api.md#authentication)
+to scripts and dashboards — `curl -H "Authorization: Bearer dmt_…"
+https://monit.example.lan/api/targets` — where `read` sees what a viewer
+sees and `write` does what an administrator does, accounts and tokens
+excepted.
 
 ## 2. Paste the snippet
 
@@ -96,6 +102,7 @@ HTTP servers with custom headers:
 | `list_silences` | read | Maintenance windows and whether they are active now. |
 | `silence_device` | write | A one-off maintenance window on a device, starting now (default 1 hour, at most a week). |
 | `remove_silence` | write | Removes a maintenance window. |
+| `acknowledge_alert` | write | Acknowledges one alert by fingerprint for a number of hours (default 4): reminders pause, the resolution is still notified. `hours: 0` lifts it. |
 | `probe_device` | write | Probes a device immediately and reports what was measured. |
 | `set_device_enabled` | write | Enables or disables monitoring of a device. |
 | `list_rules` | read | Alert rules with kind, severity, threshold, enabled. |
@@ -121,7 +128,8 @@ per minute (429 with `Retry-After` beyond that).
 ## Security notes
 
 - **A token is a password.** Anyone holding it reads everything the interface
-  shows — and, with a write token, silences your alerts. Keep it out of shared
+  shows — and, with a write token, changes anything an administrator can
+  through the REST API (devices, rules, channels), accounts excepted. Keep it out of shared
   chats, screenshots and repositories. Revoke a token you are not sure about;
   create another one in a minute.
 - **Prefer read.** Most questions ("is everything fine?") need no write scope.

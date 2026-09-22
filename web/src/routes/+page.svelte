@@ -314,7 +314,14 @@
 					{silenceError}
 				</p>
 			{/if}
-			<NeedsYouList {sky} {checkedLabel} {silencingKey} mascot="happy" onsilence={silence} />
+			<NeedsYouList
+				{sky}
+				{checkedLabel}
+				{silencingKey}
+				mascot="happy"
+				onsilence={silence}
+				onackchange={() => void alertsStore.refresh()}
+			/>
 		</section>
 
 		<!-- The week ahead -->

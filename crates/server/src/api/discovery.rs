@@ -14,7 +14,7 @@ use dumbmonit_proto::Credential;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{ApiError, ApiResult};
-use crate::auth::middleware::AdminUser;
+use crate::auth::middleware::AdminIdentity;
 use crate::collectors::snmp::{DiscoveredDevice, ScanOptions, scan_network};
 
 #[derive(Deserialize)]
@@ -58,7 +58,10 @@ pub struct ScanResponse {
 ///
 /// L'opération est bornée par les garde-fous de [`ScanOptions`] : un `/16` saisi par
 /// mégarde est refusé plutôt que de lancer soixante-cinq mille sondes.
-pub async fn scan(_: AdminUser, Json(request): Json<ScanRequest>) -> ApiResult<Json<ScanResponse>> {
+pub async fn scan(
+    _: AdminIdentity,
+    Json(request): Json<ScanRequest>,
+) -> ApiResult<Json<ScanResponse>> {
     let network: ipnet::IpNet = request
         .cidr
         .trim()

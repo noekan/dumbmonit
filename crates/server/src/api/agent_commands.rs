@@ -20,7 +20,7 @@ use dumbmonit_proto::{
 use serde::{Deserialize, Serialize};
 
 use crate::api::{ApiError, ApiResult};
-use crate::auth::middleware::CurrentUser;
+use crate::auth::middleware::CurrentPrincipal;
 use crate::collectors::agent::commands::{self, CommandError, CommandRecord, ContainerPolicy};
 use crate::collectors::agent::{self as agent};
 use crate::db;
@@ -445,9 +445,10 @@ pub struct UpdatePayload {
     prune: Option<bool>,
 }
 
-/// Qui demande : le compte de la session, ou « ui » si le garde ne l'a pas posé.
-fn requester(user: Option<&CurrentUser>) -> String {
-    user.map(|u| u.0.username.clone()).unwrap_or_else(|| "ui".to_string())
+/// Qui demande : le compte de la session ou le jeton d'API (`token:nom`), ou
+/// « ui » si le garde ne l'a pas posé.
+fn requester(who: Option<&CurrentPrincipal>) -> String {
+    who.map(|current| current.0.label()).unwrap_or_else(|| "ui".to_string())
 }
 
 async fn enqueue(
@@ -468,19 +469,19 @@ async fn enqueue(
 async fn restart(
     State(state): State<AppState>,
     Path((id, name)): Path<(TargetId, String)>,
-    user: Option<Extension<CurrentUser>>,
+    who: Option<Extension<CurrentPrincipal>>,
 ) -> ApiResult<(StatusCode, Json<CommandView>)> {
     agent_target(&state, id).await?;
     ensure_commands_supported(&state, id).await?;
     let name = checked_known_name(&state, id, &name).await?;
-    let by = requester(user.as_deref());
+    let by = requester(who.as_deref());
     enqueue(&state, id, CMD_CONTAINER_RESTART, serde_json::json!({ "name": name }), &by).await
 }
 
 async fn update(
     State(state): State<AppState>,
     Path((id, name)): Path<(TargetId, String)>,
-    user: Option<Extension<CurrentUser>>,
+    who: Option<Extension<CurrentPrincipal>>,
     payload: Option<Json<UpdatePayload>>,
 ) -> ApiResult<(StatusCode, Json<CommandView>)> {
     agent_target(&state, id).await?;
@@ -488,7 +489,7 @@ async fn update(
     let name = checked_known_name(&state, id, &name).await?;
     let policy = commands::get_policy(&state.pool, id, &name).await?;
     let prune = payload.and_then(|Json(p)| p.prune).unwrap_or(policy.prune_old_image);
-    let by = requester(user.as_deref());
+    let by = requester(who.as_deref());
     let args = serde_json::json!({ "name": name, "prune": prune });
     enqueue(&state, id, CMD_CONTAINER_UPDATE, args, &by).await
 }
@@ -507,10 +508,10 @@ async fn list_commands(
 async fn cancel_command(
     State(state): State<AppState>,
     Path((id, command_id)): Path<(TargetId, i64)>,
-    user: Option<Extension<CurrentUser>>,
+    who: Option<Extension<CurrentPrincipal>>,
 ) -> ApiResult<StatusCode> {
     agent_target(&state, id).await?;
-    let by = requester(user.as_deref());
+    let by = requester(who.as_deref());
     match commands::cancel(&state.pool, id, command_id, &by).await {
         Ok(()) => Ok(StatusCode::NO_CONTENT),
         Err(CommandError::Conflict(why)) => Err(ApiError::Conflict(why)),

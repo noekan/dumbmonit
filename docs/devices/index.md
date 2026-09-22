@@ -17,6 +17,7 @@ form always matches what this version can monitor.
 | [Domain name](services.md#dns) | `dns` | none | Your domain, an internal name |
 | [Reachable host](services.md#ping) | `ping` | none | Gateway, access point, printer |
 | [TLS certificate](services.md#tls) | `tls` | none | IMAPS, LDAPS, reverse proxy |
+| [Heartbeat](push.md) | `push` | none (secret URL) | Cron job, backup script, automation that must call in |
 | [Demo device](demo.md) | `dummy` | none | Explore the UI without hardware |
 
 ## How a device is read

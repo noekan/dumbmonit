@@ -38,6 +38,11 @@ Every alert is a state machine, evaluated every 30 seconds
 whose `effective_phase` is `suppressed` keeps `phase = firing` underneath, so it
 is not notified again when the parent recovers.
 
+An alert can also be **acknowledged** (`acked`, with `acked_by`, `acked_until`
+and `ack_note`): the phase does not move, reminders and escalations pause until
+`acked_until`, the resolution is still notified and clears the acknowledgement.
+See [Acknowledge vs silence](../using/alerts.md#acknowledge-vs-silence).
+
 ## Dependency suppression
 
 Any device can declare a **parent device**. When a device is unreachable
@@ -55,6 +60,12 @@ it probes (*Reached through* on the device form), in addition to the parent
 set explicitly: when the relay is unreachable, its devices are suppressed with
 the relay named as the cause. At equal distance, the explicit parent wins.
 
+A parent also counts as unreachable as soon as its own probe says so (the
+*Timed out* / *Device unreachable* status on its page), without waiting for
+its "Device unreachable" alert to fire: an agent that stops pushing takes
+its devices with it a minute or two before its own alert, and they would
+otherwise each notify first.
+
 ## Grouping, deduplication, reminders
 
 Without grouping, a NAS whose RAID degrades would send one message per disk,
@@ -63,7 +74,7 @@ it contains five lines. Each alert is notified once when it starts firing
 (`firing`), then only as a reminder (`reminder`, every `repeat_interval`), an
 escalation (`escalation`) or a resolution (`resolved`). The alert history
 records every transition with whether it was notified and, if not, why
-(learning, suppressed, silenced).
+(learning, suppressed, silenced, acknowledged).
 
 ## Maintenance windows
 

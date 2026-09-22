@@ -24,8 +24,9 @@ Severities are shown with the UI word; the API value is in parentheses.
 | PBS backup verification failed | Verification of the latest snapshot for this machine failed (`dumbmonit_pbs_backup_last_verified < 1`). | < 1 | 30 min | Warning (`critical`) | 24 h |
 | PBS task failed | At least one PBS task failed in the review window. | > 0 | 10 min | Advisory (`warning`) | 24 h |
 | PBS garbage collection too old | No successful garbage collection on this datastore for more than eight days. | > 8 d | 1 h | Advisory (`warning`) | 24 h |
-| Service down | The service has not responded correctly for three minutes (`dumbmonit_probe_success == bool 0`). | > 0 | 3 min | Warning (`critical`) | 30 min |
-| Service flapping | The service changed state more than six times in thirty minutes (`changes(dumbmonit_probe_success[30m])`). | > 6 | 5 min | Advisory (`warning`) | 1 h |
+| Service down | The service has not responded correctly for three minutes (`dumbmonit_probe_success{probe!="push"} == bool 0`). | > 0 | 3 min | Warning (`critical`) | 30 min |
+| Heartbeat missed | The job has not called in within its expected interval plus grace period, or reported a failure itself (`dumbmonit_probe_success{probe="push"} == bool 0`; the delay is set per device, see [Heartbeat](../devices/push.md)). | > 0 | 2 min | Advisory (`warning`) | 6 h |
+| Service flapping | The service changed state more than six times in thirty minutes (`changes(dumbmonit_probe_success{probe!="push"}[30m])`). | > 6 | 5 min | Advisory (`warning`) | 1 h |
 | Slow service | The service takes more than three seconds to respond. | > 3 s | 10 min | Advisory (`warning`) | 6 h |
 | Certificate expiring soon | The certificate expires in less than fourteen days. | < 14 d | 1 h | Advisory (`warning`) | 24 h |
 | Certificate expired | The certificate has expired. | < 0 d | 5 min | Warning (`critical`) | 24 h |

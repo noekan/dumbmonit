@@ -43,7 +43,10 @@ a QR code to scan (or the key to type), and enables the second factor once you
 enter a first code from the app. Eight **recovery codes** are then shown once:
 save them, each one signs you in a single time if the phone is lost. The
 sign-in screen asks for the code (or a recovery code) after the password;
-five wrong codes cancel the attempt and you start over from the password.
+five wrong codes cancel the attempt and you start over from the password, and
+the usual sign-in rate limit keeps counting across attempts. A code is
+accepted once: the one you just used (including the one that enabled the
+second factor) does not sign you in again — wait for the next one.
 
 **Disable** asks for the password again. Recovery codes cannot be regenerated
 on their own: disable and set up again to get a fresh set. An admin can reset
@@ -105,11 +108,13 @@ stops every agent using that token at its next push.
 
 One token can enrol several machines. Revoking it does not delete the devices.
 
-## Connect an assistant
+## API & assistants
 
-API tokens for MCP clients, with the connection snippets ready to paste. A
-**read** token can only look; a **read and write** token can also silence a
-device, run a probe, or switch a device or rule on and off. See
+API tokens for MCP clients and for the [REST API](../reference/api.md), with
+the connection snippets and a `curl` example ready to paste. A **read** token
+can only look; a **read and write** token can also change things — silence a
+device, run a probe, add or edit devices, rules and channels — but never
+accounts, sign-in settings or other tokens. See
 [Connect an assistant](assistant.md).
 
 ## Appearance

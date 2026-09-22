@@ -97,6 +97,18 @@ export function isUptimeKind(kind: string): boolean {
 	return (UPTIME_KINDS as readonly string[]).includes(kind);
 }
 
+/**
+ * The heartbeat kind: a job calls in, nothing is polled. It writes
+ * `dumbmonit_probe_success` like a service probe, so its state is read from
+ * there too — but it keeps the generic device page, not the availability one.
+ */
+export const PUSH_KIND = 'push';
+
+/** Kinds whose state comes from `dumbmonit_probe_success` rather than the last probe. */
+export function hasProbeState(kind: string): boolean {
+	return isUptimeKind(kind) || kind === PUSH_KIND;
+}
+
 /** Last known result of an uptime probe, as read from VictoriaMetrics. */
 export interface ProbeStatus {
 	/** True if the service answered correctly at the last measurement. */
@@ -114,10 +126,11 @@ export interface ProbeStatus {
  * read it in one batched query. Devices keep the classic deduction.
  */
 export function displayState(target: Target, probe: ProbeStatus | undefined): TargetState {
-	if (!isUptimeKind(target.kind)) return targetState(target);
+	if (!hasProbeState(target.kind)) return targetState(target);
 	if (!target.enabled) return 'disabled';
 	if (target.last_error) return errorState(target);
-	if (!probe) return 'unknown';
+	// A heartbeat without a verdict has not been called yet: it waits, it is not unknown.
+	if (!probe) return target.kind === PUSH_KIND ? 'pending' : 'unknown';
 	return probe.up ? 'online' : 'down';
 }
 
@@ -133,7 +146,9 @@ const FAILURE_REASON_LABEL: Record<string, string> = {
 	json: 'Unexpected JSON value',
 	body: 'Unreadable response',
 	packet_loss: 'Excessive packet loss',
-	record: 'Expected DNS record missing'
+	record: 'Expected DNS record missing',
+	missed: 'Heartbeat missed: the job did not call in on time',
+	reported_down: 'The job reported a failure'
 };
 
 /** Readable failure reason. An unknown reason is shown as is rather than hidden. */

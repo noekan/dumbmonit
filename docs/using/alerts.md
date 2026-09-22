@@ -8,7 +8,7 @@ right, opens the form for a window from any tab.
 
 | Tab | What it holds |
 |---|---|
-| **Now** | The live *Needs you* list, grouped by device: severity plate, reason, since when, and *Silence 1 h* or *Open device* on each. The badge on the tab, and on Alerts in the top bar, is this count. |
+| **Now** | The live *Needs you* list, grouped by device: severity plate, reason, since when, and *Ack*, *Silence 1 h* or *Open device* on each. Acknowledged alerts sit in their own *Acknowledged* group at the bottom. The badge on the tab, and on Alerts in the top bar, is the count of what still needs you. |
 | **Scheduled** | Maintenance windows, *Active now* or *Scheduled*, one-off or weekly. See [Maintenance windows](../alerting/maintenance.md). |
 | **Rules** | Every rule with its severity and a *Built-in* mark; enable, edit inline, delete your own, create a threshold rule. See [Rules](../alerting/rules.md). |
 | **Notifications** | Where alerts reach you: the channels and the notification policy. Details below. |
@@ -16,6 +16,25 @@ right, opens the form for a window from any tab.
 
 The same truth model feeds the overview bulletin and this page, so the two
 always agree on what needs you.
+
+## Acknowledge vs silence
+
+Two ways to make an alert quiet, for two different situations:
+
+- **Ack** is for one alert you know about: "I know, stop reminding me for
+  4 h". The menu offers 1 h, 4 h, 24 h or *until resolved*, plus an optional
+  note for whoever reads the card after you. The alert stays firing and keeps
+  being evaluated; only its reminders and escalations pause. You are still
+  told when it resolves, and the acknowledgement clears at that moment — an
+  alert that comes back later notifies again. Acked cards read *Acked by
+  someone until a time* and offer **Un-ack**.
+- **Silence 1 h** (and scheduled maintenance) is for a device: every alert on
+  it is muted while you work on it, including new ones. See
+  [Maintenance windows](../alerting/maintenance.md).
+
+Both are admin actions; viewers see the acknowledgement but cannot make one.
+Public status pages ignore acknowledgements: an acked alert is still an
+alert for the outside world.
 
 ## Notifications
 

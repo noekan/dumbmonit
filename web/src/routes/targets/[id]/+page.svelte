@@ -94,6 +94,8 @@
 	let loading = $state(true);
 	let error = $state<unknown>(null);
 	let parent = $state<Target | null>(null);
+	/** The relay agent that probes this device, when it is not the server. */
+	let relay = $state<Target | null>(null);
 	let collectors = $state<CollectorInfo[]>([]);
 	let deviceProbe = $state<ProbeStatus | undefined>(undefined);
 
@@ -299,6 +301,11 @@
 			} else if (next.parent_id === null) {
 				parent = null;
 			}
+			if (next.via_agent !== null && relay?.id !== next.via_agent) {
+				relay = await getTarget(next.via_agent, signal).catch(() => null);
+			} else if (next.via_agent === null) {
+				relay = null;
+			}
 		} catch (cause) {
 			if (cause instanceof DOMException && cause.name === 'AbortError') return;
 			error = cause;
@@ -471,6 +478,17 @@
 								<ArrowUpRight class="size-3.5" aria-hidden="true" />
 							</a>
 						{/if}
+						{#if target.via_agent !== null}
+							<span class="text-ink-3" aria-hidden="true">·</span>
+							<a
+								href={`/targets/${target.via_agent}`}
+								class="inline-flex items-center gap-1 hover:text-ink hover:underline"
+								title="Probed by this relay agent, from its own network"
+							>
+								via {relay?.name ?? `agent #${target.via_agent}`}
+								<ArrowUpRight class="size-3.5" aria-hidden="true" />
+							</a>
+						{/if}
 					</div>
 					{#if osLine}
 						<p class="mt-1 text-sm text-ink-2">{osLine}</p>
@@ -562,7 +580,7 @@
 	<!-- The story of this device: what fires now, what fired before -->
 	<section class="mt-6" aria-labelledby="device-alerts">
 		<h2 id="device-alerts" class="mb-3 text-base font-semibold tracking-tight text-ink">Alerts on this device</h2>
-		<DeviceTimeline targetId={id} {alerts} {refreshKey} />
+		<DeviceTimeline targetId={id} {alerts} {refreshKey} onackchange={() => void loadContext()} />
 	</section>
 
 	<!-- Backups the agent watches; the containers sit with the metrics below -->

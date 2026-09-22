@@ -21,6 +21,7 @@
 	import { ShieldCheck } from 'lucide-svelte';
 	import { formatDateTime, formatRelative } from '$lib/format';
 	import { alertDetail, formatAlertValue, severityTone, severityWord } from '$lib/components/alerts/helpers';
+	import AckControl from '$lib/components/alerts/AckControl.svelte';
 
 	interface Props {
 		targetId: number;
@@ -28,9 +29,11 @@
 		alerts: Alert[];
 		/** Bumped by the page on each refresh so the log follows it. */
 		refreshKey?: number;
+		/** An alert was acknowledged or un-acknowledged: the page should refresh them. */
+		onackchange?: (alert: Alert) => void;
 	}
 
-	let { targetId, alerts, refreshKey = 0 }: Props = $props();
+	let { targetId, alerts, refreshKey = 0, onackchange }: Props = $props();
 
 	const SHOWN = 20;
 	const WINDOW = 400;
@@ -79,8 +82,9 @@
 		return name || rules.get(uid)?.name || uid;
 	}
 
-	/** Plate for an active alert: suppression and building-up read as such. */
+	/** Plate for an active alert: acknowledgement, suppression and building-up read as such. */
 	function activePlate(alert: Alert): { tone: Tone; label: string } {
+		if (alert.acked) return { tone: 'muted', label: 'Acked' };
 		if (alert.effective_phase === 'suppressed') return { tone: 'muted', label: 'Suppressed by parent' };
 		if (alert.effective_phase === 'pending') return { tone: 'ghost', label: 'Building up' };
 		return { tone: severityTone(alert.severity), label: severityWord(alert.severity) };
@@ -224,11 +228,14 @@
 			{@const detail = alertDetail(alert, rules.get(alert.rule_uid))}
 			<li class="rise-in relative pb-3" style={`--rise-delay: ${Math.min(i, 8) * 30}ms`}>
 				<span
-					class={`absolute top-1.5 -left-[1.5625rem] size-2.5 rounded-full ring-4 ring-canvas ${DOT[plate.tone]} ${alert.effective_phase === 'firing' ? 'animate-pulse' : ''}`}
+					class={`absolute top-1.5 -left-[1.5625rem] size-2.5 rounded-full ring-4 ring-canvas ${DOT[plate.tone]} ${alert.effective_phase === 'firing' && !alert.acked ? 'animate-pulse' : ''}`}
 					aria-hidden="true"
 				></span>
 				<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-					<Plate tone={plate.tone} label={plate.label} pulse={alert.effective_phase === 'firing'} />
+					<Plate tone={plate.tone} label={plate.label} pulse={alert.effective_phase === 'firing' && !alert.acked} />
+					{#if alert.acked && alert.effective_phase === 'firing'}
+						<Plate tone={severityTone(alert.severity)} label={severityWord(alert.severity)} bare />
+					{/if}
 					<span class="min-w-0 font-semibold text-ink">{ruleName(alert)}</span>
 					{#if detail}
 						<span class="tnum min-w-0 break-all text-ink-2">{detail}</span>
@@ -240,7 +247,16 @@
 						since {formatRelative(alert.firing_since ?? alert.condition_since)}
 					</span>
 					<a href="/alerts" class="text-ink-2 hover:text-ink hover:underline">Open alerts</a>
+					<AckControl {alert} onchanged={onackchange} />
 				</div>
+				{#if alert.acked}
+					<p class="mt-0.5 text-[0.8125rem] text-ink-2" title={formatDateTime(alert.acked_until)}>
+						Acked{#if alert.acked_by}
+							by <span class="font-medium">{alert.acked_by}</span>{/if}{#if alert.acked_until}
+							until <span class="tnum">{formatDateTime(alert.acked_until)}</span>{/if}{#if alert.ack_note}
+							— {alert.ack_note}{/if}.
+					</p>
+				{/if}
 			</li>
 		{/each}
 

@@ -252,7 +252,13 @@
 					<p class="mb-3 text-sm text-warning-ink" role="alert" aria-live="polite">{silenceError}</p>
 				{/if}
 				<div class={sky.quiet ? 'wall-quiet' : 'wall-needs'}>
-					<NeedsYouList {sky} {checkedLabel} {silencingKey} onsilence={silence} />
+					<NeedsYouList
+						{sky}
+						{checkedLabel}
+						{silencingKey}
+						onsilence={silence}
+						onackchange={() => void load()}
+					/>
 				</div>
 			</section>
 		{/if}

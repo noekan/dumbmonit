@@ -291,6 +291,14 @@ pub struct TargetNode {
     /// Une cible désactivée reste dans la topologie — elle peut être le parent
     /// d'une cible active — mais n'a plus le droit de porter une alerte.
     pub enabled: bool,
+    /// Le dernier résultat de sonde enregistré dit « injoignable » (délai dépassé,
+    /// équipement muet). C'est le verdict que l'interface affiche, et il tombe
+    /// bien avant l'alerte `host_down` : celle-ci attend trois minutes sans
+    /// mesure, plus sa durée de confirmation. Pour la suppression, ce verdict
+    /// suffit — un relais déclaré muet par le serveur explique déjà pourquoi ses
+    /// équipements ne répondent plus, sans attendre que sa propre alerte parte.
+    #[serde(default)]
+    pub unreachable: bool,
 }
 
 /// Empreinte stable d'une alerte : règle + série.
@@ -380,6 +388,7 @@ mod tests {
             via_agent: None,
             tags: tags.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect(),
             enabled: true,
+            unreachable: false,
         }
     }
 

@@ -433,8 +433,13 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
 
     // Ensemble des cibles hors ligne, déduit du cycle courant : la suppression est
     // ainsi cohérente avec ce qu'on s'apprête à notifier, et non avec le cycle
-    // précédent.
-    let down: HashSet<TargetId> = evaluated
+    // précédent. S'y ajoutent les cibles que le serveur a déjà déclarées
+    // injoignables à leur dernière sonde : un parent (ou un relais) dont l'alerte
+    // `host_down` n'est pas encore partie explique quand même la panne de ses
+    // descendants — sans cela, un relais muet ferait notifier chacun de ses
+    // équipements un cycle ou deux avant lui, le serveur tolérant plusieurs
+    // périodes de silence d'un agent avant de cesser d'écrire son `up`.
+    let mut down: HashSet<TargetId> = evaluated
         .iter()
         .filter(|entry| {
             input.observations[entry.rule_index].rule.is_host_down()
@@ -442,6 +447,7 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
         })
         .filter_map(|entry| entry.target_id)
         .collect();
+    down.extend(input.targets.iter().filter(|t| t.unreachable).map(|t| t.id));
 
     let mut alerts = Vec::with_capacity(evaluated.len());
 
@@ -474,7 +480,7 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
                 transition: transition.clone(),
                 severity: rule.severity,
                 value: entry.value,
-                reason: history_reason(&entry.state),
+                reason: history_reason(&entry.state, now),
                 at: now,
             });
         }
@@ -506,7 +512,7 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
 }
 
 /// Explique en une phrase pourquoi cette transition n'a pas notifié, le cas échéant.
-fn history_reason(state: &AlertState) -> String {
+fn history_reason(state: &AlertState, now: DateTime<Utc>) -> String {
     if state.learning {
         "learning: would have fired".to_string()
     } else if state.suppressed {
@@ -516,6 +522,11 @@ fn history_reason(state: &AlertState) -> String {
         }
     } else if state.silenced {
         "maintenance window".to_string()
+    } else if state.is_acked(now) {
+        match &state.acked_by {
+            Some(who) => format!("acknowledged by {who}"),
+            None => "acknowledged".to_string(),
+        }
     } else {
         String::new()
     }
@@ -642,6 +653,7 @@ mod tests {
             via_agent: None,
             tags: BTreeMap::new(),
             enabled: true,
+            unreachable: false,
         }
     }
 
@@ -740,6 +752,75 @@ mod tests {
     }
 
     #[test]
+    fn une_alerte_acquittee_ne_rappelle_plus_mais_sa_resolution_est_annoncee() {
+        let mut cpu = rule("cpu_high", RuleKind::Threshold, 90.0, 0);
+        cpu.repeat_interval = Some(Duration::from_secs(600));
+        let mut baselines = BaselineStore::default();
+
+        // Déclenchement et première annonce.
+        let cycle1 = plan_cycle(
+            input(
+                at(0),
+                vec![RuleObservations { rule: cpu.clone(), series: Some(vec![point(1, 95.0)]) }],
+                vec![node(1, None)],
+                Vec::new(),
+            ),
+            &mut baselines,
+        );
+        assert_eq!(cycle1.groups[0].items[0].reason, NotifyReason::Firing);
+        let mut stored = to_stored(&cycle1);
+        mark_notified(&mut stored, &cycle1, at(0));
+
+        // L'utilisateur acquitte pour quatre heures, comme le ferait l'API.
+        stored[0].state.acked_until = Some(at(14_400));
+        stored[0].state.acked_by = Some("admin".to_string());
+
+        // Rappel dû : rien ne part, la ligne garde son acquittement.
+        let cycle2 = plan_cycle(
+            input(
+                at(600),
+                vec![RuleObservations { rule: cpu.clone(), series: Some(vec![point(1, 95.0)]) }],
+                vec![node(1, None)],
+                stored.clone(),
+            ),
+            &mut baselines,
+        );
+        assert!(cycle2.groups.is_empty(), "acked: no reminder");
+        assert_eq!(cycle2.alerts[0].state.acked_until, Some(at(14_400)));
+        assert!(cycle2.alerts[0].state.is_acked(at(600)));
+
+        // Acquittement échu, toujours en dépassement : le rappel repart.
+        let stored = to_stored(&cycle2);
+        let cycle3 = plan_cycle(
+            input(
+                at(14_400),
+                vec![RuleObservations { rule: cpu.clone(), series: Some(vec![point(1, 95.0)]) }],
+                vec![node(1, None)],
+                stored.clone(),
+            ),
+            &mut baselines,
+        );
+        assert_eq!(cycle3.groups.len(), 1, "expired: reminders come back");
+        assert_eq!(cycle3.groups[0].items[0].reason, NotifyReason::Reminder);
+
+        // Résolution pendant un acquittement : annoncée, et l'acquittement effacé.
+        let cycle4 = plan_cycle(
+            input(
+                at(1200),
+                vec![RuleObservations { rule: cpu, series: Some(vec![point(1, 50.0)]) }],
+                vec![node(1, None)],
+                stored,
+            ),
+            &mut baselines,
+        );
+        assert_eq!(cycle4.groups.len(), 1, "the resolution is always announced");
+        assert_eq!(cycle4.groups[0].items[0].reason, NotifyReason::Resolved);
+        assert_eq!(cycle4.alerts[0].state.phase, Phase::Resolved);
+        assert_eq!(cycle4.alerts[0].state.acked_until, None, "ack cleared on resolution");
+        assert_eq!(cycle4.alerts[0].state.acked_by, None);
+    }
+
+    #[test]
     fn la_disparition_d_une_serie_resout_l_alerte() {
         let cpu = rule("cpu_high", RuleKind::Threshold, 90.0, 0);
         let mut baselines = BaselineStore::default();
@@ -832,6 +913,46 @@ mod tests {
         assert_eq!(phases.len(), 4);
         let suppressed = phases.values().filter(|p| **p == EffectivePhase::Suppressed).count();
         assert_eq!(suppressed, 3, "switch, nas, and the nas CPU");
+    }
+
+    #[test]
+    fn un_relais_declare_injoignable_supprime_ses_equipements_avant_sa_propre_alerte() {
+        // relais(9) ← nas(3), interrogé par le relais. Le relais est muet depuis
+        // peu : son `up`, que le serveur écrit tant que son dernier lot n'a pas
+        // trop vieilli, est encore frais et son `host_down` ne part pas ; mais le
+        // serveur a déjà noté « injoignable » à sa dernière sonde. Le NAS, lui,
+        // n'a plus de mesure depuis la dernière sonde relayée.
+        let mut relay = node(9, None);
+        relay.unreachable = true;
+        let mut nas = node(3, None);
+        nas.via_agent = Some(9);
+        let host_down = rule(model::RULE_HOST_DOWN, RuleKind::Threshold, 180.0, 0);
+        let mut baselines = BaselineStore::default();
+
+        let outcome = plan_cycle(
+            input(
+                at(0),
+                vec![RuleObservations {
+                    rule: host_down,
+                    series: Some(vec![point(9, 60.0), point(3, 600.0)]),
+                }],
+                vec![relay, nas],
+                Vec::new(),
+            ),
+            &mut baselines,
+        );
+
+        let nas = outcome.alerts.iter().find(|a| a.target_id == Some(3)).expect("nas");
+        assert_eq!(nas.state.phase, Phase::Firing);
+        assert_eq!(nas.effective_phase(), EffectivePhase::Suppressed);
+        assert_eq!(nas.state.suppressed_by, Some(9), "the relay explains the outage");
+        assert!(outcome.groups.is_empty(), "nothing is notified for the device");
+
+        // Le relais reste libre de porter sa propre alerte : le verdict enregistré
+        // ne l'étouffe pas lui-même.
+        let relay = outcome.alerts.iter().find(|a| a.target_id == Some(9)).expect("relay");
+        assert_eq!(relay.state.phase, Phase::Ok);
+        assert!(!relay.state.suppressed);
     }
 
     #[test]

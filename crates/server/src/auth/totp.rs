@@ -96,29 +96,43 @@ pub fn code_at(secret: &[u8], unix_secs: u64) -> String {
     format!("{:0width$}", hotp(secret, unix_secs / PERIOD), width = DIGITS as usize)
 }
 
-/// Vérifie un code saisi, à l'instant donné, avec la tolérance d'horloge.
+/// Vérifie un code saisi, à l'instant donné, avec la tolérance d'horloge, et
+/// rend le pas de temps qui l'a produit — c'est lui que [`ReplayGuard`] retient.
 ///
 /// Les espaces sont ignorés : les applications affichent « 123 456 » et les
 /// gens le recopient tel quel. La comparaison est en temps constant par
 /// principe, même si la fenêtre de trois codes ne laisse rien à mesurer.
-pub fn verify_at(secret: &[u8], code: &str, unix_secs: u64) -> bool {
+pub fn matching_step_at(secret: &[u8], code: &str, unix_secs: u64) -> Option<i64> {
     let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
     if code.len() != DIGITS as usize || !code.bytes().all(|b| b.is_ascii_digit()) {
-        return false;
+        return None;
     }
     let step = (unix_secs / PERIOD) as i64;
-    let mut matched = false;
+    let mut matched = None;
     for delta in -WINDOW..=WINDOW {
         let Ok(counter) = u64::try_from(step + delta) else { continue };
         let expected = format!("{:0width$}", hotp(secret, counter), width = DIGITS as usize);
-        matched |= bool::from(expected.as_bytes().ct_eq(code.as_bytes()));
+        if bool::from(expected.as_bytes().ct_eq(code.as_bytes())) {
+            matched = Some(step + delta);
+        }
     }
     matched
 }
 
-/// Vérifie un code à l'instant présent.
+/// Vérifie un code saisi, à l'instant donné, avec la tolérance d'horloge.
+pub fn verify_at(secret: &[u8], code: &str, unix_secs: u64) -> bool {
+    matching_step_at(secret, code, unix_secs).is_some()
+}
+
+/// Vérifie un code à l'instant présent ; rend le pas de temps qui l'a produit.
+pub fn matching_step(secret: &[u8], code: &str) -> Option<i64> {
+    matching_step_at(secret, code, now())
+}
+
+/// Vérifie un code à l'instant présent, sans mémoire : à l'appelant de passer
+/// par [`ReplayGuard`] quand le code doit ne servir qu'une fois.
 pub fn verify(secret: &[u8], code: &str) -> bool {
-    verify_at(secret, code, now())
+    matching_step(secret, code).is_some()
 }
 
 fn now() -> u64 {
@@ -126,6 +140,39 @@ fn now() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// Un code n'est bon qu'une fois (RFC 6238, § 5.2) : la fenêtre d'horloge le
+/// laisse valable jusqu'à quatre-vingt-dix secondes, assez pour qu'un code
+/// aperçu par-dessus une épaule serve à quelqu'un qui connaît déjà le mot de
+/// passe. On retient donc, par compte, le dernier pas de temps accepté, et rien
+/// d'antérieur ou d'égal ne repasse.
+///
+/// En mémoire, comme les connexions en attente : un redémarrage rouvre au pire
+/// la fenêtre d'un code déjà vu, le temps d'un pas ou deux.
+#[derive(Default)]
+pub struct ReplayGuard {
+    last_step: std::collections::HashMap<i64, i64>,
+}
+
+impl ReplayGuard {
+    /// Accepte le pas `step` pour `user_id` s'il est plus récent que le dernier
+    /// accepté, et le retient. `false` : ce code, ou un plus ancien, a déjà servi.
+    pub fn accept(&mut self, user_id: i64, step: i64) -> bool {
+        match self.last_step.get(&user_id) {
+            Some(last) if step <= *last => false,
+            _ => {
+                self.last_step.insert(user_id, step);
+                true
+            }
+        }
+    }
+
+    /// Oublie le compte : son secret vient de changer, les pas retenus ne
+    /// disent plus rien.
+    pub fn forget(&mut self, user_id: i64) {
+        self.last_step.remove(&user_id);
+    }
 }
 
 /// Un code de secours a-t-il la forme d'un code de secours ? Sert à distinguer,
@@ -192,6 +239,29 @@ mod tests {
         assert!(verify_at(secret, "005 924", at), "les espaces sont ignorés");
         assert!(!verify_at(secret, "00592", at));
         assert!(!verify_at(secret, "abcdef", at));
+    }
+
+    #[test]
+    fn a_code_is_accepted_once_and_older_ones_never_again() {
+        let secret = b"12345678901234567890";
+        let at = 1_234_567_890;
+        let step = matching_step_at(secret, &code_at(secret, at), at).expect("code courant");
+        assert_eq!(step, (at / PERIOD) as i64);
+        // Le code du pas précédent, encore dans la fenêtre, est reconnu comme tel.
+        assert_eq!(
+            matching_step_at(secret, &code_at(secret, at - PERIOD), at),
+            Some(step - 1),
+            "un pas de retard est reconnu à son pas"
+        );
+
+        let mut guard = ReplayGuard::default();
+        assert!(guard.accept(7, step));
+        assert!(!guard.accept(7, step), "le même code ne repasse pas");
+        assert!(!guard.accept(7, step - 1), "ni celui d'avant, même encore dans la fenêtre");
+        assert!(guard.accept(7, step + 1), "le suivant passe");
+        assert!(guard.accept(8, step), "un autre compte a son propre compteur");
+        guard.forget(7);
+        assert!(guard.accept(7, step), "après un nouveau secret, on repart de zéro");
     }
 
     #[test]

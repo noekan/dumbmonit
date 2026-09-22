@@ -146,6 +146,7 @@ mod tests {
             via_agent: None,
             tags: BTreeMap::new(),
             enabled: true,
+            unreachable: false,
         }
     }
 

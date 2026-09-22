@@ -300,7 +300,14 @@
 		{/each}
 	</div>
 {:else if tab === 'now'}
-	<NeedsYouList {sky} grouped showOpen {silencingKey} onsilence={silence} />
+	<NeedsYouList
+		{sky}
+		grouped
+		showOpen
+		{silencingKey}
+		onsilence={silence}
+		onackchange={() => void alertsStore.refresh()}
+	/>
 {:else if tab === 'scheduled'}
 	<SilencesSection
 		{silences}

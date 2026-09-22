@@ -13,6 +13,7 @@ import {
 	Cpu,
 	Globe,
 	HardDrive,
+	HeartPulse,
 	Network,
 	Plug,
 	Radio,
@@ -20,7 +21,7 @@ import {
 	ShieldCheck
 } from 'lucide-svelte';
 import type { CollectorInfo } from '$lib/api';
-import { isUptimeKind } from '$lib/format';
+import { isUptimeKind, PUSH_KIND } from '$lib/format';
 
 const KIND_ICON: Record<string, typeof LucideIcon> = {
 	snmp: Network,
@@ -32,7 +33,8 @@ const KIND_ICON: Record<string, typeof LucideIcon> = {
 	tcp: Plug,
 	dns: AtSign,
 	ping: Radio,
-	tls: ShieldCheck
+	tls: ShieldCheck,
+	push: HeartPulse
 };
 
 export function kindIcon(kind: string): typeof LucideIcon {
@@ -59,8 +61,10 @@ export function groupCollectors(collectors: CollectorInfo[]): KindGroup[] {
 	const devices = collectors
 		.filter((c) => DEVICE_KINDS.includes(c.kind))
 		.sort((a, b) => DEVICE_KINDS.indexOf(a.kind) - DEVICE_KINDS.indexOf(b.kind));
-	const services = collectors.filter((c) => isUptimeKind(c.kind));
-	const other = collectors.filter((c) => !DEVICE_KINDS.includes(c.kind) && !isUptimeKind(c.kind));
+	// Heartbeats sit with the services: they watch a job, not a machine.
+	const isService = (kind: string) => isUptimeKind(kind) || kind === PUSH_KIND;
+	const services = collectors.filter((c) => isService(c.kind));
+	const other = collectors.filter((c) => !DEVICE_KINDS.includes(c.kind) && !isService(c.kind));
 	const groups: KindGroup[] = [
 		{ id: 'devices', title: 'Devices', collectors: devices },
 		{ id: 'services', title: 'Services', collectors: services },

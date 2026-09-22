@@ -81,6 +81,8 @@ struct Inner {
     trusted_proxies: Vec<ipnet::IpNet>,
     /// Connexions à mi-chemin : mot de passe accepté, second facteur attendu.
     pending_totp: Mutex<totp_login::PendingLogins>,
+    /// Dernier code TOTP accepté par compte : un code ne sert qu'une fois.
+    totp_replay: Mutex<totp::ReplayGuard>,
     /// Client HTTP vers le fournisseur OIDC (découverte, JWKS, échange du code).
     http: reqwest::Client,
     /// Document de découverte et clés du fournisseur, mis en cache.
@@ -122,6 +124,7 @@ impl AuthState {
             limiter: Mutex::new(Buckets::new()),
             trusted_proxies: Vec::new(),
             pending_totp: Mutex::new(totp_login::PendingLogins::default()),
+            totp_replay: Mutex::new(totp::ReplayGuard::default()),
             http,
             discovery: Mutex::new(None),
             pending: Mutex::new(oidc::flow::PendingLogins::default()),
@@ -142,6 +145,10 @@ impl AuthState {
 
     pub fn pending_totp(&self) -> &Mutex<totp_login::PendingLogins> {
         &self.0.pending_totp
+    }
+
+    pub fn totp_replay(&self) -> &Mutex<totp::ReplayGuard> {
+        &self.0.totp_replay
     }
 
     pub fn http(&self) -> &reqwest::Client {

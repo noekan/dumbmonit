@@ -9,6 +9,15 @@
 //! lui-même — se déconnecter, changer son mot de passe. Les lectures sont ouvertes
 //! aux deux rôles ; les quelques lectures réservées (liste des comptes, réglages
 //! SSO) le disent elles-mêmes avec l'extracteur [`AdminUser`].
+//!
+//! Deux façons de se présenter : le cookie de session d'un navigateur, ou un
+//! jeton d'API (`Authorization: Bearer dmt_…`) pour les scripts et les
+//! assistants. Un jeton `read` vaut un lecteur, un jeton `write` vaut un
+//! administrateur — à ceci près qu'un jeton ne gère jamais les comptes, les
+//! sessions, le second facteur, le SSO ni les autres jetons ([`TOKEN_DENIED`]) :
+//! ce sont des gestes que l'on fait soi-même, dans l'interface. Une requête
+//! portée par un jeton n'a pas de cookie, donc pas de CSRF possible : la preuve
+//! d'origine n'est exigée que des sessions.
 
 use axum::extract::{Extension, FromRequestParts, Request, State};
 use axum::http::request::Parts;
@@ -18,6 +27,7 @@ use axum::response::{IntoResponse, Response};
 use sqlx::SqlitePool;
 
 use crate::auth::session::SessionToken;
+use crate::auth::token::{self, ApiToken, Scope};
 use crate::auth::users::{self, User};
 use crate::auth::{AuthError, AuthState, cookie, session};
 use crate::state::AppState;
@@ -28,13 +38,54 @@ use crate::state::AppState;
 #[derive(Clone)]
 pub struct CurrentSession(pub SessionToken);
 
-/// Compte de la session, déposé de la même façon.
+/// Compte de la session, déposé de la même façon. Absent quand la requête est
+/// portée par un jeton d'API : voir [`CurrentPrincipal`].
 #[derive(Clone)]
 pub struct CurrentUser(pub User);
+
+/// Qui fait la requête : un compte connecté par session, ou un jeton d'API.
+#[derive(Debug, Clone)]
+pub enum Principal {
+    User(User),
+    Token(ApiToken),
+}
+
+impl Principal {
+    /// Nom à inscrire dans les journaux : l'identifiant du compte, ou le nom du
+    /// jeton précédé de `token:` pour qu'on ne le confonde pas avec un compte.
+    pub fn label(&self) -> String {
+        match self {
+            Self::User(user) => user.username.clone(),
+            Self::Token(token) => format!("token:{}", token.name),
+        }
+    }
+
+    /// Un administrateur, ou un jeton `write` — ce qui revient au même.
+    pub fn is_admin(&self) -> bool {
+        match self {
+            Self::User(user) => user.role.is_admin(),
+            Self::Token(token) => token.scope.allows(Scope::Write),
+        }
+    }
+}
+
+/// L'identité de la requête, quel qu'en soit le porteur. Toujours déposée par le
+/// garde, là où [`CurrentUser`] et [`CurrentSession`] ne le sont que pour une
+/// session.
+#[derive(Clone)]
+pub struct CurrentPrincipal(pub Principal);
 
 /// Écritures que chacun peut faire sur son propre compte, sans être admin.
 const SELF_SERVICE: &[&str] =
     &["/auth/logout", "/auth/password", "/auth/totp", "/auth/totp/enroll", "/auth/totp/verify"];
+
+/// Préfixes de routes interdits aux jetons d'API, quelle que soit leur portée :
+/// comptes et sessions (`/auth/**`, journal d'audit compris), gestion des
+/// comptes (`/users/**`), jetons d'API et d'agents. Un jeton ne fabrique pas
+/// d'autres secrets et ne touche pas à qui peut se connecter.
+pub const TOKEN_DENIED: &[&str] = &["/auth", "/users", "/tokens", "/agent/tokens"];
+
+const TOKEN_DENIED_MESSAGE: &str = "API tokens cannot manage accounts, sessions, two-factor                                     authentication, SSO or other tokens: sign in to the web                                     interface for that.";
 
 /// En-tête que l'interface pose sur chaque écriture, et sa valeur attendue.
 ///
@@ -73,6 +124,20 @@ pub async fn require_session(
         Ok(true) => {}
     }
 
+    // Un jeton d'API présenté prime : on ne retombe pas sur le cookie s'il est
+    // refusé, sinon un jeton révoqué dans un navigateur connecté passerait
+    // inaperçu.
+    if token::extract_bearer(request.headers()).is_some() {
+        let (method, path) = (request.method().clone(), request.uri().path().to_string());
+        return match bearer_identity(&state, request.headers(), &method, &path).await {
+            Ok(api_token) => {
+                request.extensions_mut().insert(CurrentPrincipal(Principal::Token(api_token)));
+                next.run(request).await
+            }
+            Err(response) => *response,
+        };
+    }
+
     let (token, user) = match current_session(&state.pool, request.headers()).await {
         Ok(Some(found)) => found,
         Ok(None) => {
@@ -91,8 +156,42 @@ pub async fn require_session(
     }
 
     request.extensions_mut().insert(CurrentSession(token));
+    request.extensions_mut().insert(CurrentPrincipal(Principal::User(user.clone())));
     request.extensions_mut().insert(CurrentUser(user));
     next.run(request).await
+}
+
+/// Vérifie le jeton d'API d'une requête et ce qu'il a le droit de faire ici.
+///
+/// Jeton inconnu ou révoqué : 401 ; route interdite aux jetons : 403 ; écriture
+/// avec un jeton `read` : 403 ; jeton qui boucle : 429 — les mêmes réponses que
+/// le point d'entrée MCP, qui passe par la même vérification.
+async fn bearer_identity(
+    state: &AppState,
+    headers: &HeaderMap,
+    method: &Method,
+    path: &str,
+) -> Result<ApiToken, Box<Response>> {
+    let api_token = token::check(&state.pool, headers, Scope::Read)
+        .await
+        .map_err(|error| Box::new(error.into_response()))?;
+    if is_token_denied(path) {
+        return Err(Box::new(AuthError::Forbidden(TOKEN_DENIED_MESSAGE.into()).into_response()));
+    }
+    if is_mutation(method) {
+        api_token
+            .require(Scope::Write)
+            .map_err(|reason| Box::new(AuthError::Forbidden(reason).into_response()))?;
+    }
+    Ok(api_token)
+}
+
+/// Vrai si la route est de celles qu'un jeton d'API ne peut pas appeler.
+fn is_token_denied(path: &str) -> bool {
+    let path = path.strip_prefix("/api").unwrap_or(path);
+    TOKEN_DENIED.iter().any(|prefix| {
+        path == *prefix || path.strip_prefix(prefix).is_some_and(|rest| rest.starts_with('/'))
+    })
 }
 
 /// Une écriture portée par le cookie de session doit prouver qu'elle vient de
@@ -175,7 +274,39 @@ impl<S: Send + Sync> FromRequestParts<S> for Authenticated {
     }
 }
 
+/// Extracteur : l'identité de la requête — compte ou jeton — ou 401.
+pub struct Identity(pub Principal);
+
+impl<S: Send + Sync> FromRequestParts<S> for Identity {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<CurrentPrincipal>()
+            .map(|current| Self(current.0.clone()))
+            .ok_or_else(|| AuthError::Unauthorized("Authentication required.".into()))
+    }
+}
+
+/// Extracteur : une identité d'administrateur — compte `admin` ou jeton `write`.
+pub struct AdminIdentity(pub Principal);
+
+impl<S: Send + Sync> FromRequestParts<S> for AdminIdentity {
+    type Rejection = AuthError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let Identity(principal) = Identity::from_request_parts(parts, state).await?;
+        if !principal.is_admin() {
+            return Err(AuthError::admin_required());
+        }
+        Ok(Self(principal))
+    }
+}
+
 /// Extracteur : le compte courant, à condition qu'il soit administrateur.
+/// Réservé aux routes que les jetons ne peuvent pas appeler ; ailleurs,
+/// [`AdminIdentity`] accepte aussi un jeton `write`.
 pub struct AdminUser(pub User);
 
 impl<S: Send + Sync> FromRequestParts<S> for AdminUser {
@@ -201,6 +332,19 @@ mod tests {
         assert!(is_self_service("/auth/totp/enroll"));
         assert!(!is_self_service("/targets"));
         assert!(!is_self_service("/api/users"));
+    }
+
+    #[test]
+    fn the_routes_denied_to_tokens_are_matched_by_prefix() {
+        assert!(is_token_denied("/auth/me"));
+        assert!(is_token_denied("/api/auth/audit"));
+        assert!(is_token_denied("/users"));
+        assert!(is_token_denied("/api/users/3/totp"));
+        assert!(is_token_denied("/tokens/4"));
+        assert!(is_token_denied("/agent/tokens"));
+        assert!(!is_token_denied("/targets"));
+        assert!(!is_token_denied("/api/agent/relay"));
+        assert!(!is_token_denied("/authors"), "un préfixe, pas une sous-chaîne");
     }
 
     #[test]

@@ -140,13 +140,20 @@ pub async fn verify(
     let keys = limiter_keys(ip, Some(&user.username));
     guard_attempt(&auth, &keys).await?;
     let secret = state.cipher.decrypt(encrypted)?;
-    if !totp::verify(&secret, &payload.code) {
+    let Some(step) = totp::matching_step(&secret, &payload.code) else {
         auth.limiter().lock().await.record_failure(&keys, Instant::now());
         return Err(AuthError::Unauthorized(
             "That code is not valid. Check the clock of your device and try the next code.".into(),
         ));
-    }
+    };
     auth.limiter().lock().await.record_success(&keys);
+    // Nouveau secret : on repart de zéro, puis le code d'activation compte comme
+    // servi — il n'ouvrira pas une session dans la foulée.
+    {
+        let mut replay = auth.totp_replay().lock().await;
+        replay.forget(user.id);
+        replay.accept(user.id, step);
+    }
 
     let codes = totp::generate_recovery_codes();
     let hashes: Vec<Vec<u8>> = codes.iter().map(|code| totp::hash_recovery_code(code)).collect();
@@ -168,6 +175,7 @@ pub async fn disable(
 ) -> AuthResult<StatusCode> {
     check_password(&auth, &user, ip, payload.password).await?;
     users::clear_totp(&state.pool, user.id).await?;
+    auth.totp_replay().lock().await.forget(user.id);
     audit::record(&state.pool, Some(&user.username), "totp.disabled", None, ip).await;
     tracing::info!(user = %user.username, "two-factor authentication disabled");
     Ok(StatusCode::NO_CONTENT)
@@ -177,6 +185,7 @@ pub async fn disable(
 /// facteur d'un compte qui n'a plus ni téléphone ni code de secours.
 pub async fn admin_reset(
     State(state): State<AppState>,
+    Extension(auth): Extension<AuthState>,
     AdminUser(me): AdminUser,
     ClientIp(ip): ClientIp,
     Path(id): Path<i64>,
@@ -185,6 +194,7 @@ pub async fn admin_reset(
         return Err(AuthError::NotFound("No such user.".into()));
     };
     users::clear_totp(&state.pool, id).await?;
+    auth.totp_replay().lock().await.forget(id);
     // Le compte retombe sur son seul mot de passe : ses sessions ouvertes ne
     // valent plus la garantie sous laquelle elles ont été ouvertes.
     session::delete_for_user(&state.pool, id, None).await?;
@@ -264,7 +274,12 @@ pub async fn login_step(
     } else {
         let encrypted = user.totp_secret.as_deref().ok_or_else(expired)?;
         let secret = state.cipher.decrypt(encrypted)?;
-        totp::verify(&secret, &payload.code)
+        // Un code déjà accepté est refusé comme un code faux : rien ne distingue,
+        // pour qui l'a intercepté, un code périmé d'un code inventé.
+        match totp::matching_step(&secret, &payload.code) {
+            Some(step) => auth.totp_replay().lock().await.accept(user.id, step),
+            None => false,
+        }
     };
 
     if !accepted {

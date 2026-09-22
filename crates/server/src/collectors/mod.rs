@@ -13,6 +13,7 @@
 
 pub mod agent;
 pub mod pbs_history;
+pub mod push;
 pub mod relay;
 pub mod synology_history;
 
@@ -25,3 +26,4 @@ pub use dumbmonit_collectors::{
 pub use dumbmonit_proto::Collector;
 
 pub use agent::AgentCollector;
+pub use push::PushCollector;

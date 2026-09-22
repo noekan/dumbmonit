@@ -308,6 +308,10 @@ pub fn builtin_rules() -> Vec<Rule> {
         // seuil, et le `for` absorbe un raté isolé. `== bool 0` rend 1 pour un
         // service en panne ; sans `bool`, la comparaison renverrait 0 (la valeur
         // de gauche) et le seuil « > 0 » ne se déclencherait jamais.
+        //
+        // Les heartbeats (`probe="push"`) écrivent la même série mais ont leur
+        // propre règle, `push_missed`, en avertissement : un cron en retard n'est
+        // pas une panne critique, et il ne doit pas alerter deux fois.
         Rule {
             description: "The service has not responded correctly for three minutes.".to_string(),
             operator: Operator::Gt,
@@ -319,7 +323,27 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "service_down",
                 "Service down",
                 RuleKind::Threshold,
-                "dumbmonit_probe_success == bool 0",
+                "dumbmonit_probe_success{probe!=\"push\"} == bool 0",
+            )
+        },
+        // Heartbeat manqué. Le collecteur `push` écrit `probe_success = 0` dès que
+        // le dernier appel dépasse la période attendue plus la tolérance, ou que
+        // le script a lui-même signalé `status=down` ; la règle n'a donc aucun
+        // délai à connaître — il est propre à chaque cible. Le `for` court
+        // n'absorbe que le battement du planificateur : la tolérance est déjà
+        // dans le verdict.
+        Rule {
+            description: "The job has not called in within its expected interval plus grace period, or reported a failure itself."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(2 * 60),
+            severity: Severity::Warning,
+            ..base(
+                "push_missed",
+                "Heartbeat missed",
+                RuleKind::Threshold,
+                "dumbmonit_probe_success{probe=\"push\"} == bool 0",
             )
         },
         // Instabilité : un service qui alterne sans cesse n'est jamais « en panne »
@@ -336,7 +360,7 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "service_flapping",
                 "Service flapping",
                 RuleKind::Threshold,
-                "changes(dumbmonit_probe_success[30m])",
+                "changes(dumbmonit_probe_success{probe!=\"push\"}[30m])",
             )
         },
         // Lenteur : le défaut de délai des sondes est de 5 s, au-delà elles échouent
@@ -1287,6 +1311,7 @@ mod tests {
             "pbs_task_failed",
             "pbs_gc_too_old",
             "service_down",
+            "push_missed",
             "service_flapping",
             "service_slow",
             "tls_cert_expiring",

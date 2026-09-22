@@ -24,10 +24,14 @@ The single primary action of the page is **Add a device**.
 The list of what needs you now, most severe first: unreachable devices, then
 firing alerts by severity. Each row names the rule, the device, the current
 value, how long it has been going on, and whether it groups several series
-("×4" for four filesystems on the same device). Two actions: **Open device**
-and **Silence 1 h**, a one-hour maintenance window on that device.
+("×4" for four filesystems on the same device). Three actions: **Ack**
+(acknowledge this alert for 1 h, 4 h, 24 h or until resolved — reminders
+pause, the resolution is still notified), **Silence 1 h**, a one-hour
+maintenance window on that device, and **Open device**.
 
-Alerts suppressed by a parent or still building up are not in this list.
+Acknowledged alerts move to a quieter *Acknowledged* group under the list and
+leave the *Needs you* count. See
+[Acknowledge vs silence](alerts.md#acknowledge-vs-silence).
 
 ## Devices summary
 

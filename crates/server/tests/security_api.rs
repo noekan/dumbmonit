@@ -153,7 +153,13 @@ async fn two_factor_makes_the_login_a_two_step_dance() {
         .await;
     assert_eq!(unknown.status, StatusCode::UNAUTHORIZED);
 
-    let code = totp::code_at(&secret, now_secs());
+    // Le code qui a activé le second facteur a déjà servi : celui du pas
+    // suivant, que la fenêtre d'horloge accepte, ouvre la session.
+    let used = totp::code_at(&secret, now_secs());
+    let reused =
+        app.post("/api/auth/login/totp", json!({ "pending": pending, "code": used }), None).await;
+    assert_eq!(reused.status, StatusCode::UNAUTHORIZED, "{}", reused.body);
+    let code = totp::code_at(&secret, now_secs() + 30);
     let second =
         app.post("/api/auth/login/totp", json!({ "pending": pending, "code": code }), None).await;
     assert_eq!(second.status, StatusCode::NO_CONTENT, "{}", second.body);
@@ -164,6 +170,14 @@ async fn two_factor_makes_the_login_a_two_step_dance() {
     let replay =
         app.post("/api/auth/login/totp", json!({ "pending": pending, "code": code }), None).await;
     assert_eq!(replay.status, StatusCode::UNAUTHORIZED);
+
+    // Et le code aussi : un nouveau mot de passe ne le fait pas resservir
+    // (RFC 6238, § 5.2), même s'il est encore dans la fenêtre d'horloge.
+    let pending =
+        app.login_as("admin", PASSWORD).await.body["pending"].as_str().unwrap().to_string();
+    let replayed =
+        app.post("/api/auth/login/totp", json!({ "pending": pending, "code": code }), None).await;
+    assert_eq!(replayed.status, StatusCode::UNAUTHORIZED, "{}", replayed.body);
 
     // Un code de secours passe une fois, et une seule.
     let pending =
@@ -222,7 +236,7 @@ async fn too_many_wrong_codes_cancel_the_pending_login() {
     }
     assert!(matches!(last, StatusCode::UNAUTHORIZED | StatusCode::TOO_MANY_REQUESTS), "{last}");
     // Le jeton est mort, même avec le bon code — et le seau du compte se ferme.
-    let code = totp::code_at(&secret, now_secs());
+    let code = totp::code_at(&secret, now_secs() + 30);
     let reply =
         app.post("/api/auth/login/totp", json!({ "pending": pending, "code": code }), None).await;
     assert!(
@@ -231,6 +245,30 @@ async fn too_many_wrong_codes_cancel_the_pending_login() {
         reply.status,
         reply.body
     );
+
+    // Retaper le mot de passe n'efface pas l'ardoise : la connexion n'est qu'à
+    // mi-chemin. Le sixième code faux est refusé par le compteur, pas seulement
+    // par le jeton — sans quoi qui tient le mot de passe essaierait les codes
+    // par paquets de cinq, indéfiniment.
+    let retry = app.login_as("admin", PASSWORD).await;
+    assert!(
+        matches!(retry.status, StatusCode::OK | StatusCode::TOO_MANY_REQUESTS),
+        "{} {}",
+        retry.status,
+        retry.body
+    );
+    if retry.status == StatusCode::OK {
+        let pending = retry.body["pending"].as_str().unwrap().to_string();
+        // Le sixième échec ferme le seau ; le septième s'y heurte.
+        let mut last = StatusCode::OK;
+        for _ in 0..2 {
+            let reply = app
+                .post("/api/auth/login/totp", json!({ "pending": pending, "code": "000000" }), None)
+                .await;
+            last = reply.status;
+        }
+        assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+    }
 }
 
 #[tokio::test]

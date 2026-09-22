@@ -616,6 +616,24 @@ const TLS_OPTIONS: &[OptionView] = &[
     PROBE_TIMEOUT,
 ];
 
+/// Options lues par `collectors/push/mod.rs` (`Settings::from_target`).
+const PUSH_OPTIONS: &[OptionView] = &[
+    text(
+        "expected_interval",
+        "Expected interval",
+        "How often the job is supposed to call in: 30m, 1h, 6h, 24h, 7d (or a number of seconds). A missed call is declared once this interval plus the grace period has passed.",
+        "24h",
+        "24h",
+    ),
+    text(
+        "grace",
+        "Grace period",
+        "Extra time tolerated after the expected interval before the heartbeat counts as missed: a percentage of the interval (10%) or a fixed duration (15m). Never less than one minute.",
+        "10%",
+        "10%",
+    ),
+];
+
 /// Options lues par `collectors/proxmox/options.rs`.
 const PROXMOX_OPTIONS: &[OptionView] = &[
     number("port", "API port", "Used if the address does not give a port.", "8006", "8006"),
@@ -1083,6 +1101,38 @@ fn describe(kind: &'static str) -> CollectorView {
             },
             options: TLS_OPTIONS,
         },
+        // Moniteur en poussée : rien n'est interrogé, c'est le travail surveillé
+        // qui appelle. L'adresse n'est qu'un libellé : elle doit rester unique
+        // parmi les heartbeats, comme toute adresse pour un type donné.
+        "push" => CollectorView {
+            kind,
+            label: "Heartbeat (push)",
+            summary: "A cron job, backup script or automation that must call DumbMonit regularly; if it stops calling, you are told.",
+            examples: &[
+                "Nightly backup script",
+                "Cron job",
+                "Home Assistant automation",
+                "Certificate renewal",
+                "Database dump",
+            ],
+            credential_types: &["none"],
+            credentials: &[NO_AUTH],
+            address_hint: "nightly-backup",
+            default_port: 0,
+            setup: Setup {
+                title: "Make the job call in",
+                steps: &[
+                    "In the address, write a short label for the job (\"nightly-backup\", \"certbot-renew\"): nothing is contacted, the label only has to be unique among your heartbeats.",
+                    "Set the expected interval to the job's schedule (\"24h\" for a nightly job, \"1h\" for an hourly one) and, if the schedule drifts, a wider grace period. Save the device.",
+                    "The device page shows the URL to call. Add it at the end of the job, so it is called only when the job succeeded:\ncurl -fsS -m 10 --retry 3 https://monit.example.com/api/push/<token>",
+                    "A job that can tell when it failed may say so instead of staying silent: append ?status=down&msg=… to the URL, and the alert fires at once.",
+                    "Until the first call arrives the device shows \"Waiting\" and nothing is alerted. Lost or leaked URL? \"Regenerate\" on the device page issues a new one; the old one stops answering immediately.",
+                ],
+                warning: "Call the URL at the end of the job, after the part that matters. A call placed at the top would report a success even when the backup itself failed.",
+                doc_url: "",
+            },
+            options: PUSH_OPTIONS,
+        },
         "dummy" => CollectorView {
             kind,
             label: "Demo device",
@@ -1125,7 +1175,8 @@ mod tests {
     /// Les types enregistrés dans `main.rs`. Un type ajouté là-bas sans notice ici
     /// s'afficherait sous son nom brut, sans explication ni exemple d'adresse.
     const KINDS_ENREGISTRES: &[&str] = &[
-        "snmp", "proxmox", "pbs", "synology", "agent", "http", "tcp", "dns", "ping", "tls", "dummy",
+        "snmp", "proxmox", "pbs", "synology", "agent", "http", "tcp", "dns", "ping", "tls", "push",
+        "dummy",
     ];
 
     #[test]
@@ -1237,6 +1288,7 @@ mod tests {
                 ],
             ),
             ("synology", &["scheme", "port", "insecure_tls", "request_timeout_seconds", "abb"]),
+            ("push", &["expected_interval", "grace"]),
         ];
         for (kind, cles) in attendues {
             let obtenues: Vec<&str> = describe(kind).options.iter().map(|o| o.key).collect();
@@ -1304,6 +1356,11 @@ mod tests {
         assert_eq!(defaut("pbs", "max_groups"), "500");
         assert_eq!(defaut("synology", "request_timeout_seconds"), "15");
         assert_eq!(defaut("synology", "abb"), "true");
+        assert_eq!(
+            defaut("push", "expected_interval"),
+            crate::collectors::push::DEFAULT_EXPECTED_INTERVAL
+        );
+        assert_eq!(defaut("push", "grace"), crate::collectors::push::DEFAULT_GRACE);
     }
 
     /// `credential_types` et `credentials` décrivent la même liste : l'ancienne
@@ -1434,6 +1491,7 @@ mod tests {
             ("pbs", include_str!("../../../../docs/devices/pbs.md")),
             ("synology", include_str!("../../../../docs/devices/synology.md")),
             ("agent", include_str!("../../../../docs/devices/agent.md")),
+            ("push", include_str!("../../../../docs/devices/push.md")),
         ];
         fn flatten(text: &str) -> String {
             text.replace('`', "").split_whitespace().collect::<Vec<_>>().join(" ")
@@ -1469,7 +1527,7 @@ mod tests {
         let view = describe("http");
         assert!(view.credential_types.contains(&"username_password"));
         assert!(view.credential_types.contains(&"api_token"));
-        for kind in ["tcp", "dns", "ping", "tls"] {
+        for kind in ["tcp", "dns", "ping", "tls", "push"] {
             assert_eq!(describe(kind).credential_types, &["none"], "« {kind} » n'envoie rien");
         }
     }

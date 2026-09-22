@@ -204,6 +204,16 @@ export interface Alert {
 	silenced: boolean;
 	/** True while a baseline rule is still learning (silent for its first days). */
 	learning: boolean;
+	/**
+	 * True while someone has acknowledged this alert: reminders and escalations
+	 * pause until `acked_until`, the resolution is still notified. The phase
+	 * does not move — an acked alert is still a problem, just a known one.
+	 */
+	acked: boolean;
+	acked_until: string | null;
+	/** Account that acknowledged, or `token:name` for an API token. */
+	acked_by: string | null;
+	ack_note: string | null;
 	value: number | null;
 	score: number | null;
 	condition_since: string | null;
@@ -211,6 +221,17 @@ export interface Alert {
 	last_eval_at: string | null;
 	last_notified_at: string | null;
 	notify_count: number;
+}
+
+/**
+ * Body of `POST /api/alerts/{fingerprint}/ack`. One of `until` (RFC 3339) or
+ * `duration_secs`; neither means four hours. `until: null` lifts the
+ * acknowledgement, like `DELETE`.
+ */
+export interface AckPayload {
+	until?: string | null;
+	duration_secs?: number;
+	note?: string | null;
 }
 
 /** One recorded phase transition, mirroring the server's `HistoryEntryView`. */
@@ -1448,4 +1469,32 @@ export interface SynologyAbb {
 	min_allowance_s: number;
 	learning_allowance_s: number;
 	failing_streak: number;
+}
+
+// --- Heartbeat (push) monitors (`crates/server/src/api/push.rs`) -------------
+
+/**
+ * `GET /api/targets/{id}/push`: the secret URL a heartbeat device is called
+ * on, and what its last call said. Mirrors `PushMonitorView`. The token is
+ * returned on purpose: it only lets a caller say "the job ran", and it must be
+ * copied into a crontab long after the device was created.
+ */
+export interface PushMonitor {
+	target_id: TargetId;
+	token: string;
+	/** Path relative to the server: `/api/push/<token>`. The UI prepends its origin. */
+	path: string;
+	last_seen_at: string | null;
+	/** Age of the last call in seconds, `null` until the first one. */
+	last_seen_age_secs: number | null;
+	/** What the last call declared. */
+	last_status: 'up' | 'down';
+	last_message: string;
+	received_total: number;
+	created_at: string;
+	/** Effective settings, `null` when the options are unreadable (`settings_error`). */
+	expected_interval_secs: number | null;
+	grace_secs: number | null;
+	settings_error: string | null;
+	verdict: 'waiting' | 'on_time' | 'missed' | 'reported_down';
 }

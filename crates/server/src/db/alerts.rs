@@ -254,15 +254,18 @@ pub async fn set_rule_enabled(pool: &SqlitePool, id: i64, enabled: bool) -> Resu
 /// Les cibles désactivées sont incluses : elles peuvent être le parent d'une cible
 /// active, et les retirer casserait la chaîne de suppression.
 pub async fn list_target_nodes(pool: &SqlitePool) -> Result<Vec<TargetNode>> {
-    let rows =
-        sqlx::query("SELECT id, name, address, parent_id, via_agent, tags, enabled FROM targets")
-            .fetch_all(pool)
-            .await
-            .context("lecture de la topologie des cibles")?;
+    let rows = sqlx::query(
+        "SELECT id, name, address, parent_id, via_agent, tags, enabled, last_error FROM targets",
+    )
+    .fetch_all(pool)
+    .await
+    .context("lecture de la topologie des cibles")?;
 
     rows.iter()
         .map(|row| {
             let tags: String = row.try_get("tags")?;
+            let enabled = row.try_get::<i64, _>("enabled")? != 0;
+            let last_error: Option<String> = row.try_get("last_error")?;
             Ok(TargetNode {
                 id: row.try_get("id")?,
                 name: row.try_get("name")?,
@@ -270,7 +273,11 @@ pub async fn list_target_nodes(pool: &SqlitePool) -> Result<Vec<TargetNode>> {
                 parent_id: row.try_get("parent_id")?,
                 via_agent: row.try_get("via_agent")?,
                 tags: json_or_default(&tags),
-                enabled: row.try_get::<i64, _>("enabled")? != 0,
+                enabled,
+                // Une cible en pause garde son dernier verdict, qui ne dit plus
+                // rien du présent : elle ne peut pas étouffer ses descendants.
+                unreachable: enabled
+                    && last_error.as_deref().is_some_and(crate::db::targets::error_means_down),
             })
         })
         .collect()
@@ -328,7 +335,8 @@ pub async fn load_states(pool: &SqlitePool) -> Result<Vec<StoredAlert>> {
     let rows = sqlx::query(
         "SELECT fingerprint, rule_uid, target_id, series_key, labels, phase, suppressed,
                 suppressed_by, silenced, learning, value, score, condition_since,
-                firing_since, last_eval_at, last_notified_at, notify_count, resolved_at
+                firing_since, last_eval_at, last_notified_at, notify_count, resolved_at,
+                acked_until, acked_by, ack_note
          FROM alert_state",
     )
     .fetch_all(pool)
@@ -359,6 +367,9 @@ pub async fn load_states(pool: &SqlitePool) -> Result<Vec<StoredAlert>> {
                     learning: row.try_get::<i64, _>("learning")? != 0,
                     value: row.try_get("value")?,
                     score: row.try_get("score")?,
+                    acked_until: from_sql(row.try_get("acked_until")?),
+                    acked_by: row.try_get("acked_by")?,
+                    ack_note: row.try_get("ack_note")?,
                 },
             })
         })
@@ -368,6 +379,13 @@ pub async fn load_states(pool: &SqlitePool) -> Result<Vec<StoredAlert>> {
 /// Écrit l'état issu d'un cycle. Une seule transaction : un cycle interrompu ne
 /// laisse jamais la moitié des alertes dans l'état d'avant et l'autre dans celui
 /// d'après.
+///
+/// L'acquittement est la seule donnée de la ligne que le cycle ne réécrit pas :
+/// il est posé par l'API, entre deux cycles, et un cycle parti avant le clic
+/// l'écraserait avec l'état d'avant. Sur une ligne existante, le cycle ne fait
+/// que l'effacer — quand l'alerte n'est plus active, ou quand l'échéance est
+/// passée — ; une ligne neuve reprend ce qu'il porte en mémoire (le cas d'une
+/// alerte reprise sous une nouvelle empreinte).
 pub async fn save_states(pool: &SqlitePool, alerts: &[AlertOutcome]) -> Result<()> {
     if alerts.is_empty() {
         return Ok(());
@@ -379,8 +397,9 @@ pub async fn save_states(pool: &SqlitePool, alerts: &[AlertOutcome]) -> Result<(
             "INSERT INTO alert_state
                  (fingerprint, rule_uid, target_id, series_key, labels, phase, suppressed,
                   suppressed_by, silenced, learning, severity, value, score, condition_since,
-                  firing_since, last_eval_at, last_notified_at, notify_count, resolved_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  firing_since, last_eval_at, last_notified_at, notify_count, resolved_at,
+                  acked_until, acked_by, ack_note)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(fingerprint) DO UPDATE SET
                  rule_uid = excluded.rule_uid, target_id = excluded.target_id,
                  series_key = excluded.series_key, labels = excluded.labels,
@@ -391,7 +410,16 @@ pub async fn save_states(pool: &SqlitePool, alerts: &[AlertOutcome]) -> Result<(
                  condition_since = excluded.condition_since,
                  firing_since = excluded.firing_since, last_eval_at = excluded.last_eval_at,
                  last_notified_at = excluded.last_notified_at,
-                 notify_count = excluded.notify_count, resolved_at = excluded.resolved_at",
+                 notify_count = excluded.notify_count, resolved_at = excluded.resolved_at,
+                 acked_until = CASE WHEN excluded.phase IN ('pending', 'firing')
+                                     AND alert_state.acked_until > excluded.last_eval_at
+                                    THEN alert_state.acked_until END,
+                 acked_by = CASE WHEN excluded.phase IN ('pending', 'firing')
+                                  AND alert_state.acked_until > excluded.last_eval_at
+                                 THEN alert_state.acked_by END,
+                 ack_note = CASE WHEN excluded.phase IN ('pending', 'firing')
+                                  AND alert_state.acked_until > excluded.last_eval_at
+                                 THEN alert_state.ack_note END",
         )
         .bind(&alert.fingerprint)
         .bind(&alert.rule_uid)
@@ -412,6 +440,9 @@ pub async fn save_states(pool: &SqlitePool, alerts: &[AlertOutcome]) -> Result<(
         .bind(alert.state.last_notified_at.map(to_sql))
         .bind(i64::from(alert.state.notify_count))
         .bind(alert.state.resolved_at.map(to_sql))
+        .bind(alert.state.acked_until.map(to_sql))
+        .bind(&alert.state.acked_by)
+        .bind(&alert.state.ack_note)
         .execute(&mut *tx)
         .await
         .context("écriture de l'état d'une alerte")?;
@@ -485,7 +516,8 @@ pub async fn list_active(pool: &SqlitePool) -> Result<Vec<StoredAlert>> {
     let rows = sqlx::query(
         "SELECT fingerprint, rule_uid, target_id, series_key, labels, phase, suppressed,
                 suppressed_by, silenced, learning, value, score, condition_since,
-                firing_since, last_eval_at, last_notified_at, notify_count, resolved_at
+                firing_since, last_eval_at, last_notified_at, notify_count, resolved_at,
+                acked_until, acked_by, ack_note
          FROM alert_state
          WHERE phase IN ('pending', 'firing')
          ORDER BY firing_since DESC",
@@ -518,10 +550,64 @@ pub async fn list_active(pool: &SqlitePool) -> Result<Vec<StoredAlert>> {
                     learning: row.try_get::<i64, _>("learning")? != 0,
                     value: row.try_get("value")?,
                     score: row.try_get("score")?,
+                    acked_until: from_sql(row.try_get("acked_until")?),
+                    acked_by: row.try_get("acked_by")?,
+                    ack_note: row.try_get("ack_note")?,
                 },
             })
         })
         .collect()
+}
+
+/// Acquittement à poser sur une alerte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ack {
+    pub until: DateTime<Utc>,
+    pub by: String,
+    pub note: Option<String>,
+}
+
+/// Pose ou lève l'acquittement d'une alerte active.
+///
+/// `None` lève l'acquittement. Renvoie `false` si l'empreinte est inconnue ou
+/// n'est plus active : acquitter une alerte résolue n'aurait pas de sens, et
+/// l'interface ne la propose plus. En acquittant, les lignes de cette alerte
+/// encore retenues dans la file de notification (fenêtre de regroupement,
+/// heures calmes) sont retirées : l'utilisateur vient de dire qu'il sait, le
+/// résumé n'a pas à le lui répéter. La mention d'une résolution survenue
+/// pendant l'attente, elle, reste.
+pub async fn set_ack(pool: &SqlitePool, fingerprint: &str, ack: Option<&Ack>) -> Result<bool> {
+    let mut tx = pool.begin().await.context("ouverture de la transaction d'acquittement")?;
+    let updated = sqlx::query(
+        "UPDATE alert_state SET acked_until = ?, acked_by = ?, ack_note = ?
+         WHERE fingerprint = ? AND phase IN ('pending', 'firing')",
+    )
+    .bind(ack.map(|ack| to_sql(ack.until)))
+    .bind(ack.map(|ack| ack.by.as_str()))
+    .bind(ack.and_then(|ack| ack.note.as_deref()))
+    .bind(fingerprint)
+    .execute(&mut *tx)
+    .await
+    .context("acquittement de l'alerte")?
+    .rows_affected();
+    if updated == 0 {
+        return Ok(false);
+    }
+    if ack.is_some() {
+        sqlx::query("DELETE FROM notify_queue WHERE fingerprint = ? AND resolved_meanwhile = 0")
+            .bind(fingerprint)
+            .execute(&mut *tx)
+            .await
+            .context("retrait des notifications en attente de l'alerte acquittée")?;
+    }
+    tx.commit().await.context("validation de l'acquittement")?;
+    Ok(true)
+}
+
+/// Une alerte active, par son empreinte, pour l'API.
+pub async fn get_active(pool: &SqlitePool, fingerprint: &str) -> Result<Option<StoredAlert>> {
+    let alerts = list_active(pool).await?;
+    Ok(alerts.into_iter().find(|alert| alert.fingerprint == fingerprint))
 }
 
 // --------------------------------------------------------------------------
@@ -928,5 +1014,43 @@ mod tests {
         // Une base éditée à la main ne doit pas empêcher le moteur de démarrer.
         assert_eq!(json_or_default::<TargetSelector>("{{{"), TargetSelector::All);
         assert_eq!(json_or_default::<Vec<i64>>("pas du json"), Vec::<i64>::new());
+    }
+
+    #[tokio::test]
+    async fn la_topologie_porte_le_verdict_injoignable_des_cibles_actives_seulement() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::db::open(&dir.path().join("t.db")).await.unwrap();
+        let cipher =
+            crate::db::init_cipher(&pool, "secret-de-test-suffisamment-long").await.unwrap();
+        let input = |name: &str| crate::db::targets::TargetInput {
+            name: name.into(),
+            address: format!("{name}.lan"),
+            kind: "agent".into(),
+            profile_id: None,
+            parent_id: None,
+            via_agent: None,
+            interval: std::time::Duration::from_secs(30),
+            enabled: true,
+            tags: Default::default(),
+            credential: None,
+        };
+        let silent = crate::db::targets::create(&pool, &cipher, &input("silent")).await.unwrap();
+        let broken = crate::db::targets::create(&pool, &cipher, &input("broken")).await.unwrap();
+        let paused = crate::db::targets::create(&pool, &cipher, &input("paused")).await.unwrap();
+        let fine = crate::db::targets::create(&pool, &cipher, &input("fine")).await.unwrap();
+
+        let down = "Device unreachable: no measurement for 120 s (limit 90 s)";
+        crate::db::targets::record_probe(&pool, silent, Some(down)).await.unwrap();
+        crate::db::targets::record_probe(&pool, broken, Some("Bad credentials")).await.unwrap();
+        crate::db::targets::record_probe(&pool, paused, Some(down)).await.unwrap();
+        crate::db::targets::set_enabled(&pool, paused, false).await.unwrap();
+        crate::db::targets::record_probe(&pool, fine, None).await.unwrap();
+
+        let nodes = list_target_nodes(&pool).await.unwrap();
+        let unreachable = |id: TargetId| nodes.iter().find(|n| n.id == id).unwrap().unreachable;
+        assert!(unreachable(silent), "un délai dépassé ou un silence, c'est injoignable");
+        assert!(!unreachable(broken), "une erreur de configuration n'est pas une panne");
+        assert!(!unreachable(paused), "une cible en pause garde un verdict périmé");
+        assert!(!unreachable(fine));
     }
 }

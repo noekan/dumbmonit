@@ -6,36 +6,89 @@ mirrored in `web/src/lib/api/types.ts`.
 
 ## Authentication
 
-The instance has one password and uses an HttpOnly session cookie named
-`dumbmonit_session` (SameSite Lax; `Secure` when `DUMBMONIT_COOKIE_SECURE=1`).
-Sessions last 30 days.
+Two ways in, accepted on every protected route:
+
+- **Session cookie** — what the web UI uses. Log in with a password (or SSO)
+  and send the HttpOnly `dumbmonit_session` cookie (SameSite Lax; `Secure`
+  when `DUMBMONIT_COOKIE_SECURE=1`; 30 days). Every state-changing request
+  (`POST`, `PUT`, `DELETE`) must also carry `X-Requested-With: DumbMonit` —
+  the anti-CSRF proof the UI adds automatically; without it the request is
+  refused with `403`.
+- **API token** — `Authorization: Bearer dmt_…`, for scripts, dashboards and
+  assistants. Created in Settings → **API & assistants** (the same tokens the
+  [MCP server](../using/assistant.md) uses), shown once, hashed at rest. No
+  cookie is involved, so no `X-Requested-With` header is needed.
 
 ```bash
-# Log in: 204 and a Set-Cookie header
+# Session: log in (204 and a Set-Cookie header), then send the cookie
 curl -c cookies.txt -X POST http://localhost:8080/api/auth/login \
   -H 'content-type: application/json' \
-  -d '{"password":"…"}'
-
-# Then send the cookie with every call
+  -d '{"username":"admin","password":"…"}'
 curl -b cookies.txt http://localhost:8080/api/targets
+curl -b cookies.txt -X POST http://localhost:8080/api/targets \
+  -H 'X-Requested-With: DumbMonit' -H 'content-type: application/json' \
+  -d '{"name":"NAS","address":"nas.lan","kind":"snmp","credential":{"type":"snmp_community","community":"public"}}'
+
+# API token: one header, nothing else
+curl -H 'Authorization: Bearer dmt_…' http://localhost:8080/api/targets
+curl -H 'Authorization: Bearer dmt_…' -X POST http://localhost:8080/api/targets/4/probe
 ```
 
-!!! note "No API token yet"
-    The only way to call the protected routes is the session cookie obtained
-    with the password. Agent enrollment tokens (`dmon_…`) are accepted on
-    `POST /api/ingest` only.
+A token has one of two scopes. **`read`** grants what a *viewer* account
+sees: every `GET`. **`write`** grants what an *administrator* does: every
+`POST`, `PUT` and `DELETE` as well. A `read` token on a write route gets
+`403` with a message naming the token and the missing scope.
+
+Whatever its scope, a token can never touch accounts, sessions or other
+credentials — those are things a person does in the web UI. Every route under
+`/api/auth/*` (own account, password, two-factor, SSO configuration, audit
+log), `/api/users/*`, `/api/tokens/*` and `/api/agent/tokens/*` answers `403`
+to a bearer token. A missing, unknown or revoked token gets `401` with
+`WWW-Authenticate: Bearer`; when a bearer token is presented, the cookie is
+ignored, so a revoked token is refused even from a signed-in browser. Each
+token is limited to 120 calls per minute (`429` with `Retry-After` beyond),
+and the token list shows when each one was last used (updated at most once a
+minute).
+
+Agent enrollment tokens (`dmon_…`) are a different thing: they only work on
+the agent routes (`/api/ingest`, `/api/agent/commands/*`, `/api/agent/relay*`).
 
 Login is rate-limited: after five failed attempts, each further attempt is
 refused with `429` and a `Retry-After` delay that doubles from 30 s up to
 5 minutes. Never guess passwords in a loop.
 
+In the tables below, *session* means a session cookie **or** an API token;
+*admin* means an administrator session or a `write` token; *session only*
+means a session cookie, never a token.
+
 | Method | Route | Auth | Purpose |
 |---|---|---|---|
-| `GET` | `/api/auth/status` | public | `{"configured": bool, "authenticated": bool}`. `configured: false` means a fresh instance: until the first admin exists, every route marked *session* answers `401` — only `status`, `setup`, `login` and `health` are reachable. |
-| `POST` | `/api/auth/setup` | public | `{"password": "…"}`. Sets the password on a fresh instance (at least 12 characters). `204`; does not open a session. |
-| `POST` | `/api/auth/login` | public | `{"password": "…"}`. `204` with `Set-Cookie`. `401` on a wrong password, `429` when rate-limited. |
-| `POST` | `/api/auth/logout` | session | Ends the session and clears the cookie. |
-| `POST` | `/api/auth/password` | session | `{"current_password": "…", "new_password": "…"}`. Signs out every other session. |
+| `GET` | `/api/auth/status` | public | `{"configured": bool, "authenticated": bool, "user": …, "oidc": {"enabled", "provider_name", "login_url"}}`. `configured: false` means a fresh instance: until the first admin exists, every route marked *session* answers `401` — only `status`, `setup`, `login` and `health` are reachable. |
+| `POST` | `/api/auth/setup` | public | `{"username": "admin", "password": "…"}`. Creates the first administrator on a fresh instance (at least 12 characters). `204`; does not open a session. |
+| `POST` | `/api/auth/login` | public | `{"username": "…", "password": "…"}`. `204` with `Set-Cookie`. `401` on a wrong password, `429` when rate-limited. When the account has two-factor enabled, `200` with `{"totp_required": true}` and a short-lived cookie instead: finish with `/api/auth/login/totp`. |
+| `POST` | `/api/auth/login/totp` | public | `{"code": "123456"}` (or a recovery code). Second step of the login: `204` with the session cookie. |
+| `GET` | `/api/auth/oidc/start` | public | Redirects the browser to the identity provider. |
+| `GET` | `/api/auth/oidc/callback` | public | Return from the provider (`code`, `state`): opens the session and redirects to the UI. |
+| `GET` | `/api/auth/me` | session only | The current account: `id`, `username`, `display_name`, `role` (`admin`, `viewer`), `auth` (`password`, `oidc`), `disabled`, `totp_enabled`, `created_at`, `last_login_at`. |
+| `POST` | `/api/auth/logout` | session only | Ends the session and clears the cookie. |
+| `POST` | `/api/auth/password` | session only | `{"current_password": "…", "new_password": "…"}`. Signs out every other session. |
+| `GET` | `/api/auth/totp` | session only | Two-factor state of the current account: `enabled`, `pending`, `recovery_codes_left`. |
+| `POST` | `/api/auth/totp/enroll` | session only | `{"password": "…"}`. Proposes a secret: `secret` (base32), `otpauth_uri`, `issuer`, `account`. Nothing is enforced until verified. |
+| `POST` | `/api/auth/totp/verify` | session only | `{"code": "123456"}`. Confirms the enrolment and returns `{"recovery_codes": […]}` — shown once. |
+| `DELETE` | `/api/auth/totp` | session only | `{"password": "…"}`. Removes the second factor. `204`. |
+| `GET` | `/api/auth/audit?limit=200` | admin, session only | The latest security events: `id`, `at`, `actor`, `action` (`login`, `login.failed`, `password.changed`, `token.created`, `user.updated`, …), `subject`, `ip`. |
+| `GET` | `/api/auth/oidc/config` | admin, session only | The SSO settings and where they come from (environment or database); the client secret is never returned. |
+| `PUT` | `/api/auth/oidc/config` | admin, session only | `{"issuer", "client_id", "client_secret", "provider_name", "scopes", "auto_create", "admin_groups", "groups_claim", "public_url"}`. An absent or empty `client_secret` keeps the stored one. |
+| `DELETE` | `/api/auth/oidc/config` | admin, session only | Forgets the stored SSO settings (environment variables, if any, apply again). `204`. |
+| `POST` | `/api/auth/oidc/test` | admin, session only | Fetches the provider's discovery document and reports what it found. |
+| `GET` | `/api/users` | admin, session only | Every account, in the shape of `/api/auth/me`. |
+| `POST` | `/api/users` | admin, session only | `{"username", "display_name", "role", "password"}`. `password` may be omitted only when SSO is enabled. `201`. |
+| `PUT` | `/api/users/{id}` | admin, session only | Any of `display_name`, `role`, `disabled`, `password`; an omitted field keeps its value. Cannot demote or disable the last administrator. |
+| `DELETE` | `/api/users/{id}` | admin, session only | `204`. Not yourself, not the last administrator. |
+| `DELETE` | `/api/users/{id}/totp` | admin, session only | Resets another account's second factor (a locked-out colleague). `204`. |
+| `GET` | `/api/tokens` | session only | Every API token: `id`, `name`, `prefix`, `scope`, `created_at`, `last_used_at`, `revoked_at`. |
+| `POST` | `/api/tokens` | admin, session only | `{"name": "Grafana", "scope": "read"}` (`read` by default, or `write`). `201` with the token fields plus `secret` (shown once). |
+| `DELETE` | `/api/tokens/{id}` | admin, session only | Revoke. `204`; `404` when unknown or already revoked. |
 
 Every response carries `X-Content-Type-Options: nosniff`,
 `Referrer-Policy: same-origin` and, except for the public status pages under
@@ -45,7 +98,9 @@ Every response carries `X-Content-Type-Options: nosniff`,
 ## Errors
 
 Every error is JSON: `{"error": "message"}`, with `400` for a bad request,
-`401` without a valid session, `404` when the id does not exist, `409` on a
+`401` without a valid session or token, `403` when the session or token may
+not do this (viewer on a write route, `read` token, missing anti-CSRF header,
+token on an account route), `404` when the id does not exist, `409` on a
 conflict, `429` when rate-limited and `500` otherwise.
 
 ## Health
@@ -177,6 +232,8 @@ curl -b cookies.txt -G http://localhost:8080/api/metrics/query \
 |---|---|---|
 | `GET` | `/api/alerts` | Active alerts (pending, firing, suppressed, recently resolved). Alerts of deleted or paused devices are never listed. |
 | `GET` | `/api/alerts/history?since=2026-09-01T00:00:00Z&limit=200` | Phase transitions. `since` is RFC 3339, default the last seven days; `limit` must be positive. |
+| `POST` | `/api/alerts/{fingerprint}/ack` | Acknowledge: `{"duration_secs": 14400, "note": "…"}` or `{"until": "2026-09-22T18:00:00Z"}` (one of the two; neither means 4 hours, at most 30 days). `{"until": null}` lifts it. Returns the alert. Admin only; audited. |
+| `DELETE` | `/api/alerts/{fingerprint}/ack` | Lift the acknowledgement. Returns the alert. |
 
 An active alert:
 
@@ -195,6 +252,10 @@ An active alert:
   "suppressed_by": 2,
   "silenced": false,
   "learning": false,
+  "acked": true,
+  "acked_until": "2026-09-15T17:20:00Z",
+  "acked_by": "admin",
+  "ack_note": "replacing the disk",
   "value": 95.96,
   "score": null,
   "condition_since": "2026-09-15T12:00:00Z",
@@ -208,7 +269,10 @@ An active alert:
 A history entry has `id`, `fingerprint`, `rule_uid`, `target_id`,
 `from_phase`, `to_phase`, `severity`, `value`, `notified`, `reason` (empty, or
 why nothing was sent: `learning: would have fired`, `suppressed: device 2
-unreachable`, `maintenance window`, `device removed or disabled`) and `at`.
+unreachable`, `maintenance window`, `acknowledged by admin`, `device removed
+or disabled`) and `at`. `acked` is true while `acked_until` is in the future:
+reminders and escalations pause, the resolution is still notified and clears
+the acknowledgement.
 A `target_id` that no longer exists is shown as "(deleted device)" by the UI.
 
 ### Rules
@@ -269,6 +333,24 @@ A one-off schedule is `{"kind": "once", "starts_at": "2026-09-20T22:00:00Z",
 "ends_at": "2026-09-21T02:00:00Z"}`. Days are 0 = Monday … 6 = Sunday;
 minutes are since local midnight (0–1439).
 
+### Per-device overrides
+
+A rule can be tuned for one device without touching the rule itself.
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/alerts/overrides?target_id=4` | Every override, or those of one device: `rule_uid`, `target_id`, `threshold`, `clear_threshold`, `enabled`. |
+| `GET` | `/api/alerts/rules/{id}/overrides` | The overrides of one rule. |
+| `PUT` | `/api/alerts/rules/{id}/overrides/{target_id}` | `{"threshold": 95, "clear_threshold": 90, "enabled": true}` — each field optional; `null` means "as the rule". Creates or replaces. |
+| `DELETE` | `/api/alerts/rules/{id}/overrides/{target_id}` | `204`. |
+
+## Notification policy
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/notify/policy` | The global policy: `batch_window_secs` (0 = send at once), `max_per_hour` per channel (0 = unlimited), `flap_events`, `flap_window_secs`, `flap_hold_secs` (0 = no flap detection), `public_url` (links in messages; empty = `DUMBMONIT_PUBLIC_URL`). |
+| `PUT` | `/api/notify/policy` | Same fields, every one optional: an omitted field keeps its value. Returns the policy. |
+
 ## Notification channels
 
 | Method | Route | Purpose |
@@ -293,6 +375,24 @@ minutes are since local midnight (0–1439).
 The exact keys per kind come from `/api/notify/kinds` and are documented in
 [Notification channels](../notifications.md).
 
+## Status pages and incidents
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| `GET` | `/api/status-pages` | session | Every page with its items: `page` (`id`, `slug`, `title`, `description`, `published`, `theme`, `show_uptime_days`, `created_at`, `updated_at`) and `items` (`id`, `page_id`, `target_id`, `label`, `group_name`, `position`). |
+| `POST` | `/api/status-pages` | admin | `{"title", "slug", "description", "published", "theme", "show_uptime_days"}`. `slug` (`^[a-z0-9-]{2,40}$`) is derived from the title when omitted. `201`. |
+| `GET` | `/api/status-pages/{id}` | session | One page with its items. |
+| `PUT` | `/api/status-pages/{id}` | admin | Same fields; an omitted field keeps its value. |
+| `DELETE` | `/api/status-pages/{id}` | admin | `204`. The public URL stops answering. |
+| `PUT` | `/api/status-pages/{id}/items` | admin | `[{"target_id": 4, "label": "NAS", "group_name": "Storage"}, …]` — the full ordered list of devices shown on the page. |
+| `GET` | `/api/incidents` | session | Every incident with its updates: `incident` (`id`, `page_id`, `title`, `kind`, `status`, `severity`, `starts_at`, `ends_at`, `created_at`, `updated_at`) and `updates`. |
+| `POST` | `/api/incidents` | admin | `{"title", "kind", "status", "severity", "page_id", "starts_at", "ends_at", "body"}` — `body` is the first update. `201`. |
+| `PUT` | `/api/incidents/{id}` | admin | Same fields; an omitted field keeps its value. |
+| `DELETE` | `/api/incidents/{id}` | admin | `204`. |
+| `GET` | `/api/incidents/{id}/updates` | session | The timeline: `id`, `incident_id`, `status`, `body`, `created_at`. |
+| `POST` | `/api/incidents/{id}/updates` | admin | `{"status": "monitoring", "body": "…"}`. Appends an update and moves the incident to `status`. `201`. |
+| `GET` | `/api/public/status/{slug}` | public | The JSON document a published page is built from (also `badge.svg` and `rss` under the same path). See [Status pages](../using/status-pages.md). |
+
 ## Agent tokens and ingest
 
 | Method | Route | Auth | Purpose |
@@ -303,6 +403,8 @@ The exact keys per kind come from `/api/notify/kinds` and are documented in
 | `POST` | `/api/ingest` | `Authorization: Bearer dmon_…` | Receives a batch of samples from an agent (bodies up to 16 MB). Not meant to be called by hand. |
 | `GET` | `/api/agent/relay?key=…&wait=N` | `Authorization: Bearer dmon_…` | Probes delegated to a relay agent (`relay: true`). Held up to `wait` seconds (25 at most) when nothing is pending. Each item is a command of kind `probe` whose `args` carry the target, its decrypted credential, `timeout_secs` and `discover`. Never written to disk. |
 | `POST` | `/api/agent/relay/{id}?key=…` | `Authorization: Bearer dmon_…` | Outcome of a delegated probe: `{"duration_ms", "error", "samples", "profile_id"}` (bodies up to 16 MB). `204`; `404` when the probe expired or belongs to another agent. |
+| `GET` | `/api/agent/commands?key=…&wait=N` | `Authorization: Bearer dmon_…` | Commands queued for an agent (container restart or update), held up to `wait` seconds when nothing is pending. Not meant to be called by hand. |
+| `POST` | `/api/agent/commands/{id}?key=…` | `Authorization: Bearer dmon_…` | Progress and outcome of a command, reported by the agent. |
 | `GET` | `/api/relays` | session | Every agent device as a possible relay: `id`, `name`, `site`, `relay` (declared `relay: true`), `last_seen_at`, `relayed` (devices reached through it). Relays first, then by name. |
 
 ```json
@@ -360,6 +462,36 @@ hypervisor). `404` when the device does not exist, `400` when it is not a
   }
 ]
 ```
+
+## Proxmox Backup Server
+
+The panels of a `pbs` device, read from the last probe (nothing asked of the
+server except the task log). `404` when the device does not exist, `400` when
+it is not a `pbs` target.
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/targets/{id}/pbs/calendar?days=30&offset=120` | One row per backup group (`datastore`, `namespace`, `backup_type`, `backup_id`, `name`, `count`, `last_time`, `last_size`, `last_verified`, `last_success`, `last_failure`, `retention`) with a `days` array of `{date, state, runs, snapshot}`. `offset` is the viewer's UTC offset in minutes, so that days are cut at local midnight. |
+| `GET` | `/api/targets/{id}/pbs/failures?days=30` | Failed tasks: `upid`, `worker_type`, `kind`, `worker_id`, `datastore`, `start`, `end`, `error`. |
+| `GET` | `/api/targets/{id}/pbs/jobs` | Sync, verify, prune and garbage-collection jobs with their schedule and last result. |
+| `GET` | `/api/targets/{id}/pbs/health` | Datastores (usage, estimated full date), disks (SMART, wearout) and ZFS pools. |
+| `GET` | `/api/targets/{id}/pbs/tasks/{upid}/log` | The log of one task, fetched from the server: `{"upid", "lines": […]}`. |
+| `GET` | `/api/targets/{id}/pbs/disks/smart` | SMART attributes of every disk. |
+
+## Synology
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/targets/{id}/synology` | Overview of a `synology` device from the last probe: `system` (model, DSM version, uptime, temperature, CPU, memory), `volumes` (`name`, `fs_type`, `raid_type`, `status`, `severity`, `total_bytes`, `used_bytes`), `disks` (`model`, `serial`, `kind`, `ssd`, `status`, `smart_status`, `temperature_celsius`, `size_bytes`, `remaining_life_percent`, …) and `sampled_at`. `404` when the device does not exist, `400` when it is not a Synology. |
+| `GET` | `/api/targets/{id}/synology/abb` | Active Backup for Business: `tasks`, and `devices` — one report per protected device with its learnt cadence in `assessment` (`state`, `last_success_s`, `typical_interval_s`, 30-day counts). |
+
+## Heartbeats (push monitors)
+
+| Method | Route | Auth | Purpose |
+|---|---|---|---|
+| `GET` or `POST` | `/api/push/{token}` | none (the token) | The call a job makes each time it runs. Optional `?status=up\|down&msg=…` (Uptime Kuma compatible). `204` empty on success, `404` for an unknown token, `400` for another `status`, `429` with `Retry-After` beyond sixty calls a minute per token. See [Heartbeat](../devices/push.md). |
+| `GET` | `/api/targets/{id}/push` | session | The monitor of a `push` device: `token`, `path` (`/api/push/<token>`), `last_seen_at`, `last_seen_age_secs`, `last_status`, `last_message`, `received_total`, `expected_interval_secs`, `grace_secs`, `settings_error`, `verdict` (`waiting`, `on_time`, `missed`, `reported_down`). Created on first read. `400` when the device is not a heartbeat. |
+| `POST` | `/api/targets/{id}/push/regenerate` | admin | New token; the previous URL answers `404` from then on. Same body as the read. |
 
 ## Agent files (outside `/api`)
 

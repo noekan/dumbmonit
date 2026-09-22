@@ -57,11 +57,7 @@ pub struct TargetView {
 /// Seul le texte est conservé en base ; les préfixes proviennent de l'affichage
 /// de `ProbeError`, dont `means_down` fait la même distinction.
 fn error_kind(message: &str) -> &'static str {
-    if message.starts_with("Timed out") || message.starts_with("Device unreachable") {
-        "down"
-    } else {
-        "config"
-    }
+    if db::targets::error_means_down(message) { "down" } else { "config" }
 }
 
 impl TargetView {
@@ -185,6 +181,14 @@ impl TargetPayload {
                     .into(),
             ));
         }
+        // Même chose pour un heartbeat : c'est le travail qui appelle le serveur,
+        // et le relais ne connaît pas ce type.
+        if via_agent.is_some() && self.kind == crate::collectors::push::KIND {
+            return Err(ApiError::BadRequest(
+                "A heartbeat is called by the job itself: it cannot be reached through a relay."
+                    .into(),
+            ));
+        }
 
         Ok(db::targets::TargetInput {
             name,
@@ -242,7 +246,10 @@ pub async fn create(
         spawn_discovery(state.clone(), id);
     }
 
-    Ok((StatusCode::CREATED, Json(TargetView::new(target, None))))
+    // Le relais fait partie du statut, pas de la cible : sans lui, la réponse
+    // dirait `via_agent: null` alors qu'il vient d'être enregistré.
+    let status = db::targets::statuses(&state.pool).await?.remove(&id);
+    Ok((StatusCode::CREATED, Json(TargetView::new(target, status))))
 }
 
 pub async fn update(

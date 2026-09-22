@@ -24,13 +24,20 @@ class AlertsStore {
 	#subscribers = 0;
 
 	/**
-	 * Alerts that actually need attention: firing right now, and not suppressed
-	 * by an offline parent. Pending ("building up") and resolved ones are not
-	 * counted — they are not yet, or no longer, a problem.
+	 * Alerts that actually need attention: firing right now, not suppressed
+	 * by an offline parent, and not acknowledged (someone already knows).
+	 * Pending ("building up") and resolved ones are not counted — they are not
+	 * yet, or no longer, a problem.
 	 */
 	get activeCount(): number {
-		const firing = this.alerts.filter((alert) => alert.effective_phase === 'firing');
-		const covered = new Set(firing.map((alert) => alert.target_id));
+		const firing = this.alerts.filter(
+			(alert) => alert.effective_phase === 'firing' && !alert.acked
+		);
+		const covered = new Set(
+			this.alerts
+				.filter((alert) => alert.effective_phase === 'firing')
+				.map((alert) => alert.target_id)
+		);
 		// A device that is unreachable but has no firing alert yet (no data, rule
 		// still evaluating) still needs attention: count it once, like the overview.
 		const unreachable = this.targets.filter(

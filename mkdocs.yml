@@ -78,6 +78,7 @@ nav:
       - Synology DSM: devices/synology.md
       - Linux and Windows agent: devices/agent.md
       - Services (HTTP, TCP, DNS, ping, TLS): devices/services.md
+      - Heartbeat (push): devices/push.md
       - Demo device: devices/demo.md
   - Alerting:
       - How alerting works: alerting/index.md

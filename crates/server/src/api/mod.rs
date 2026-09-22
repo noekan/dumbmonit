@@ -14,6 +14,7 @@ mod notify_policy;
 mod oidc;
 mod pbs;
 mod proxmox;
+mod push;
 mod relay;
 mod spa;
 mod status_pages;
@@ -67,6 +68,7 @@ pub fn router(state: AppState) -> Router {
         .route("/metrics/query_range", get(metrics::query_range))
         .route("/alerts", get(alerts::list_active))
         .route("/alerts/history", get(alerts::history))
+        .route("/alerts/{fingerprint}/ack", post(alerts::ack_alert).delete(alerts::unack_alert))
         .route("/alerts/rules", get(alerts::list_rules).post(alerts::create_rule))
         .route("/alerts/rules/{id}", put(alerts::update_rule).delete(alerts::delete_rule))
         .route("/alerts/rules/{id}/enable", post(alerts::set_rule_enabled))
@@ -94,6 +96,8 @@ pub fn router(state: AppState) -> Router {
         .merge(status_pages::routes())
         // Calendrier des sauvegardes et travaux d'un Proxmox Backup Server (`pbs.rs`).
         .merge(pbs::routes())
+        // Moniteurs en poussée : jeton d'une cible et sa régénération (`push.rs`).
+        .merge(push::ui_routes())
         // `route_layer` plutôt que `layer` : le garde ne s'applique qu'aux routes
         // effectivement déclarées ici, jamais au repli qui sert l'interface.
         .route_layer(middleware::from_fn_with_state(
@@ -129,7 +133,10 @@ pub fn router(state: AppState) -> Router {
         // compte rendu peut peser autant qu'un lot de mesures.
         .merge(relay::agent_routes().layer(DefaultBodyLimit::max(16 * 1024 * 1024)))
         // Pages de statut publiques : lecture seule, sans session, par conception.
-        .merge(status_pages::public_routes());
+        .merge(status_pages::public_routes())
+        // Heartbeats : l'URL secrète qu'un cron ou un script appelle (`push.rs`).
+        // Ouverte par nécessité — une crontab n'a ni session ni en-tête anti-CSRF.
+        .merge(push::public_routes());
 
     // Serveur MCP : authentifié par jeton d'API, pas par session — un assistant
     // n'a pas de navigateur. Le garde ne couvre que cette route ; `GET` reste

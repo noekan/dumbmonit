@@ -2,9 +2,10 @@
 //!
 //! `ok` → `pending` (condition vraie, `for` non écoulé) → `firing` → `resolved`.
 //!
-//! La suppression et le silence ne sont pas des états de cette machine : ce sont des
-//! surcouches appliquées ensuite (voir [`crate::alerting::suppress`] et
-//! [`crate::alerting::silence`]). La distinction est délibérée — pendant une fenêtre
+//! La suppression, le silence et l'acquittement ne sont pas des états de cette
+//! machine : ce sont des surcouches appliquées ensuite (voir
+//! [`crate::alerting::suppress`], [`crate::alerting::silence`] et
+//! [`AlertState::is_acked`]). La distinction est délibérée — pendant une fenêtre
 //! de maintenance, la condition continue d'être suivie, si bien qu'à la sortie une
 //! alerte toujours active n'est pas renotifiée comme si elle venait de naître.
 
@@ -93,6 +94,14 @@ pub struct AlertState {
     pub learning: bool,
     pub value: Option<f64>,
     pub score: Option<f64>,
+    /// Fin de l'acquittement. Tant qu'elle est à venir, l'alerte ne rappelle
+    /// pas ; la résolution, elle, est toujours annoncée. Effacé dès que la
+    /// condition retombe : une alerte qui revient plus tard notifie à nouveau.
+    pub acked_until: Option<DateTime<Utc>>,
+    /// Qui a acquitté : nom du compte, ou `token:nom` pour un jeton d'API.
+    pub acked_by: Option<String>,
+    /// Pourquoi, en une ligne, à l'intention des autres.
+    pub ack_note: Option<String>,
 }
 
 impl Default for AlertState {
@@ -111,11 +120,29 @@ impl Default for AlertState {
             learning: false,
             value: None,
             score: None,
+            acked_until: None,
+            acked_by: None,
+            ack_note: None,
         }
     }
 }
 
 impl AlertState {
+    /// Vrai tant que l'acquittement court : l'alerte est active et sa fin
+    /// d'acquittement est encore à venir. Un acquittement échu n'a pas besoin
+    /// d'être effacé pour cesser d'agir.
+    pub fn is_acked(&self, now: DateTime<Utc>) -> bool {
+        matches!(self.phase, Phase::Firing | Phase::Pending)
+            && self.acked_until.is_some_and(|until| until > now)
+    }
+
+    /// Oublie l'acquittement, quel qu'en soit l'état.
+    pub fn clear_ack(&mut self) {
+        self.acked_until = None;
+        self.acked_by = None;
+        self.ack_note = None;
+    }
+
     pub fn effective_phase(&self) -> EffectivePhase {
         if self.suppressed && matches!(self.phase, Phase::Firing | Phase::Pending) {
             return EffectivePhase::Suppressed;
@@ -160,6 +187,10 @@ pub fn advance(
             Phase::Firing => Phase::Resolved,
             _ => Phase::Ok,
         };
+        // L'acquittement disait « je sais, ne me le rappelle plus » : le problème
+        // parti, il n'a plus d'objet. Si la condition revient, l'alerte repart de
+        // zéro et notifie comme une alerte neuve.
+        next.clear_ack();
         if next.phase == Phase::Resolved {
             next.resolved_at = Some(now);
         } else {
@@ -302,6 +333,45 @@ mod tests {
         let (pending, _) = advance(&AlertState::default(), true, t(1000), FOR_5M);
         let (toujours_pending, _) = advance(&pending, true, t(900), FOR_5M);
         assert_eq!(toujours_pending.phase, Phase::Pending);
+    }
+
+    #[test]
+    fn l_acquittement_ne_tient_que_pendant_sa_duree_et_sur_une_alerte_active() {
+        let mut state = AlertState {
+            phase: Phase::Firing,
+            acked_until: Some(t(3600)),
+            acked_by: Some("admin".to_string()),
+            ..Default::default()
+        };
+        assert!(state.is_acked(t(0)));
+        assert!(state.is_acked(t(3599)));
+        assert!(!state.is_acked(t(3600)), "expired: the reminders come back");
+        state.phase = Phase::Resolved;
+        assert!(!state.is_acked(t(0)), "a resolved alert is not acked, whatever the row says");
+    }
+
+    #[test]
+    fn la_resolution_efface_l_acquittement() {
+        let (firing, _) = advance(&AlertState::default(), true, t(0), Duration::ZERO);
+        let mut firing = firing;
+        firing.acked_until = Some(t(14_400));
+        firing.acked_by = Some("admin".to_string());
+        firing.ack_note = Some("on it".to_string());
+
+        let (still, _) = advance(&firing, true, t(60), Duration::ZERO);
+        assert_eq!(still.acked_until, Some(t(14_400)), "still firing: the ack holds");
+
+        let (resolved, _) = advance(&still, false, t(120), Duration::ZERO);
+        assert_eq!(resolved.phase, Phase::Resolved);
+        assert_eq!(resolved.acked_until, None);
+        assert_eq!(resolved.acked_by, None);
+        assert_eq!(resolved.ack_note, None);
+
+        // Une alerte qui revient plus tard repart sans acquittement.
+        let (ok, _) = advance(&resolved, false, t(180), Duration::ZERO);
+        let (again, _) = advance(&ok, true, t(240), Duration::ZERO);
+        assert_eq!(again.phase, Phase::Firing);
+        assert!(!again.is_acked(t(240)));
     }
 
     #[test]

@@ -110,6 +110,10 @@ async fn run(config: Config) -> Result<()> {
     registry.register(Arc::new(collectors::PingCollector::new()));
     registry.register(Arc::new(collectors::TlsCollector::new()));
 
+    // Moniteurs en poussée (heartbeat) : le travail surveillé appelle une URL, ce
+    // collecteur ne fait que constater qu'il l'a fait à temps.
+    registry.register(Arc::new(collectors::PushCollector::new(pool.clone())));
+
     // Collecteur de démonstration : il permet d'obtenir des graphes sans matériel,
     // le temps de configurer un premier équipement réel.
     registry.register(Arc::new(collectors::DummyCollector));

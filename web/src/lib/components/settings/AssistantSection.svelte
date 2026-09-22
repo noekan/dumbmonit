@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
-	 * Settings → Connect an assistant: API tokens for MCP clients (Claude,
-	 * ChatGPT, Cursor…) and the ready-to-paste connection snippets.
+	 * Settings → API & assistants: API tokens for MCP clients (Claude, ChatGPT,
+	 * Cursor…) and for the REST API, with the ready-to-paste connection snippets.
 	 *
 	 * A token is shown in clear once, right after creation. The snippets are
 	 * always visible so people can see what they will paste before creating
@@ -104,7 +104,8 @@
 	let client = $state<Client>('claude');
 
 	// The URL assistants will reach this server at: what the browser sees.
-	const url = $derived(typeof location === 'undefined' ? '/api/mcp' : `${location.origin}/api/mcp`);
+	const origin = $derived(typeof location === 'undefined' ? '' : location.origin);
+	const url = $derived(`${origin}/api/mcp`);
 	const isHttps = $derived(typeof location === 'undefined' ? false : location.protocol === 'https:');
 	const token = $derived(created?.secret ?? 'dmt_…paste-your-token…');
 	const bearer = $derived(`Bearer ${token}`);
@@ -114,6 +115,8 @@
 		JSON.stringify({ mcpServers: { dumbmonit: { type: 'http', url, headers: { Authorization: bearer } } } }, null, 2)
 	);
 	const cursorJson = $derived(JSON.stringify({ mcpServers: { dumbmonit: { url, headers: { Authorization: bearer } } } }, null, 2));
+	// The same token on the REST API: no cookie, no CSRF header.
+	const curlExample = $derived(`curl -H "Authorization: ${bearer}" ${origin}/api/targets`);
 
 	// Arrow keys move between tabs, as a tablist is expected to behave.
 	function onTabKey(event: KeyboardEvent) {
@@ -128,8 +131,8 @@
 
 <Panel
 	id="assistant"
-	title="Connect an assistant"
-	description="Let Claude, ChatGPT, Cursor or any MCP client ask DumbMonit how things are. A read token can only look; a write token can also silence a device, run a probe, or switch a device or rule on and off."
+	title="API & assistants"
+	description="One kind of token for both: let Claude, ChatGPT, Cursor or any MCP client ask DumbMonit how things are, or call the REST API from a script. A read token can only look; a write token can also change things — silence a device, run a probe, add or edit devices, rules and channels."
 	padded={false}
 >
 	<div class="px-5 py-4">
@@ -166,7 +169,7 @@
 						</label>
 					{/each}
 				</div>
-				<p class="text-[0.8125rem] text-ink-2">{scope === 'read' ? 'Can never change anything.' : 'Can silence, probe, enable and disable.'}</p>
+				<p class="text-[0.8125rem] text-ink-2">{scope === 'read' ? 'Can never change anything.' : 'Can change everything but accounts and tokens.'}</p>
 			</fieldset>
 			<!-- Offset by the label height so the button sits level with the inputs. -->
 			<Button type="submit" variant="secondary" class="sm:mt-[1.625rem]" loading={creating}>
@@ -257,6 +260,20 @@
 					The server speaks MCP over Streamable HTTP (JSON responses, no session). Full instructions and security notes: <a class="underline decoration-line underline-offset-2 hover:text-ink" href="https://dumbmonit.readthedocs.io/en/latest/using/assistant/" target="_blank" rel="noreferrer">Connect an assistant</a>.
 				</p>
 			</div>
+		</div>
+
+		<!-- REST API access -->
+		<div class="mt-6">
+			<p class="text-sm font-semibold text-ink">API access</p>
+			<p class="mt-1 text-sm text-ink-2">
+				The same token opens the REST API to scripts and dashboards: send it as a bearer header instead of a session cookie. A read token maps to a viewer, a write token to an administrator — except that no token can manage accounts, sign-in settings or other tokens.
+			</p>
+			<div class="mt-3">
+				<CopyBlock value={curlExample} label="Copy command" secret={created !== null} />
+			</div>
+			<p class="mt-2 text-sm text-ink-2">
+				Every route is listed in the <a class="underline decoration-line underline-offset-2 hover:text-ink" href="https://dumbmonit.readthedocs.io/en/latest/reference/api/" target="_blank" rel="noreferrer">HTTP API reference</a>.
+			</p>
 		</div>
 
 		<!-- Token list -->

@@ -54,8 +54,8 @@ const MAINTENANCE_STATUSES: [&str; 3] = ["scheduled", "in_progress", "completed"
 const SEVERITIES: [&str; 2] = ["minor", "major"];
 
 /// Types de cibles qui émettent `probe_success` : leur état vient de là, et non
-/// de la simple présence de mesures.
-const PROBE_KINDS: [&str; 5] = ["http", "tcp", "dns", "ping", "tls"];
+/// de la simple présence de mesures. Les heartbeats (`push`) en font partie.
+const PROBE_KINDS: [&str; 6] = ["http", "tcp", "dns", "ping", "tls", "push"];
 
 /// Fenêtre au-delà de laquelle une sonde sans mesure est d'état inconnu — la même
 /// que celle de l'interface.

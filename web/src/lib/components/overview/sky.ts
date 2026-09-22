@@ -24,7 +24,7 @@ export type SkyRow =
 	| {
 			kind: 'device';
 			key: string;
-			/** Reading order: 0 warning, 1 advisory, 2 info, 3 building up, 4 suppressed. */
+			/** Reading order: 0 warning, 1 advisory, 2 info, 3 building up, 4 suppressed, 5 acked. */
 			rank: number;
 			tone: Tone;
 			/** The word on the plate: Unreachable / Down / Misconfigured. */
@@ -80,6 +80,8 @@ export interface Sky {
 		notices: number;
 		buildingUp: number;
 		suppressed: number;
+		/** Firing alerts someone has acknowledged: known, reminders paused. */
+		acked: number;
 	};
 }
 
@@ -111,11 +113,21 @@ function count(n: number, one: string, many = `${one}s`): string {
 	return `${n} ${n === 1 ? one : many}`;
 }
 
-/** Sort key for a firing alert: warnings first, then advisories, then info. */
+/**
+ * Sort key for a firing alert: warnings first, then advisories, then info.
+ * An acknowledged alert reads last — someone already knows — even below the
+ * suppressed ones, and the list gathers those rows under their own heading.
+ */
 function alertRank(alert: Alert): number {
+	if (alert.acked) return 5;
 	if (alert.effective_phase === 'suppressed') return 4;
 	if (alert.effective_phase === 'pending') return 3;
 	return severityRank(alert.severity);
+}
+
+/** True for a row the "Needs you" list files under "Acknowledged". */
+export function isAckedRow(row: SkyRow): boolean {
+	return row.kind === 'alert' && row.alert.acked;
 }
 
 export function readSky({ targets, probes, alerts, rules }: SkyInput): Sky {
@@ -169,20 +181,23 @@ export function readSky({ targets, probes, alerts, rules }: SkyInput): Sky {
 			kind: 'alert',
 			key: `alert:${alert.fingerprint}`,
 			rank: alertRank(alert),
-			tone: isSuppressed
-				? 'muted'
-				: alert.learning
-					? 'info'
-					: isPending
-						? 'ghost'
-						: severityTone(alert.severity),
-			plate: isSuppressed
-				? 'Suppressed by parent'
-				: alert.learning
-					? 'Learning'
-					: isPending
-						? 'Building up'
-						: severityWord(alert.severity),
+			tone:
+				alert.acked || isSuppressed
+					? 'muted'
+					: alert.learning
+						? 'info'
+						: isPending
+							? 'ghost'
+							: severityTone(alert.severity),
+			plate: alert.acked
+				? 'Acked'
+				: isSuppressed
+					? 'Suppressed by parent'
+					: alert.learning
+						? 'Learning'
+						: isPending
+							? 'Building up'
+							: severityWord(alert.severity),
 			alert,
 			rule: rulesMap.get(alert.rule_uid),
 			target: alert.target_id !== null ? targetsMap.get(alert.target_id) : undefined,
@@ -205,7 +220,8 @@ export function readSky({ targets, probes, alerts, rules }: SkyInput): Sky {
 		advisories: firing.filter((alert) => alert.severity === 'warning').length,
 		notices: firing.filter((alert) => alert.severity === 'info').length,
 		buildingUp: pending.length,
-		suppressed: suppressed.length
+		suppressed: suppressed.length,
+		acked: [...firing, ...pending].filter((alert) => alert.acked).length
 	};
 
 	const forecasts = [...firing, ...pending].filter((alert) =>
@@ -239,13 +255,23 @@ export function readSky({ targets, probes, alerts, rules }: SkyInput): Sky {
 	if (counts.suppressed > 0) {
 		plates.push({ tone: 'muted', label: `${counts.suppressed} suppressed by parent` });
 	}
+	if (counts.acked > 0) plates.push({ tone: 'muted', label: `${counts.acked} acknowledged` });
+
+	// Acknowledged alerts stay in the counts (the sky is honest about the
+	// weather) but leave the "Needs you" readout: someone already knows.
+	const ackedFiring = firing.filter((alert) => alert.acked).length;
 
 	return {
 		sentence,
 		plates,
 		needsYou: rows,
 		attention:
-			counts.warnings + counts.advisories + counts.notices + unreachableRows + misconfiguredRows,
+			counts.warnings +
+			counts.advisories +
+			counts.notices -
+			ackedFiring +
+			unreachableRows +
+			misconfiguredRows,
 		forecasts,
 		quiet: rows.length === 0,
 		counts

@@ -25,6 +25,9 @@ use crate::alerting::overrides::RuleOverride;
 use crate::alerting::silence::{MINUTES_PER_DAY, Schedule, Silence};
 use crate::api::channels;
 use crate::api::{ApiError, ApiResult};
+use crate::auth::audit;
+use crate::auth::client_ip::ClientIp;
+use crate::auth::middleware::AdminIdentity;
 use crate::db;
 use crate::notify::policy_store;
 use crate::state::AppState;
@@ -52,6 +55,18 @@ const DEFAULT_HISTORY_LIMIT: i64 = 500;
 /// que l'utilisateur croit avoir posée.
 const MIN_UTC_OFFSET: i32 = -12 * 60;
 const MAX_UTC_OFFSET: i32 = 14 * 60;
+
+/// Durée d'un acquittement quand l'appelant ne précise rien : quatre heures,
+/// le temps de s'en occuper sans que le rappel du soir ne se perde.
+pub const DEFAULT_ACK_SECS: i64 = 4 * 3600;
+
+/// Durée maximale d'un acquittement : trente jours. « Jusqu'à résolution »
+/// dans l'interface, c'est cela ; au-delà, c'est une règle à retoucher, pas une
+/// alerte à faire taire.
+pub const MAX_ACK_SECS: i64 = 30 * 24 * 3600;
+
+/// Longueur maximale de la note d'acquittement.
+const MAX_ACK_NOTE_LEN: usize = 200;
 
 // --------------------------------------------------------------------------
 // Vues
@@ -175,6 +190,14 @@ pub struct ActiveAlertView {
     pub suppressed_by: Option<i64>,
     pub silenced: bool,
     pub learning: bool,
+    /// Vrai tant que l'acquittement court : plus de rappel, la résolution reste
+    /// annoncée. Calculé à la lecture — un acquittement échu n'est pas effacé
+    /// tout de suite, il a simplement cessé d'agir.
+    pub acked: bool,
+    pub acked_until: Option<DateTime<Utc>>,
+    /// Compte qui a acquitté, ou `token:nom` pour un jeton d'API.
+    pub acked_by: Option<String>,
+    pub ack_note: Option<String>,
     pub value: Option<f64>,
     pub score: Option<f64>,
     pub condition_since: Option<DateTime<Utc>>,
@@ -182,6 +205,41 @@ pub struct ActiveAlertView {
     pub last_eval_at: Option<DateTime<Utc>>,
     pub last_notified_at: Option<DateTime<Utc>>,
     pub notify_count: u32,
+}
+
+impl ActiveAlertView {
+    fn new(
+        alert: crate::alerting::cycle::StoredAlert,
+        rule: Option<&Rule>,
+        now: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            effective_phase: alert.state.effective_phase(),
+            phase: alert.state.phase,
+            rule_name: rule.map(|rule| rule.name.clone()).unwrap_or_default(),
+            severity: rule.map_or(Severity::Warning, |rule| rule.severity),
+            fingerprint: alert.fingerprint,
+            rule_uid: alert.rule_uid,
+            target_id: alert.target_id,
+            series_key: alert.series_key,
+            labels: alert.labels,
+            suppressed: alert.state.suppressed,
+            suppressed_by: alert.state.suppressed_by,
+            silenced: alert.state.silenced,
+            learning: alert.state.learning,
+            acked: alert.state.is_acked(now),
+            acked_until: alert.state.acked_until,
+            acked_by: alert.state.acked_by,
+            ack_note: alert.state.ack_note,
+            value: alert.state.value,
+            score: alert.state.score,
+            condition_since: alert.state.condition_since,
+            firing_since: alert.state.firing_since,
+            last_eval_at: alert.state.last_eval_at,
+            last_notified_at: alert.state.last_notified_at,
+            notify_count: alert.state.notify_count,
+        }
+    }
 }
 
 /// Transition consignée dans l'historique.
@@ -305,6 +363,96 @@ struct AnomalyParamsPayload {
 #[derive(Debug, Deserialize)]
 pub struct EnablePayload {
     pub enabled: bool,
+}
+
+/// Acquittement soumis par l'interface ou l'assistant.
+///
+/// `until` et `duration_secs` s'excluent ; sans l'un ni l'autre, quatre heures.
+/// Un `until` explicitement `null` (et pas de durée) lève l'acquittement, comme
+/// le `DELETE` — d'où le double `Option` : absent et `null` ne disent pas la
+/// même chose.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct AckPayload {
+    /// Fin de l'acquittement, RFC 3339 ou `YYYY-MM-DD HH:MM:SS` en UTC.
+    #[serde(deserialize_with = "deserialize_explicit_null")]
+    pub until: Option<Option<String>>,
+    pub duration_secs: Option<i64>,
+    pub note: Option<String>,
+}
+
+/// Distingue un champ absent (`None`) d'un champ à `null` (`Some(None)`).
+fn deserialize_explicit_null<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+
+/// Ce que l'acquittement doit devenir, une fois la saisie validée.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AckRequest {
+    /// Acquitter jusqu'à cet instant, avec une note éventuelle.
+    Set { until: DateTime<Utc>, note: Option<String> },
+    /// Lever l'acquittement.
+    Clear,
+}
+
+impl AckPayload {
+    pub fn validate(self, now: DateTime<Utc>) -> ApiResult<AckRequest> {
+        let note = self.note.map(|note| note.trim().to_string()).filter(|note| !note.is_empty());
+        if note.as_ref().is_some_and(|note| note.chars().count() > MAX_ACK_NOTE_LEN) {
+            return Err(ApiError::BadRequest(format!(
+                "\"note\" is limited to {MAX_ACK_NOTE_LEN} characters."
+            )));
+        }
+        let until = match (self.until, self.duration_secs) {
+            (Some(Some(_)), Some(_)) => {
+                return Err(ApiError::BadRequest(
+                    "Give either \"until\" or \"duration_secs\", not both.".into(),
+                ));
+            }
+            (Some(None), None) => return Ok(AckRequest::Clear),
+            (Some(Some(raw)), None) => parse_until(raw.trim())?,
+            (_, Some(secs)) => {
+                if secs <= 0 {
+                    return Err(ApiError::BadRequest(
+                        "\"duration_secs\" must be a strictly positive integer.".into(),
+                    ));
+                }
+                now + TimeDelta::seconds(secs)
+            }
+            (None, None) => now + TimeDelta::seconds(DEFAULT_ACK_SECS),
+        };
+        if until <= now {
+            return Err(ApiError::BadRequest("\"until\" must be in the future.".into()));
+        }
+        if until > now + TimeDelta::seconds(MAX_ACK_SECS) {
+            return Err(ApiError::BadRequest(format!(
+                "An alert can be acknowledged for at most {} days.",
+                MAX_ACK_SECS / 86_400
+            )));
+        }
+        Ok(AckRequest::Set { until, note })
+    }
+}
+
+/// Lit une échéance : RFC 3339, sinon `YYYY-MM-DD HH:MM:SS` lu en UTC — la
+/// forme sans suffixe des horodatages du serveur.
+fn parse_until(raw: &str) -> ApiResult<DateTime<Utc>> {
+    if let Ok(at) = DateTime::parse_from_rfc3339(raw) {
+        return Ok(at.with_timezone(&Utc));
+    }
+    let naive = chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S"))
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M"))
+        .map_err(|_| {
+            ApiError::BadRequest(format!(
+                "\"until\" must be an RFC 3339 date or a UTC timestamp like \
+                 2026-08-31 12:00:00 (received: \"{raw}\")."
+            ))
+        })?;
+    Ok(naive.and_utc())
 }
 
 /// Fenêtre de maintenance soumise par l'interface.
@@ -876,6 +1024,7 @@ fn rule_not_found(id: i64) -> ApiError {
 // --------------------------------------------------------------------------
 
 pub async fn list_active(State(state): State<AppState>) -> ApiResult<Json<Vec<ActiveAlertView>>> {
+    let now = Utc::now();
     let alerts = db::alerts::list_active(&state.pool).await?;
     let rules: HashMap<String, Rule> = db::alerts::list_rules(&state.pool)
         .await?
@@ -901,31 +1050,76 @@ pub async fn list_active(State(state): State<AppState>) -> ApiResult<Json<Vec<Ac
             })
             .map(|alert| {
                 let rule = rules.get(&alert.rule_uid);
-                ActiveAlertView {
-                    effective_phase: alert.state.effective_phase(),
-                    phase: alert.state.phase,
-                    rule_name: rule.map(|rule| rule.name.clone()).unwrap_or_default(),
-                    severity: rule.map_or(Severity::Warning, |rule| rule.severity),
-                    fingerprint: alert.fingerprint,
-                    rule_uid: alert.rule_uid,
-                    target_id: alert.target_id,
-                    series_key: alert.series_key,
-                    labels: alert.labels,
-                    suppressed: alert.state.suppressed,
-                    suppressed_by: alert.state.suppressed_by,
-                    silenced: alert.state.silenced,
-                    learning: alert.state.learning,
-                    value: alert.state.value,
-                    score: alert.state.score,
-                    condition_since: alert.state.condition_since,
-                    firing_since: alert.state.firing_since,
-                    last_eval_at: alert.state.last_eval_at,
-                    last_notified_at: alert.state.last_notified_at,
-                    notify_count: alert.state.notify_count,
-                }
+                ActiveAlertView::new(alert, rule, now)
             })
             .collect(),
     ))
+}
+
+/// Pose ou lève l'acquittement d'une alerte, au nom de `actor`.
+///
+/// Partagé par la route HTTP et l'outil MCP : la validation de la saisie est
+/// faite par l'appelant, la vérification du rôle par le garde de la route.
+pub async fn acknowledge(
+    state: &AppState,
+    fingerprint: &str,
+    request: AckRequest,
+    actor: &str,
+) -> ApiResult<ActiveAlertView> {
+    let ack = match request {
+        AckRequest::Set { until, note } => {
+            Some(db::alerts::Ack { until, by: actor.to_string(), note })
+        }
+        AckRequest::Clear => None,
+    };
+    if !db::alerts::set_ack(&state.pool, fingerprint, ack.as_ref()).await? {
+        return Err(alert_not_found(fingerprint));
+    }
+    let alert = db::alerts::get_active(&state.pool, fingerprint)
+        .await?
+        .ok_or_else(|| alert_not_found(fingerprint))?;
+    let rule = db::alerts::list_rules(&state.pool)
+        .await?
+        .into_iter()
+        .find(|rule| rule.uid == alert.rule_uid);
+    Ok(ActiveAlertView::new(alert, rule.as_ref(), Utc::now()))
+}
+
+fn alert_not_found(fingerprint: &str) -> ApiError {
+    ApiError::NotFound(format!("No active alert with fingerprint \"{fingerprint}\"."))
+}
+
+/// `POST /alerts/{fingerprint}/ack` : « je sais, ne me le rappelle plus ».
+pub async fn ack_alert(
+    State(state): State<AppState>,
+    AdminIdentity(principal): AdminIdentity,
+    ClientIp(ip): ClientIp,
+    Path(fingerprint): Path<String>,
+    payload: Option<Json<AckPayload>>,
+) -> ApiResult<Json<ActiveAlertView>> {
+    let payload = payload.map(|Json(payload)| payload).unwrap_or_default();
+    let request = payload.validate(Utc::now())?;
+    let action = match request {
+        AckRequest::Set { .. } => "alert.acked",
+        AckRequest::Clear => "alert.unacked",
+    };
+    let actor = principal.label();
+    let view = acknowledge(&state, &fingerprint, request, &actor).await?;
+    audit::record(&state.pool, Some(&actor), action, Some(&fingerprint), ip).await;
+    Ok(Json(view))
+}
+
+/// `DELETE /alerts/{fingerprint}/ack` : lève l'acquittement.
+pub async fn unack_alert(
+    State(state): State<AppState>,
+    AdminIdentity(principal): AdminIdentity,
+    ClientIp(ip): ClientIp,
+    Path(fingerprint): Path<String>,
+) -> ApiResult<Json<ActiveAlertView>> {
+    let actor = principal.label();
+    let view = acknowledge(&state, &fingerprint, AckRequest::Clear, &actor).await?;
+    audit::record(&state.pool, Some(&actor), "alert.unacked", Some(&fingerprint), ip).await;
+    Ok(Json(view))
 }
 
 /// Historique des transitions, de la plus récente à la plus ancienne.

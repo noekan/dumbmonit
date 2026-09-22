@@ -505,8 +505,11 @@ async fn alerts_of_missing_or_paused_devices_are_never_listed() {
 
     let (status, body) = app.request("GET", "/api/alerts", None).await;
     assert_eq!(status, StatusCode::OK);
-    let listed: Vec<&str> =
+    // Triées : la liste est ordonnée par `firing_since`, et deux alertes créées
+    // à la suite tombent d'un côté ou de l'autre d'une milliseconde.
+    let mut listed: Vec<&str> =
         body.as_array().unwrap().iter().map(|a| a["fingerprint"].as_str().unwrap()).collect();
+    listed.sort_unstable();
     assert_eq!(listed, vec!["cpu_high@0000000000000001", "cpu_high@0000000000000005"], "{body}");
 }
 

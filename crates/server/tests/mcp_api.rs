@@ -325,6 +325,7 @@ async fn tools_list_is_the_documented_catalogue() {
             "list_silences",
             "silence_device",
             "remove_silence",
+            "acknowledge_alert",
             "probe_device",
             "set_device_enabled",
             "list_rules",

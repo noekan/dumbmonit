@@ -164,6 +164,16 @@ pub async fn delete(pool: &SqlitePool, id: TargetId) -> Result<bool> {
     Ok(result.rows_affected() > 0)
 }
 
+/// Vrai si un message d'erreur de sonde enregistré signifie « équipement
+/// injoignable » plutôt qu'une erreur de configuration.
+///
+/// Seul le texte est conservé en base ; les préfixes sont ceux de l'affichage de
+/// `ProbeError`, dont `means_down` fait la même distinction, et du message des
+/// sondes relayées restées sans réponse.
+pub fn error_means_down(message: &str) -> bool {
+    message.starts_with("Timed out") || message.starts_with("Device unreachable")
+}
+
 /// Enregistre l'issue d'une interrogation. `error` à `None` signifie succès.
 pub async fn record_probe(pool: &SqlitePool, id: TargetId, error: Option<&str>) -> Result<()> {
     sqlx::query(

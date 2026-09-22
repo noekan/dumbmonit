@@ -12,6 +12,7 @@ import type {
 	AgentToken,
 	ApiToken,
 	ApiTokenScope,
+	AckPayload,
 	Alert,
 	AlertHistoryEntry,
 	AlertRule,
@@ -242,6 +243,19 @@ export function createSilence(payload: SilencePayload): Promise<Silence> {
 
 export function deleteSilence(id: number): Promise<void> {
 	return request<void>(`/alerts/silences/${id}`, { method: 'DELETE' });
+}
+
+/** Acknowledges an alert ("I know, stop reminding me"); returns the updated alert. */
+export function ackAlert(fingerprint: string, payload: AckPayload = {}): Promise<Alert> {
+	return request<Alert>(`/alerts/${encodeURIComponent(fingerprint)}/ack`, {
+		method: 'POST',
+		body: payload
+	});
+}
+
+/** Lifts an acknowledgement; returns the updated alert. */
+export function unackAlert(fingerprint: string): Promise<Alert> {
+	return request<Alert>(`/alerts/${encodeURIComponent(fingerprint)}/ack`, { method: 'DELETE' });
 }
 
 // --- Network discovery ------------------------------------------------------

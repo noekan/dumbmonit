@@ -112,7 +112,10 @@ impl AlertOutcome {
 ///
 /// Les trois causes de mutisme — suppression par dépendance, silence de
 /// maintenance, apprentissage — sont vérifiées avant toute autre considération :
-/// elles priment sur les rappels comme sur l'escalade.
+/// elles priment sur les rappels comme sur l'escalade. L'acquittement vient
+/// ensuite : il ne fait taire que ce qui annonce un problème en cours (première
+/// annonce, rappel, escalade), jamais la résolution — qui, elle, ne passe pas
+/// par ici puisque la machine efface l'acquittement en résolvant.
 pub fn decide(outcome: &AlertOutcome, now: DateTime<Utc>) -> Option<NotifyReason> {
     let state = &outcome.state;
 
@@ -122,6 +125,9 @@ pub fn decide(outcome: &AlertOutcome, now: DateTime<Utc>) -> Option<NotifyReason
 
     match state.phase {
         Phase::Firing => {
+            if state.is_acked(now) {
+                return None;
+            }
             if state.notify_count == 0 {
                 return Some(NotifyReason::Firing);
             }
@@ -372,6 +378,44 @@ mod tests {
             mutateur(&mut o.state);
             assert_eq!(decide(&o, at(0)), None);
         }
+    }
+
+    #[test]
+    fn une_alerte_acquittee_ne_rappelle_plus_jusqu_a_l_echeance() {
+        let mut o = outcome("a", 1, "nas");
+        o.state.notify_count = 1;
+        o.state.last_notified_at = Some(at(0));
+        o.state.acked_until = Some(at(14_400));
+        o.state.acked_by = Some("admin".to_string());
+        o.escalate_after = Some(Duration::from_secs(1800));
+
+        assert_eq!(decide(&o, at(3600)), None, "reminder due, but acked");
+        assert_eq!(decide(&o, at(1800)), None, "escalation due, but acked");
+        // L'acquittement échu : le rappel repart au cycle suivant.
+        assert_eq!(decide(&o, at(14_400)), Some(NotifyReason::Escalation));
+        o.state.last_notified_at = Some(at(14_400));
+        assert_eq!(decide(&o, at(18_000)), Some(NotifyReason::Reminder));
+    }
+
+    #[test]
+    fn une_alerte_acquittee_avant_toute_annonce_se_tait_aussi() {
+        let mut o = outcome("a", 1, "nas");
+        o.state.acked_until = Some(at(3600));
+        assert_eq!(decide(&o, at(0)), None, "acked from the UI before the batch left");
+        assert_eq!(decide(&o, at(3600)), Some(NotifyReason::Firing));
+    }
+
+    #[test]
+    fn la_resolution_d_une_alerte_acquittee_est_annoncee() {
+        let mut o = outcome("a", 1, "nas");
+        o.state.notify_count = 1;
+        o.state.last_notified_at = Some(at(0));
+        o.state.acked_until = Some(at(14_400));
+        // La machine à états a résolu — et effacé l'acquittement au passage ;
+        // même si une ligne gardait la date, la résolution passe.
+        o.state.phase = Phase::Resolved;
+        o.state.resolved_at = Some(at(60));
+        assert_eq!(decide(&o, at(60)), Some(NotifyReason::Resolved));
     }
 
     #[test]

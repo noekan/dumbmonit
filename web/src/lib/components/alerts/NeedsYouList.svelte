@@ -6,11 +6,13 @@
 	 * warnings first, then advisories, building up, and the suppressed last.
 	 * When `grouped` is set, rows are gathered under their device (host
 	 * grouping), which is how the Alerts page reads them; the Overview leaves
-	 * them as one flat stream. The empty state only appears when the sky says
-	 * so — a device that has stopped reporting is never "nothing".
+	 * them as one flat stream. Acknowledged alerts leave the stream for a
+	 * quieter "Acknowledged" group at the bottom: still visible, no longer
+	 * shouting. The empty state only appears when the sky says so — a device
+	 * that has stopped reporting is never "nothing".
 	 */
 	import type { Alert, Target } from '$lib/api';
-	import type { Sky, SkyRow } from '$lib/components/overview/sky';
+	import { isAckedRow, type Sky, type SkyRow } from '$lib/components/overview/sky';
 	import { EmptyState } from '$lib/ui';
 	import { CloudSun } from 'lucide-svelte';
 	import AlertRow from './AlertRow.svelte';
@@ -27,6 +29,8 @@
 		/** The pigeon instead of the icon in the quiet state (the Overview smiles). */
 		mascot?: 'watch' | 'dizzy' | 'happy';
 		onsilence: (alert: Alert, target: Target) => void;
+		/** An acknowledgement was made or lifted: refresh the alerts. */
+		onackchange?: (alert: Alert) => void;
 	}
 
 	let {
@@ -36,7 +40,8 @@
 		showOpen = false,
 		silencingKey = null,
 		mascot,
-		onsilence
+		onsilence,
+		onackchange
 	}: Props = $props();
 
 	/**
@@ -68,7 +73,8 @@
 		return out;
 	}
 
-	const rows = $derived(fold(sky.needsYou));
+	const rows = $derived(fold(sky.needsYou.filter((row) => !isAckedRow(row))));
+	const ackedRows = $derived(fold(sky.needsYou.filter(isAckedRow)));
 
 	/** What "quiet" means right now: everything reporting, or still waiting. */
 	const quietDescription = $derived.by(() => {
@@ -122,7 +128,29 @@
 			{showOpen}
 			silencing={silencingKey === folded.row.alert.fingerprint}
 			{onsilence}
+			{onackchange}
 		/>
+	{/if}
+{/snippet}
+
+{#snippet ackedSection()}
+	{#if ackedRows.length > 0}
+		<div class={rows.length > 0 ? 'mt-6' : ''}>
+			<h3 class="label-tape mb-2 flex items-center gap-2">
+				Acknowledged
+				<span class="tnum font-normal text-ink-3">· {ackedRows.length}</span>
+			</h3>
+			<p class="mb-2 text-[0.8125rem] text-ink-2">
+				Known problems: reminders are paused until the acknowledgement ends or the alert resolves.
+			</p>
+			<div class="space-y-2.5">
+				{#each ackedRows as folded, i (folded.row.key)}
+					<div class="rise-in" style={`--rise-delay: ${i * 30}ms`}>
+						{@render rowView(folded)}
+					</div>
+				{/each}
+			</div>
+		</div>
 	{/if}
 {/snippet}
 
@@ -157,6 +185,7 @@
 			</div>
 		{/each}
 	</div>
+	{@render ackedSection()}
 {:else}
 	<div class="space-y-2.5">
 		{#each rows as folded, i (folded.row.key)}
@@ -165,4 +194,5 @@
 			</div>
 		{/each}
 	</div>
+	{@render ackedSection()}
 {/if}
