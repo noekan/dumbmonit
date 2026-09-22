@@ -18,6 +18,8 @@
 
 **Qualité** : test d'intégration flaky sous charge, pas de tests navigateur automatisés.
 
+**Fait le 22/09 (`v0.1.0-alpha.4`, commit `dba1383`)** : étapes 1 et 2 livrées et vérifiées en live — relais testé sur un réseau Docker isolé (6 bugs corrigés dont un rejeu de code TOTP et la cascade « relais tombé »), heartbeat/push (`GET|POST /api/push/<token>`, règle « Heartbeat missed », URL et ligne cron à copier sur la page appareil), acquittement d'alerte (1 h / 4 h / 24 h / jusqu'à résolution, groupe « Acknowledged » sur l'accueil), jetons `dmt_` valables sur toute l'API REST (`Authorization: Bearer`, doc API complétée). À noter : « Since you last looked » nomme encore les appareils supprimés « Device N ».
+
 **Ordre retenu** : 1) tests live relais + 2FA ; 2) push monitor + ack/snooze + jetons API ; 3) export/import + sauvegarde ; 4) jeton agent ↔ machine ; 5) onboarding, PWA, doc ; 6) intégrations.
 
 **Mise à jour 21/09** — retour collègue (round 6) livré : `v0.1.0-alpha.2` (commit `98e75d2`) puis `v0.1.0-alpha.3` (`0cf8cbc`, correctifs ci-dessous). Image `ghcr.io/noekan/dumbmonit:latest` = alpha.3 dès que le workflow Release finit (~2 h) ; en attendant, `:edge`.
