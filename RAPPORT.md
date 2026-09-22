@@ -1,5 +1,25 @@
 # DumbMonit — rapport du 16 septembre 2026
 
+## Analyse du 22/09 : ce qui manque encore
+
+**Priorité haute (petit/moyen effort)** : moniteur push/heartbeat (cron, scripts de sauvegarde) · acquitter/snoozer une alerte · jetons API pour toute l'API REST (les `dmt_` n'ouvrent que MCP) · export/import de la config + sauvegarde SQLite planifiée · export Prometheus `/metrics` · test live du relais et du 2FA.
+
+**Intégrations** : agent macOS/FreeBSD (TrueNAS, pfSense, OPNsense), capteurs (températures, SMART, GPU, ZFS) côté agent, Windows jamais exercé ; moniteurs gRPC/MQTT/SQL/SMTP/WebSocket ; Docker sans agent ; TrueNAS/OPNsense/Unifi/NUT ; diff lisible des paquets PVE dans la notification.
+
+**Alerting** : maintenance cron/mensuelle · routage par tag vers les canaux · escalade · bouton « tester ce canal » + journal des envois.
+
+**Pages de statut** : logo, CSS, badges uptime, widget, abonnés e-mail, domaine perso natif.
+
+**Sécurité (reste de l'audit)** : jeton d'agent non lié à la machine (un hôte compromis peut en usurper un autre) · commandes distantes actives par défaut et jetons en clair en `http://` · CSP complet, taille des rapports de commande, URIs en logs debug, CSRF login OIDC · passkeys.
+
+**Exploitation** : test de migration N→N+1 en CI (la bascule root→65532 l'a montré), nettoyage des séries orphelines, « pas de données » explicite plutôt qu'une sparkline vide.
+
+**Produit** : onboarding après le setup, PWA/manifest, filtre par tag et par site, route `/dev/sky` à retirer, `reference/api.md` et `faq.md` périmés, page des règles incomplète (~60 règles).
+
+**Qualité** : test d'intégration flaky sous charge, pas de tests navigateur automatisés.
+
+**Ordre retenu** : 1) tests live relais + 2FA ; 2) push monitor + ack/snooze + jetons API ; 3) export/import + sauvegarde ; 4) jeton agent ↔ machine ; 5) onboarding, PWA, doc ; 6) intégrations.
+
 **Mise à jour 21/09** — retour collègue (round 6) livré : `v0.1.0-alpha.2` (commit `98e75d2`) puis `v0.1.0-alpha.3` (`0cf8cbc`, correctifs ci-dessous). Image `ghcr.io/noekan/dumbmonit:latest` = alpha.3 dès que le workflow Release finit (~2 h) ; en attendant, `:edge`.
 
 - **Vérifié en live sur :8080** (fakes PVE/PBS/DSM du labo local) : panneau Invités PVE (7 VM/CT, statut, CPU, RAM, disque, réseau, uptime, dernière sauvegarde, HA), page PBS (échecs 30 j, calendrier à points, jobs sync/verify/prune/GC, santé), page Synology (CPU/RAM/température/uptime, volumes, disques SMART/usure, Active Backup avec cadence apprise), formulaire Proxmox « Token ID + Secret » avec tuto utilisateur dédié en lecture seule, nouvelle navigation Overview · Devices · Alerts · Status · Settings, 2FA dans Réglages, CSRF (`X-Requested-With`), en-têtes de sécurité, alertes intégrées PVE/ABB qui montent. Captures README/docs régénérées.
