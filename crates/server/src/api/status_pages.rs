@@ -1379,9 +1379,9 @@ mod tests {
     #[test]
     fn slug_rule() {
         assert!(is_valid_slug("homelab"));
-        assert!(is_valid_slug("my-lab-2"));
+        assert!(is_valid_slug("my-site-2"));
         assert!(!is_valid_slug("a"));
-        assert!(!is_valid_slug("My-Lab"));
+        assert!(!is_valid_slug("My-Site"));
         assert!(!is_valid_slug("lab_1"));
         assert!(!is_valid_slug(&"x".repeat(41)));
     }

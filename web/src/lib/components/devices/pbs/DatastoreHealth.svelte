@@ -102,6 +102,44 @@
 	function dedup(factor: number | null): string {
 		return factor === null ? '—' : `${(Math.round(factor * 100) / 100).toFixed(2)}×`;
 	}
+
+	/** A removable datastore that is not mounted, or one held for maintenance. */
+	function availabilityPlate(store: PbsDatastore): { tone: Tone; label: string } | null {
+		if (store.maintenance) return { tone: 'warning', label: `Maintenance: ${store.maintenance}` };
+		if (store.mount_status === 'notmounted') return { tone: 'warning', label: 'Not mounted' };
+		if (store.mount_status === 'mounted') return { tone: 'info', label: 'Removable, mounted' };
+		return null;
+	}
+
+	/** "+1.2 GB/day over 28 days", or null when PBS has too little history. */
+	function growth(store: PbsDatastore): string | null {
+		if (store.growth_bytes_per_day === null) return null;
+		const sign = store.growth_bytes_per_day < 0 ? '−' : '+';
+		const size = formatBytes(Math.abs(store.growth_bytes_per_day));
+		const days = store.history_days === null ? null : Math.round(store.history_days);
+		return `${sign}${size}/day${days ? ` over ${days} days` : ''}`;
+	}
+
+	/** "4 VMs, 12 containers" — only the types that have something. */
+	function counts(store: PbsDatastore): string | null {
+		const word: Record<string, string> = { vm: 'VM', ct: 'container', host: 'host', other: 'other' };
+		const parts = store.counts
+			.filter((c) => c.groups > 0)
+			.map((c) => `${c.groups} ${word[c.backup_type] ?? c.backup_type}${c.groups === 1 ? '' : 's'}`);
+		return parts.length > 0 ? parts.join(', ') : null;
+	}
+
+	/** What is holding the datastore right now, or null when it is idle. */
+	function busy(store: PbsDatastore): string | null {
+		const reads = store.active_reads ?? 0;
+		const writes = store.active_writes ?? 0;
+		if (store.active_reads === null && store.active_writes === null) return null;
+		if (reads === 0 && writes === 0) return null;
+		const parts: string[] = [];
+		if (writes > 0) parts.push(`${writes} write${writes === 1 ? '' : 's'}`);
+		if (reads > 0) parts.push(`${reads} read${reads === 1 ? '' : 's'}`);
+		return parts.join(', ');
+	}
 </script>
 
 {#if datastores.length === 0}
@@ -113,12 +151,18 @@
 			{@const pct = percentOf(store.used_bytes, store.total_bytes)}
 			{@const fill = forecast(store)}
 			{@const gc = gcPlate(store)}
+			{@const availability = availabilityPlate(store)}
+			{@const busyNow = busy(store)}
+			{@const growthLabel = growth(store)}
+			{@const countLabel = counts(store)}
 			<li class="px-5 py-3">
 				<div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
 					<p class="min-w-0 font-semibold text-ink break-all">{store.name}</p>
 					<Plate tone={usage.tone} label={usage.label} />
 					{#if fill}<Plate tone={fill.tone} label={fill.label} bare />{/if}
 					<Plate tone={gc.tone} label={gc.label} bare />
+					{#if availability}<Plate tone={availability.tone} label={availability.label} />{/if}
+					{#if busyNow}<Plate tone="info" label={`Busy: ${busyNow}`} bare />{/if}
 				</div>
 				{#if store.available}
 					<div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-surface-2" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct === null ? undefined : Math.round(pct)} aria-label={`${store.name} usage`}>
@@ -132,7 +176,18 @@
 						{#if store.gc?.schedule}<span>GC <span class="font-mono">{store.gc.schedule}</span></span>{/if}
 						{#if store.gc?.next_run !== null && store.gc?.next_run !== undefined}<span>next GC {formatAgo(store.gc.next_run)}</span>{/if}
 						{#if store.gc?.removed_bytes !== null && store.gc?.removed_bytes !== undefined}<span>last GC freed {formatBytes(store.gc.removed_bytes)}</span>{/if}
+						{#if store.gc?.duration_seconds !== null && store.gc?.duration_seconds !== undefined}<span>last GC took {formatSpan(store.gc.duration_seconds)}</span>{/if}
+						{#if growthLabel}<span title={`Measured from the usage history Proxmox Backup Server keeps, the same numbers behind its own forecast`}>growing {growthLabel}</span>{/if}
+						{#if countLabel}<span>{countLabel}</span>{/if}
+						{#if store.backend && store.backend !== 'filesystem'}<span>backend {store.backend}</span>{/if}
 					</p>
+					{#if store.gc?.bad_chunks}
+						<p class="mt-1 text-[0.8125rem] text-warning-ink">
+							The last garbage collection found {store.gc.bad_chunks} unreadable
+							{store.gc.bad_chunks === 1 ? 'chunk' : 'chunks'}: some backups in this datastore can no
+							longer be restored.
+						</p>
+					{/if}
 					{#if store.gc && isSuccess(store.gc.last_run_state) === false}
 						<p class="mt-1 text-[0.8125rem] text-warning-ink break-words">{store.gc.last_run_state?.replace(/^TASK ERROR:\s*/i, '')}</p>
 					{/if}

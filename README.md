@@ -62,6 +62,15 @@ back for a paid edition.
 - **Proxmox Backup Server** — datastore usage and fill-up forecast, deduplication
   factor, per-machine snapshot age and verification result, failed tasks (backup,
   verify, GC, sync), age of the last garbage collection.
+- **Proxmox Datacenter Manager** — the console that federates several PVE clusters
+  and backup servers: which instances it still reaches and why one dropped off,
+  the whole estate in one page (guests running, nodes online, CPU, memory and
+  storage totals), failed tasks across every site, and the console's own health.
+- **Proxmox Mail Gateway** — the postfix queues and how long the oldest message
+  has been stuck there, the mail counted and filtered today (spam, viruses,
+  bounces, greylisting), quarantine sizes, and the age of the antivirus and
+  antispam signature databases: the silent failure where the gateway keeps
+  filtering with last week's rules. Counts only, never message content.
 - **Synology DSM** — volumes, disks and SMART health, temperature, load and
   services, through the NAS web API; **Active Backup for Business** tasks, their
   last result and the age of the last success.
@@ -234,7 +243,7 @@ and state.
 
 ```
 crates/proto     shared types: Sample, Target, Credential, trait Collector (+ ProbeError)
-crates/collectors  snmp (profiles/*.yaml), proxmox, pbs, synology, uptime — shared by the server and the relay agent
+crates/collectors  snmp (profiles/*.yaml), proxmox, pbs, pdm, synology, uptime — shared by the server and the relay agent
 crates/server    the binary
   api/           axum routes; spa.rs serves the embedded web UI
   auth/          single instance password, HttpOnly session cookie, rate limit

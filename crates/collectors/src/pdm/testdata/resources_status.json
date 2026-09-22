@@ -1,0 +1,102 @@
+{
+  "data": {
+    "failed_remotes": 2,
+    "failed_remotes_list": [
+      {
+        "error": "Could not establish a TLS connection. Check whether the fingerprint matches or the certificate on the remote is valid. The system log might also contain more information. OpenSSL Error: error:0A00010B:SSL routines:tls_validate_record_header:wrong version number:../ssl/record/methods/tlsany_meth.c:77:",
+        "name": "site-b",
+        "remote_type": "pve"
+      },
+      {
+        "error": "api error (status = 501: {\"data\": null})",
+        "name": "site-c",
+        "remote_type": "pve"
+      }
+    ],
+    "lxc": {
+      "running": 0,
+      "stopped": 0,
+      "template": 0,
+      "unknown": 0
+    },
+    "pbs_cpu_stats": {
+      "allocated": null,
+      "max": 0.0,
+      "used": 0.0
+    },
+    "pbs_datastores": {
+      "online": 0,
+      "under_maintenance": null
+    },
+    "pbs_memory_stats": {
+      "avail": 0,
+      "total": 0,
+      "used": 0
+    },
+    "pbs_nodes": {
+      "offline": 0,
+      "online": 0,
+      "unknown": 0
+    },
+    "pbs_storage_stats": {
+      "avail": 0,
+      "total": 0,
+      "used": 0
+    },
+    "pve_cpu_stats": {
+      "allocated": 0.0,
+      "max": 0.0,
+      "used": 0.0
+    },
+    "pve_memory_stats": {
+      "avail": 0,
+      "total": 0,
+      "used": 0
+    },
+    "pve_nodes": {
+      "offline": 0,
+      "online": 0,
+      "unknown": 0
+    },
+    "pve_storage_stats": {
+      "avail": 0,
+      "total": 0,
+      "used": 0
+    },
+    "qemu": {
+      "running": 0,
+      "stopped": 0,
+      "template": 0,
+      "unknown": 0
+    },
+    "remote-list": [
+      {
+        "messages": [
+          "Could not establish a TLS connection. Check whether the fingerprint matches or the certificate on the remote is valid. The system log might also contain more information. OpenSSL Error: error:0A00010B:SSL routines:tls_validate_record_header:wrong version number:../ssl/record/methods/tlsany_meth.c:77:"
+        ],
+        "name": "site-b",
+        "status": "Error",
+        "ty": "pve"
+      },
+      {
+        "messages": [
+          "api error (status = 501: {\"data\": null})"
+        ],
+        "name": "site-c",
+        "status": "Error",
+        "ty": "pve"
+      }
+    ],
+    "remotes": 0,
+    "sdn_zones": {
+      "available": 0,
+      "error": 0,
+      "pending": 0,
+      "unknown": 0
+    },
+    "storages": {
+      "available": 0,
+      "unknown": 0
+    }
+  }
+}

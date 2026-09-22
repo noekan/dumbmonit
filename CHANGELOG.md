@@ -5,6 +5,85 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- **Proxmox Backup Server** now watches the server itself and its tape tier.
+  Two new panels on the device page: **Server** (the systemd units with the
+  ones PBS cannot do without called out, the Proxmox package versions —
+  installed, available, running — with a "Restart pending" plate when the
+  daemon is behind its package, the certificate and its expiry, and the
+  traffic-control rules with what they are carrying) and **Tape**, shown only
+  when there is a tape tier (backup jobs with their pool, drive and next tape,
+  media pools with their retention and expired count, drives, changers and the
+  tapes themselves). New `dumbmonit_pbs_…` families for services, package
+  versions, certificate expiry and traffic limits; per datastore, the
+  maintenance and removable-mount state, what is reading or writing it right
+  now, how many machines of each type it holds and the growth measured per day
+  from the history PBS itself keeps; and for garbage collection, the run
+  duration, the chunk counters and the unreadable chunks it left in place.
+  Seven built-in rules (service down, certificate expiring, restart pending
+  after upgrade, tape backup failed, job never ran, corrupt chunks found,
+  datastore not mounted) and five options (`services`, `datastore_details`,
+  `traffic_control`, `certificates` off by default since PBS guards that call
+  behind a write privilege, `tape` off by default). Garbage collection is now
+  read with a single `/admin/gc` call for every datastore at once instead of
+  one call per datastore, with the old call kept as a fallback.
+- **PBS setup instructions corrected**: a token's effective privileges are the
+  intersection of its own ACL and its **user's**, so every role has to be
+  granted twice — to `dumbmonit@pbs` and to `dumbmonit@pbs!monitor`. Granted
+  to the token alone, as the documentation previously said, nothing is refused
+  and nothing is reported either: the calls succeed and return empty lists.
+  The device page now explains how to check with
+  `proxmox-backup-manager user permissions`, and records that `Remote.Audit`
+  and `Tape.Audit` come from the separate `RemoteAudit` and `TapeAudit` roles,
+  not from `Audit`.
+- **Proxmox Mail Gateway** device (`pmg`): the postfix queues with the age of
+  the oldest waiting message — the difference between slow mail and stuck
+  mail —, today's mail counted and filtered (spam, viruses, bounces,
+  greylisting, blocklist and SPF rejects, average processing time) with a
+  recent traffic curve, the size of the spam and virus quarantines, the age of
+  the ClamAV and SpamAssassin databases, services, certificates, pending
+  updates and cluster sync state. `dumbmonit_pmg_…` metrics, nine built-in
+  rules, `GET /api/targets/{id}/pmg/…`, and a documentation page. Quarantines
+  are counted, never read: no subject, sender or message body leaves the
+  gateway.
+- **Proxmox Datacenter Manager** device (`pdm`): one device for the whole
+  estate a console federates. Which Proxmox VE clusters and backup servers it
+  reaches and the message it got back when it cannot, each instance's version
+  with the ones left behind their peers, estate-wide guest, node, CPU, memory
+  and storage totals, tasks that failed anywhere, and the console's own host
+  (CPU, memory, root filesystem, certificates, pending updates, subscription).
+  `dumbmonit_pdm_…` metrics, six built-in rules, `GET /api/targets/{id}/pdm/…`,
+  and a page in the documentation explaining when to prefer it over a device
+  per cluster.
+- **Proxmox VE** now reads the cluster inventory in one call
+  (`/cluster/resources`): the guests of a node that stopped answering stay
+  listed instead of vanishing from the panel at the moment you want to look at
+  them, resource pools and guest locks appear, and each probe makes two calls
+  fewer per node. The guests table gains a pool filter, a lock badge, and the
+  operating system and IP addresses of each guest — read from inside once an
+  hour, not at every probe.
+- Proxmox VE device page: a **Nodes** section above the guests, one card per
+  node with its CPU, memory and root filesystem, the version installed on it,
+  the Proxmox daemons that are not running, the interfaces set to start at boot
+  that are down, and the fill of each LVM thin pool (data *and* metadata) and
+  volume group. `GET /api/targets/{id}/proxmox/nodes`.
+- Proxmox VE device page: a **Ceph** section, shown only when the cluster has
+  Ceph — health, capacity, a table of OSDs with usage and latency, a table of
+  pools, the CephFS filesystems, the OSD flags left set after a maintenance and
+  the health checks currently muted. Also the HA manager's own view (which node
+  holds the master, the state of each local resource manager and whether it is
+  still reporting) and, per scheduled backup job, which disks of the guests it
+  covers it actually writes. `GET /api/targets/{id}/proxmox/ceph`.
+- Eleven built-in Proxmox VE rules: thin pool and thin pool metadata almost
+  full, core service down, node interface down, Ceph OSD down, Ceph OSD and
+  Ceph pool nearly full, `noout` flag left on, HA manager not reporting, backup
+  job excluding a disk, and guest locked for six hours.
+- Proxmox VE, optional and off by default: ingest the full RRD stream
+  (`/cluster/metrics/export`), everything Proxmox's own metric servers receive,
+  including per-node pressure stall information and every point since the last
+  probe rather than just the current value.
+
 ## 0.1.0-alpha.4 — 2026-09-22
 
 ### Added

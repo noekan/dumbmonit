@@ -10,6 +10,8 @@
 pub mod dummy;
 pub mod http;
 pub mod pbs;
+pub mod pdm;
+pub mod pmg;
 pub mod proxmox;
 pub mod snmp;
 pub mod synology;
@@ -23,6 +25,8 @@ use dumbmonit_proto::{Collector, MetricKind, ProbeError, Sample, Target};
 
 pub use dummy::DummyCollector;
 pub use pbs::PbsCollector;
+pub use pdm::PdmCollector;
+pub use pmg::PmgCollector;
 pub use proxmox::ProxmoxCollector;
 pub use snmp::SnmpCollector;
 pub use synology::SynologyCollector;
@@ -46,6 +50,8 @@ impl Registry {
         registry.register(Arc::new(SnmpCollector::new().with_request_timeout(request_timeout)));
         registry.register(Arc::new(ProxmoxCollector::new()));
         registry.register(Arc::new(PbsCollector::new()));
+        registry.register(Arc::new(PmgCollector::new()));
+        registry.register(Arc::new(PdmCollector::new()));
         registry.register(Arc::new(SynologyCollector::new()));
         registry.register(Arc::new(HttpCollector::new()));
         registry.register(Arc::new(TcpCollector::new()));

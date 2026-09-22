@@ -7,8 +7,11 @@
 
 use dumbmonit_proto::{MetricKind, Sample};
 
-use super::model::{DatastoreUsage, DiskEntry, GcStatus, NodeStatus, Num, Version, ZpoolEntry};
-use super::view::{DatastoreView, DiskView, GcView, ZpoolView};
+use super::model::{
+    ActiveOperations, DatastoreConfig, DatastoreStatus, DatastoreUsage, DiskEntry, GcStatus,
+    NodeStatus, Num, Version, ZpoolEntry,
+};
+use super::view::{DatastoreView, DiskView, GcView, TypeCountView, ZpoolView};
 
 /// Préfixe commun à toutes les métriques de l'intégration.
 ///
@@ -59,7 +62,17 @@ pub fn node_samples(status: &NodeStatus, ts_ms: i64) -> Vec<Sample> {
         }
     }
 
+    // L'attente d'entrées-sorties est ce qui distingue « le serveur travaille »
+    // de « les disques n'en peuvent plus ». Sur un serveur de sauvegarde, c'est
+    // la différence entre une nuit chargée et une nuit qui ne finira pas.
+    if let Some(wait) = status.wait {
+        samples.push(gauge("node_iowait_percent", wait.0 * 100.0, ts_ms));
+    }
+
     if let Some(memory) = &status.memory {
+        if let Some(free) = memory.free {
+            samples.push(gauge("node_memory_free_bytes", free.0, ts_ms));
+        }
         if let Some(used) = memory.used {
             samples.push(gauge("node_memory_used_bytes", used.0, ts_ms));
         }
@@ -140,7 +153,159 @@ pub fn datastore_samples(usage: &DatastoreUsage, now_s: i64, ts_ms: i64) -> Vec<
         push(gauge("datastore_estimated_full_seconds", remaining, ts_ms));
     }
 
+    // Un datastore amovible débranché répond `notmounted` sans erreur : ce
+    // n'est pas une panne, mais la sauvegarde de ce soir n'aura pas lieu.
+    if let Some(status) = usage.mount_status.as_deref() {
+        push(
+            gauge(
+                "datastore_removable_unmounted",
+                if status.eq_ignore_ascii_case("notmounted") { 1.0 } else { 0.0 },
+                ts_ms,
+            )
+            .with_label("mount_status", status),
+        );
+    }
+    if let Some(backend) = usage.backend_type.as_deref() {
+        push(gauge("datastore_backend_info", 1.0, ts_ms).with_label("backend", backend));
+    }
+
+    // Ce qui fabrique la prévision « plein dans N jours » que PBS affiche : la
+    // pente de son propre historique, et le nombre de jours qu'elle couvre.
+    if let Some(growth) = growth(usage) {
+        push(gauge("datastore_growth_percent_per_day", growth.percent_per_day, ts_ms));
+        if let Some(bytes) = growth.bytes_per_day(usage.total) {
+            push(gauge("datastore_growth_bytes_per_day", bytes, ts_ms));
+        }
+        push(gauge("datastore_history_days", growth.days, ts_ms));
+    }
+
     samples
+}
+
+/// La croissance mesurée sur l'historique que PBS renvoie avec l'occupation.
+///
+/// `history` est une fraction d'occupation (0 à 1), un point toutes les
+/// `history-delta` secondes depuis `history-start` — l'interface de PBS la
+/// trace exactement ainsi. Les trous sont des `null` : on les saute plutôt que
+/// de les combler, un serveur arrêté n'ayant pas grandi pendant son arrêt.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Growth {
+    /// Pente en points de pourcentage d'occupation par jour.
+    pub percent_per_day: f64,
+    /// Nombre de jours entre le premier et le dernier point mesuré.
+    pub days: f64,
+}
+
+impl Growth {
+    /// La même pente en octets par jour, si la taille du datastore est connue.
+    pub fn bytes_per_day(&self, total: Option<Num>) -> Option<f64> {
+        let total = total?.0;
+        (total > 0.0).then(|| self.percent_per_day / 100.0 * total)
+    }
+}
+
+/// Nombre minimal de points mesurés pour oser une pente. En dessous, deux
+/// mesures prises à une heure d'écart donneraient une extrapolation absurde.
+const MIN_HISTORY_POINTS: usize = 8;
+
+pub fn growth(usage: &DatastoreUsage) -> Option<Growth> {
+    let delta = usage.history_delta?.0;
+    if delta <= 0.0 || usage.history.is_empty() {
+        return None;
+    }
+
+    // Régression linéaire des moindres carrés sur les points connus, l'abscisse
+    // en jours pour que la pente se lise directement.
+    let points: Vec<(f64, f64)> = usage
+        .history
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| Some((index as f64 * delta / 86_400.0, value.as_ref()?.0)))
+        .collect();
+    if points.len() < MIN_HISTORY_POINTS {
+        return None;
+    }
+
+    let n = points.len() as f64;
+    let mean_x = points.iter().map(|(x, _)| x).sum::<f64>() / n;
+    let mean_y = points.iter().map(|(_, y)| y).sum::<f64>() / n;
+    let variance: f64 = points.iter().map(|(x, _)| (x - mean_x).powi(2)).sum();
+    if variance <= 0.0 {
+        return None;
+    }
+    let covariance: f64 = points.iter().map(|(x, y)| (x - mean_x) * (y - mean_y)).sum();
+    let slope = covariance / variance;
+    if !slope.is_finite() {
+        return None;
+    }
+
+    let days = points.last()?.0 - points.first()?.0;
+    Some(Growth { percent_per_day: slope * 100.0, days })
+}
+
+/// `GET /admin/datastore/{store}/status?verbose=1` : groupes et instantanés par
+/// type de sauvegarde, tous espaces de noms confondus.
+pub fn counts_samples(store: &str, status: &DatastoreStatus, ts_ms: i64) -> Vec<Sample> {
+    let Some(counts) = &status.counts else { return Vec::new() };
+    let mut samples = Vec::new();
+    for (backup_type, groups, snapshots) in counts.by_type() {
+        for (metric, value) in [("datastore_groups", groups), ("datastore_snapshots", snapshots)] {
+            samples.push(
+                gauge(metric, value, ts_ms)
+                    .with_label("datastore", store)
+                    .with_label("type", backup_type),
+            );
+        }
+    }
+    samples
+}
+
+pub fn counts_views(status: &DatastoreStatus) -> Vec<TypeCountView> {
+    let Some(counts) = &status.counts else { return Vec::new() };
+    counts
+        .by_type()
+        .into_iter()
+        .map(|(backup_type, groups, snapshots)| TypeCountView {
+            backup_type: backup_type.to_string(),
+            groups,
+            snapshots,
+        })
+        .collect()
+}
+
+/// `GET /admin/datastore/{store}/active-operations` : ce qui tient le datastore
+/// à l'instant. Une GC qui n'avance pas, un démontage qui refuse : c'est ici que
+/// l'on voit qui est encore dessus.
+pub fn active_operations_samples(
+    store: &str,
+    operations: &ActiveOperations,
+    ts_ms: i64,
+) -> Vec<Sample> {
+    let mut samples = Vec::new();
+    if let Some(read) = operations.read {
+        samples.push(gauge("datastore_active_reads", read.0, ts_ms).with_label("datastore", store));
+    }
+    if let Some(write) = operations.write {
+        samples
+            .push(gauge("datastore_active_writes", write.0, ts_ms).with_label("datastore", store));
+    }
+    samples
+}
+
+/// `GET /config/datastore` : le mode de maintenance, première explication d'un
+/// refus de sauvegarde. Un datastore qui fonctionne produit la série à zéro —
+/// c'est bien une mesure, pas un trou.
+pub fn datastore_maintenance_samples(configs: &[DatastoreConfig], ts_ms: i64) -> Vec<Sample> {
+    configs
+        .iter()
+        .filter(|config| !config.name.is_empty())
+        .map(|config| {
+            let kind = config.maintenance_kind();
+            gauge("datastore_maintenance", if kind.is_some() { 1.0 } else { 0.0 }, ts_ms)
+                .with_label("datastore", config.name.clone())
+                .with_label("mode", kind.unwrap_or_default())
+        })
+        .collect()
 }
 
 /// Temps restant avant remplissage, d'après l'estimation de PBS.
@@ -181,6 +346,23 @@ pub fn gc_samples(store: &str, status: &GcStatus, ts_ms: i64) -> Vec<Sample> {
             ts_ms,
         ));
     }
+    if let Some(duration) = status.duration {
+        push(gauge("gc_last_duration_seconds", duration.0, ts_ms));
+    }
+    if let Some(chunks) = status.disk_chunks {
+        push(gauge("gc_disk_chunks", chunks.0, ts_ms));
+    }
+    if let Some(chunks) = status.pending_chunks {
+        push(gauge("gc_last_pending_chunks", chunks.0, ts_ms));
+    }
+    if let Some(chunks) = status.removed_chunks {
+        push(gauge("gc_last_removed_chunks", chunks.0, ts_ms));
+    }
+    // Les chunks illisibles laissés en place sont de la corruption, pas de la
+    // place à reprendre : c'est la série qui dit « une restauration échouera ».
+    if let Some(bad) = status.still_bad {
+        push(gauge("gc_bad_chunks", bad.0, ts_ms));
+    }
 
     samples
 }
@@ -215,6 +397,14 @@ pub fn datastore_view(usage: &DatastoreUsage, now_s: i64) -> DatastoreView {
             .filter(|&date| date > now_s),
         dedup_factor: None,
         gc: None,
+        mount_status: usage.mount_status.clone(),
+        backend: usage.backend_type.clone(),
+        maintenance: None,
+        counts: Vec::new(),
+        growth_bytes_per_day: growth(usage).and_then(|g| g.bytes_per_day(usage.total)),
+        history_days: growth(usage).map(|g| g.days),
+        active_reads: None,
+        active_writes: None,
     }
 }
 
@@ -228,6 +418,11 @@ pub fn gc_view(status: &GcStatus) -> GcView {
         next_run: status.next_run.map(|n| n.0 as i64),
         removed_bytes: status.removed_bytes.map(|n| n.0),
         pending_bytes: status.pending_bytes.map(|n| n.0),
+        duration_seconds: status.duration.map(|n| n.0),
+        disk_chunks: status.disk_chunks.map(|n| n.0),
+        pending_chunks: status.pending_chunks.map(|n| n.0),
+        removed_chunks: status.removed_chunks.map(|n| n.0),
+        bad_chunks: status.still_bad.map(|n| n.0),
     }
 }
 
@@ -399,8 +594,217 @@ mod tests {
       {"store":"archive","total":1000,"used":300,"avail":700,"estimated-full-date":-1}
     ]}"#;
 
+    /// Copie de `GET /status/datastore-usage` d'un PBS 4.2.6, avec tout ce que
+    /// la réponse porte et que l'on lisait jusqu'ici sans le regarder :
+    /// l'occupation mesurée d'un mois, l'état de montage et le fond de stockage.
+    /// L'historique est une fraction de remplissage (0 à 1), un point toutes les
+    /// demi-heures — c'est ainsi que l'interface de PBS le trace.
+    const DATASTORE_USAGE_REAL: &str = r#"{"data":[
+      {"store":"main","total":247212277760,"used":207692513280,"avail":39519764480,
+       "backend-type":"filesystem","mount-status":"nonremovable",
+       "history":[0.80,null,0.81,0.82,null,0.83,0.84,0.85,0.86,0.87],
+       "history-start":1787486372,"history-delta":86400,
+       "gc-status":{"disk-bytes":43329242,"index-data-bytes":134222368}}
+    ]}"#;
+
+    /// Copie de `GET /admin/datastore/main/status?verbose=1` : sans `verbose`,
+    /// PBS ne renvoie que les tailles, déjà connues par `/status/datastore-usage`.
+    const DATASTORE_STATUS: &str = r#"{"data":{
+      "avail":39519109120,"backend-type":"filesystem","total":247212277760,"used":207693168640,
+      "counts":{"ct":null,"host":{"groups":3,"snapshots":4},"other":null,"vm":{"groups":12,"snapshots":97}}
+    }}"#;
+
+    /// Copie de `GET /admin/gc` : la GC de tous les datastores en un appel.
+    const ADMIN_GC: &str = r#"{"data":[
+      {"store":"main","upid":"UPID:pbs:0000168E:04450640:00000009:6AB26CEA:garbage_collection:main:root@pam:",
+       "schedule":"daily","next-run":1790121600,"last-run-endtime":1790078188,"last-run-state":"OK",
+       "duration":142,"disk-bytes":43329242,"disk-chunks":17,"index-data-bytes":134222368,
+       "index-file-count":8,"pending-bytes":0,"pending-chunks":0,"removed-bytes":8123,
+       "removed-chunks":4,"removed-bad":1,"still-bad":3,"cache-stats":{"hits":32,"misses":16}}
+    ]}"#;
+
     fn extraire<T: serde::de::DeserializeOwned>(json: &str) -> T {
         serde_json::from_str::<Envelope<T>>(json).expect("réponse analysable").data
+    }
+
+    /// La valeur d'une série repérée par son nom et une seule de ses étiquettes.
+    fn etiquetee(samples: &[Sample], metric: &str, label: (&str, &str)) -> Option<f64> {
+        samples
+            .iter()
+            .find(|s| s.metric == metric && s.labels.get(label.0).is_some_and(|v| v == label.1))
+            .map(|s| s.value)
+    }
+
+    #[test]
+    fn la_croissance_se_lit_dans_lhistorique_que_pbs_renvoie_deja() {
+        let usages: Vec<DatastoreUsage> = extraire(DATASTORE_USAGE_REAL);
+        let growth = growth(&usages[0]).expect("dix points, dont huit mesurés");
+        // De 80 % à 87 % sur neuf jours, deux trous sautés plutôt que comblés :
+        // un peu moins d'un point de pourcentage d'occupation par jour.
+        assert!((growth.percent_per_day - 0.78).abs() < 0.02, "{growth:?}");
+        assert_eq!(growth.days, 9.0);
+        // La même pente en octets, puisque la taille du datastore est connue.
+        let bytes = growth.bytes_per_day(usages[0].total).unwrap();
+        assert!((bytes - 0.0078 * 247_212_277_760.0).abs() < 5e7, "{bytes}");
+        // Sans taille, pas de conversion inventée.
+        assert_eq!(growth.bytes_per_day(None), None);
+    }
+
+    #[test]
+    fn un_historique_trop_court_ou_vide_ne_donne_aucune_pente() {
+        // Trois points : une extrapolation faite là-dessus serait une invention.
+        let usages: Vec<DatastoreUsage> = extraire(DATASTORE_USAGE);
+        assert!(growth(&usages[0]).is_none());
+
+        // Un serveur neuf renvoie un historique de `null` : rien à mesurer.
+        let vide: Vec<DatastoreUsage> = serde_json::from_str::<Envelope<Vec<DatastoreUsage>>>(
+            r#"{"data":[{"store":"main","total":100,"used":10,
+                "history":[null,null,null,null,null,null,null,null,null,null],
+                "history-delta":1800}]}"#,
+        )
+        .unwrap()
+        .data;
+        assert!(growth(&vide[0]).is_none());
+
+        // Une occupation qui stagne a une pente nulle, et c'est une mesure.
+        let plat: Vec<DatastoreUsage> = serde_json::from_str::<Envelope<Vec<DatastoreUsage>>>(
+            r#"{"data":[{"store":"main","total":100,"used":50,
+                "history":[0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5],
+                "history-delta":1800}]}"#,
+        )
+        .unwrap()
+        .data;
+        assert_eq!(growth(&plat[0]).unwrap().percent_per_day, 0.0);
+    }
+
+    #[test]
+    fn letat_de_montage_et_le_fond_de_stockage_deviennent_des_series() {
+        let usages: Vec<DatastoreUsage> = extraire(DATASTORE_USAGE_REAL);
+        let samples = datastore_samples(&usages[0], 1_790_000_000, 1_000);
+        assert_eq!(
+            etiquetee(&samples, "pbs_datastore_removable_unmounted", ("datastore", "main")),
+            Some(0.0)
+        );
+        assert_eq!(
+            etiquetee(&samples, "pbs_datastore_backend_info", ("backend", "filesystem")),
+            Some(1.0)
+        );
+        assert!(
+            etiquetee(&samples, "pbs_datastore_growth_percent_per_day", ("datastore", "main"))
+                .is_some()
+        );
+
+        // Un datastore amovible débranché : pas d'erreur, mais rien ne s'y écrira.
+        let debranche: Vec<DatastoreUsage> = serde_json::from_str::<Envelope<Vec<DatastoreUsage>>>(
+            r#"{"data":[{"store":"usb","total":100,"used":10,"avail":90,"mount-status":"notmounted"}]}"#,
+        )
+        .unwrap()
+        .data;
+        let samples = datastore_samples(&debranche[0], 1_790_000_000, 1_000);
+        assert_eq!(
+            etiquetee(&samples, "pbs_datastore_removable_unmounted", ("datastore", "usb")),
+            Some(1.0)
+        );
+
+        // Un PBS antérieur ne dit rien du montage : pas de série inventée.
+        let usages: Vec<DatastoreUsage> = extraire(DATASTORE_USAGE);
+        let samples = datastore_samples(&usages[0], 1_790_000_000, 1_000);
+        assert!(!samples.iter().any(|s| s.metric == "pbs_datastore_removable_unmounted"));
+    }
+
+    #[test]
+    fn les_decomptes_par_type_comptent_les_types_absents_comme_des_zeros() {
+        let status: DatastoreStatus = extraire(DATASTORE_STATUS);
+        let samples = counts_samples("main", &status, 1_000);
+        assert_eq!(etiquetee(&samples, "pbs_datastore_groups", ("type", "vm")), Some(12.0));
+        assert_eq!(etiquetee(&samples, "pbs_datastore_snapshots", ("type", "vm")), Some(97.0));
+        assert_eq!(etiquetee(&samples, "pbs_datastore_groups", ("type", "host")), Some(3.0));
+        // `ct: null` veut dire « aucun conteneur ici », pas « je ne sais pas ».
+        assert_eq!(etiquetee(&samples, "pbs_datastore_groups", ("type", "ct")), Some(0.0));
+        assert_eq!(counts_views(&status).len(), 4);
+
+        // Sans `verbose`, PBS ne renvoie pas `counts` : aucune série.
+        let sans: DatastoreStatus = extraire(r#"{"data":{"total":1,"used":1,"avail":0}}"#);
+        assert!(counts_samples("main", &sans, 1_000).is_empty());
+        assert!(counts_views(&sans).is_empty());
+    }
+
+    #[test]
+    fn la_gc_globale_porte_la_duree_et_les_chunks_illisibles() {
+        let list: Vec<GcStatus> = extraire(ADMIN_GC);
+        let status = &list[0];
+        assert_eq!(status.store.as_deref(), Some("main"));
+        let samples = gc_samples("main", status, 1_000);
+        assert_eq!(
+            etiquetee(&samples, "pbs_gc_last_duration_seconds", ("datastore", "main")),
+            Some(142.0)
+        );
+        assert_eq!(etiquetee(&samples, "pbs_gc_bad_chunks", ("datastore", "main")), Some(3.0));
+        assert_eq!(
+            etiquetee(&samples, "pbs_gc_last_removed_chunks", ("datastore", "main")),
+            Some(4.0)
+        );
+        assert_eq!(etiquetee(&samples, "pbs_gc_disk_chunks", ("datastore", "main")), Some(17.0));
+        assert_eq!(etiquetee(&samples, "pbs_gc_last_run_ok", ("datastore", "main")), Some(1.0));
+
+        let view = gc_view(status);
+        assert_eq!(view.bad_chunks, Some(3.0));
+        assert_eq!(view.duration_seconds, Some(142.0));
+        assert_eq!(view.schedule.as_deref(), Some("daily"));
+
+        // Un statut d'avant `/admin/gc` n'a ni durée ni compteurs de chunks :
+        // aucune série, plutôt que des zéros qui ressembleraient à une mesure.
+        let ancien: GcStatus = extraire(r#"{"data":{"index-data-bytes":100,"disk-bytes":50}}"#);
+        let samples = gc_samples("main", &ancien, 1_000);
+        assert!(!samples.iter().any(|s| s.metric == "pbs_gc_bad_chunks"));
+        assert!(!samples.iter().any(|s| s.metric == "pbs_gc_last_duration_seconds"));
+    }
+
+    #[test]
+    fn les_operations_en_cours_disent_qui_tient_le_datastore() {
+        let operations: ActiveOperations = extraire(r#"{"data":{"read":1,"write":2}}"#);
+        let samples = active_operations_samples("main", &operations, 1_000);
+        assert_eq!(
+            etiquetee(&samples, "pbs_datastore_active_reads", ("datastore", "main")),
+            Some(1.0)
+        );
+        assert_eq!(
+            etiquetee(&samples, "pbs_datastore_active_writes", ("datastore", "main")),
+            Some(2.0)
+        );
+        assert!(active_operations_samples("main", &ActiveOperations::default(), 0).is_empty());
+    }
+
+    #[test]
+    fn le_mode_de_maintenance_se_lit_dans_les_deux_graphies() {
+        let configs: Vec<DatastoreConfig> = extraire(
+            r#"{"data":[
+              {"name":"main","path":"/srv/main"},
+              {"name":"archive","path":"/srv/archive","maintenance-mode":"type=offline,message=\"disk swap\""},
+              {"name":"scratch","path":"/srv/scratch","maintenance-mode":"read-only"}
+            ]}"#,
+        );
+        let samples = datastore_maintenance_samples(&configs, 1_000);
+        // Un datastore qui fonctionne produit bien la série à zéro : c'est une
+        // mesure, et c'est elle qui fait retomber l'alerte.
+        assert_eq!(
+            etiquetee(&samples, "pbs_datastore_maintenance", ("datastore", "main")),
+            Some(0.0)
+        );
+        assert_eq!(
+            etiquetee(&samples, "pbs_datastore_maintenance", ("datastore", "archive")),
+            Some(1.0)
+        );
+        let archive = samples
+            .iter()
+            .find(|s| s.labels.get("datastore").is_some_and(|v| v == "archive"))
+            .unwrap();
+        assert_eq!(archive.labels.get("mode").map(String::as_str), Some("offline"));
+        let scratch = samples
+            .iter()
+            .find(|s| s.labels.get("datastore").is_some_and(|v| v == "scratch"))
+            .unwrap();
+        assert_eq!(scratch.labels.get("mode").map(String::as_str), Some("read-only"));
     }
 
     fn valeur(samples: &[Sample], cle: &str) -> Option<f64> {

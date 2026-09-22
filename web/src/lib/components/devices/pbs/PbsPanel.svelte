@@ -14,6 +14,8 @@
 	import DatastoreHealth from './DatastoreHealth.svelte';
 	import FailureList from './FailureList.svelte';
 	import JobTable from './JobTable.svelte';
+	import NodeHealth from './NodeHealth.svelte';
+	import TapePanel from './TapePanel.svelte';
 	import { formatAgo, formatUnix } from './format';
 
 	interface Props {
@@ -33,6 +35,17 @@
 
 	const probedAt = $derived(calendar?.probed_at ?? jobs?.probed_at ?? health?.probed_at ?? null);
 	const failingJobs = $derived((jobs?.jobs ?? []).filter((j) => j.enabled && j.last_run_ok === false).length);
+	/** Units the backup server cannot do without; the rest never raise a count. */
+	const REQUIRED_SERVICES = ['proxmox-backup', 'proxmox-backup-proxy', 'proxmox-backup-banner'];
+	const stoppedServices = $derived(
+		(health?.services ?? []).filter((s) => !s.running && REQUIRED_SERVICES.includes(s.service)).length
+	);
+	const failingTapeJobs = $derived(
+		(health?.tape?.jobs ?? []).filter((j) => {
+			const state = j.last_run_state?.toUpperCase();
+			return state !== undefined && state !== 'OK' && !state.startsWith('WARNINGS');
+		}).length
+	);
 
 	async function load(signal?: AbortSignal) {
 		error = null;
@@ -130,6 +143,22 @@
 			<JobTable jobs={jobs?.jobs ?? []} />
 		</Panel>
 
+		{#if health?.tape}
+			<Panel
+				title="Tape"
+				description="The offline copy: tape backup jobs, media pools, drives and the tapes themselves."
+				padded={false}
+				class="rise-in"
+			>
+				{#snippet aside()}
+					{#if failingTapeJobs > 0}
+						<Plate tone="warning" label={`${failingTapeJobs} failing`} />
+					{/if}
+				{/snippet}
+				<TapePanel tape={health.tape} />
+			</Panel>
+		{/if}
+
 		<Panel
 			title="Datastores and disks"
 			description={health?.version ? `Proxmox Backup Server ${health.version}.` : undefined}
@@ -141,6 +170,25 @@
 				datastores={health?.datastores ?? []}
 				disks={health?.disks ?? []}
 				zpools={health?.zpools ?? []}
+			/>
+		</Panel>
+
+		<Panel
+			title="Server"
+			description="Services, package versions, certificate and traffic limits of the backup server itself."
+			padded={false}
+			class="rise-in"
+		>
+			{#snippet aside()}
+				{#if stoppedServices > 0}
+					<Plate tone="warning" label={`${stoppedServices} service${stoppedServices === 1 ? '' : 's'} stopped`} />
+				{/if}
+			{/snippet}
+			<NodeHealth
+				services={health?.services ?? []}
+				packages={health?.packages ?? []}
+				certificates={health?.certificates ?? []}
+				traffic={health?.traffic ?? []}
 			/>
 		</Panel>
 	</div>

@@ -448,7 +448,7 @@ hypervisor). `404` when the device does not exist, `400` when it is not a
 
 | Method | Route | Purpose |
 |---|---|---|
-| `GET` | `/api/targets/{id}/proxmox/guests` | One object per VM or container, sorted by node then VMID: `vmid`, `name`, `node`, `kind` (`qemu`, `lxc`), `status` (`running`, `stopped`, `paused`, `suspended`, `template`, `unknown`), `cpu_percent` (of the allocated cores), `cpu_count`, `memory_used_bytes`, `memory_total_bytes`, `memory_percent`, `balloon_bytes`, `disk_used_bytes`, `disk_total_bytes`, `disk_percent`, `agent` (`true` guest agent answered, `false` enabled but silent, `null` none), `network_in_bps`, `network_out_bps`, `disk_read_bps`, `disk_write_bps`, `uptime_seconds`, `last_backup_age_seconds`, `ha_state`. Every unknown value is `null` — a VM without guest agent has `disk_total_bytes` but `disk_used_bytes: null`; a stopped guest keeps its sizes and loses its measurements. |
+| `GET` | `/api/targets/{id}/proxmox/guests` | One object per VM or container, sorted by node then VMID: `vmid`, `name`, `node`, `kind` (`qemu`, `lxc`), `status` (`running`, `stopped`, `paused`, `suspended`, `template`, `unknown`), `cpu_percent` (of the allocated cores), `cpu_count`, `memory_used_bytes`, `memory_total_bytes`, `memory_percent`, `balloon_bytes`, `disk_used_bytes`, `disk_total_bytes`, `disk_percent`, `agent` (`true` guest agent answered, `false` enabled but silent, `null` none), `network_in_bps`, `network_out_bps`, `disk_read_bps`, `disk_write_bps`, `uptime_seconds`, `last_backup_age_seconds`, `ha_state`, `pool` (its resource pool), `lock` (only while a lock is held: `backup`, `migrate`…), `os` and `ip` (seen from inside the guest, refreshed hourly). Every unknown value is `null` — a VM without guest agent has `disk_total_bytes` but `disk_used_bytes: null`; a stopped guest keeps its sizes and loses its measurements. |
 
 ```json
 [
@@ -458,10 +458,22 @@ hypervisor). `404` when the device does not exist, `400` when it is not a
     "memory_used_bytes": 1879048192, "memory_total_bytes": 4294967296, "memory_percent": 43.75, "balloon_bytes": null,
     "disk_used_bytes": 61203283968, "disk_total_bytes": 107374182400, "disk_percent": 57.0, "agent": null,
     "network_in_bps": 1024.0, "network_out_bps": 512.0, "disk_read_bps": 0.0, "disk_write_bps": 2048.0,
-    "uptime_seconds": 3196800, "last_backup_age_seconds": 25200, "ha_state": "started"
+    "uptime_seconds": 3196800, "last_backup_age_seconds": 25200, "ha_state": "started",
+    "pool": "production", "lock": null,
+    "os": "Debian GNU/Linux 12 (bookworm)", "ip": "192.168.10.60"
   }
 ]
 ```
+
+## Proxmox VE nodes and Ceph
+
+The **Nodes** and **Ceph** sections of the same device page, read from the same
+last probe. Same status codes as above.
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/targets/{id}/proxmox/nodes` | One object per node, sorted by name: `name`, `up`, `cpu_percent`, `memory_percent`, `rootfs_percent`, `uptime_seconds`, `version` (the `pve-manager` release installed on that node), `services_down` (unit names of the daemons that are stopped or failed), `interfaces_offline` (interfaces set to start at boot that are not up), `thin_pools` (`name`, `vg`, `used_percent`, `metadata_used_percent`, `size_bytes`) and `volume_groups` (`name`, `used_percent`, `size_bytes`). A node that stopped answering keeps its entry with `up: false`. |
+| `GET` | `/api/targets/{id}/proxmox/ceph` | `available` (`false` when the cluster has no Ceph — the UI then draws no section at all), `health` (0 OK, 1 WARN, 2 ERR, 3 unknown), `health_status`, `bytes_used`, `bytes_total`, `used_percent`, `osds_total`, `osds_up`, `osds_in`, `osds` (`name`, `host`, `device_class`, `up`, `in`, `used_percent`, `used_bytes`, `total_bytes`, `apply_latency_ms`, `commit_latency_ms`), `pools` (`name`, `used_percent`, `used_bytes`, `size`, `min_size`, `pg_num`, `pg_num_optimal`, `autoscale`), `filesystems` (CephFS names), `flags` (OSD flags currently set, such as `noout`) and `muted_checks` (health checks silenced, which `HEALTH_OK` no longer mentions). |
 
 ## Proxmox Backup Server
 
@@ -477,6 +489,12 @@ it is not a `pbs` target.
 | `GET` | `/api/targets/{id}/pbs/health` | Datastores (usage, estimated full date), disks (SMART, wearout) and ZFS pools. |
 | `GET` | `/api/targets/{id}/pbs/tasks/{upid}/log` | The log of one task, fetched from the server: `{"upid", "lines": […]}`. |
 | `GET` | `/api/targets/{id}/pbs/disks/smart` | SMART attributes of every disk. |
+| `GET` | `/api/targets/{id}/pdm/remotes` | Proxmox Datacenter Manager: estate totals (`estate`) and one row per federated instance (`id`, `kind`, `reachable`, `error`, `version`, `version_behind`, node and guest counts, memory and storage, `subscription`, `last_collection`, `tasks_failed`), unreachable first. |
+| `GET` | `/api/targets/{id}/pdm/failures?days=14` | Tasks that failed across the estate: `upid`, `remote`, `worker_type`, `kind`, `worker_id`, `node`, `start`, `end`, `error`. |
+| `GET` | `/api/targets/{id}/pdm/health` | The console host: CPU, memory, root filesystem, uptime, certificates, pending updates and subscription. |
+| `GET` | `/api/targets/{id}/pmg/queues` | Proxmox Mail Gateway: the four Postfix queues in reading order (`queue`, `messages`, `domains`, `oldest_age_seconds`, `top_domains`, `stuck`), plus `total_messages` and a gateway-wide `stuck`. `oldest_age_seconds` is a lower bound: qshape reports age brackets. |
+| `GET` | `/api/targets/{id}/pmg/traffic` | Today's totals (`mail`), the recent traffic curve (`recent`), the spam-score histogram, the viruses caught today, and quarantine counts (`quarantine`). Counts only: no message content. |
+| `GET` | `/api/targets/{id}/pmg/health` | One entry per node (system, services, `signatures` with `family`, `age_seconds` and `stale`, `expiring_certificates`, updates, subscription), the `cluster` members with their sync state, and `stopped_services` across nodes. |
 
 ## Synology
 

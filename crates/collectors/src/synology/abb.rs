@@ -276,7 +276,7 @@ mod tests {
          "last_result":{"backup_type":2,"error_count":0,"job_action":1,"result_id":593,"status":2,
                         "success_count":2,"task_id":5,"time_end":1741946439,"time_start":1741946267,
                         "transfered_bytes":2122801152,"warning_count":0}},
-        {"task_id":6,"task_name":"Lab VMs","source_type":1,"backup_type":1,
+        {"task_id":6,"task_name":"Office VMs","source_type":1,"backup_type":1,
          "device_count":3,"devices":[],"next_trigger_time":1742176800,
          "last_result":{"job_action":131072,"result_id":601,"status":2,"task_id":6,
                         "time_end":1742000000,"time_start":1741999000}}
@@ -409,11 +409,11 @@ mod tests {
         let state = TaskState { task, last_success_s: None };
         let samples = task_samples(&[state], 1_742_000_000, 1000);
         assert!(samples.iter().all(|s| s.metric != "abb_task_last_success_seconds"));
-        assert_eq!(valeur(&samples, "abb_task_last_status", "Lab VMs"), Some(STATUS_OK));
+        assert_eq!(valeur(&samples, "abb_task_last_status", "Office VMs"), Some(STATUS_OK));
         let status = samples.iter().find(|s| s.metric == "abb_task_last_status").unwrap();
         assert_eq!(status.labels["source_type"], "vm");
         // `device_count` prime sur la liste d'appareils, absente ici.
-        assert_eq!(valeur(&samples, "abb_task_device_count", "Lab VMs"), Some(3.0));
+        assert_eq!(valeur(&samples, "abb_task_device_count", "Office VMs"), Some(3.0));
     }
 
     #[test]
@@ -481,7 +481,7 @@ mod end_to_end_tests {
     /// `task_id → (nom, type de source, appareils)`, comme les renvoie `SYNO.ActiveBackup.Task`.
     const TASKS: &[(i64, &str, i64, &[&str])] = &[
         (5, "Office laptops", 2, &["laptop-anna", "laptop-ben"]),
-        (6, "Lab VMs", 1, &["vm-web", "vm-db", "vm-ci"]),
+        (6, "Office VMs", 1, &["vm-web", "vm-db", "vm-ci"]),
         (7, "File server share", 4, &["fileserver-01"]),
     ];
     const FAILED_TASK: i64 = 6;
@@ -662,12 +662,12 @@ mod end_to_end_tests {
         );
 
         // Les VM : en échec depuis trois nuits, dernière réussite il y a trois jours.
-        assert_eq!(valeur(&samples, "abb_task_last_status", "Lab VMs"), Some(0.0));
-        let age = valeur(&samples, "abb_task_last_success_seconds", "Lab VMs").unwrap();
+        assert_eq!(valeur(&samples, "abb_task_last_status", "Office VMs"), Some(0.0));
+        let age = valeur(&samples, "abb_task_last_success_seconds", "Office VMs").unwrap();
         assert!((age - (3.0 * 86_400.0 + 3060.0)).abs() < 30.0, "{age}");
         let status = samples
             .iter()
-            .find(|s| s.metric == "abb_task_last_status" && s.labels["task"] == "Lab VMs")
+            .find(|s| s.metric == "abb_task_last_status" && s.labels["task"] == "Office VMs")
             .unwrap();
         assert_eq!(status.labels["source_type"], "vm");
         assert_eq!(status.labels["result"], "fail");

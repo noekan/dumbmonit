@@ -13,6 +13,8 @@ mod metrics;
 mod notify_policy;
 mod oidc;
 mod pbs;
+mod pdm;
+mod pmg;
 mod proxmox;
 mod push;
 mod relay;
@@ -96,6 +98,10 @@ pub fn router(state: AppState) -> Router {
         .merge(status_pages::routes())
         // Calendrier des sauvegardes et travaux d'un Proxmox Backup Server (`pbs.rs`).
         .merge(pbs::routes())
+        // Instances fédérées et santé d'un Proxmox Datacenter Manager (`pdm.rs`).
+        .merge(pdm::routes())
+        // Files d'attente, filtrage et santé d'une Proxmox Mail Gateway (`pmg.rs`).
+        .merge(pmg::routes())
         // Moniteurs en poussée : jeton d'une cible et sa régénération (`push.rs`).
         .merge(push::ui_routes())
         // `route_layer` plutôt que `layer` : le garde ne s'applique qu'aux routes

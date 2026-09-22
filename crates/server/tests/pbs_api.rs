@@ -6,8 +6,9 @@ mod common;
 use axum::http::StatusCode;
 use common::TestApp;
 use dumbmonit_collectors::pbs::{
-    DatastoreView, DiskView, GcView, GroupView, JobView, ProbeView, SnapshotView, TaskView,
-    ZpoolView,
+    CertificateView, DatastoreView, DiskView, GcView, GroupView, JobView, MediaPoolView,
+    PackageView, ProbeView, ServiceView, SnapshotView, TapeJobView, TapeView, TaskView,
+    TrafficRuleView, TypeCountView, ZpoolView,
 };
 use dumbmonit_server::db;
 use serde_json::{Value, json};
@@ -34,6 +35,13 @@ fn vue(probed_at: i64) -> ProbeView {
             avail_bytes: Some(1.2e12),
             estimated_full_at: Some(probed_at + 200 * DAY),
             dedup_factor: Some(12.4),
+            mount_status: Some("nonremovable".into()),
+            backend: Some("filesystem".into()),
+            counts: vec![TypeCountView { backup_type: "vm".into(), groups: 12.0, snapshots: 97.0 }],
+            growth_bytes_per_day: Some(4.2e9),
+            history_days: Some(28.0),
+            active_reads: Some(1.0),
+            active_writes: Some(2.0),
             gc: Some(GcView {
                 last_run_state: Some("OK".into()),
                 last_run_end: Some(last_night + 2 * HOUR),
@@ -146,6 +154,71 @@ fn vue(probed_at: i64) -> ProbeView {
             health: "DEGRADED".into(),
             ..Default::default()
         }],
+        // Le nœud lui-même : le mandataire arrêté, le paquet mis à niveau sans
+        // redémarrage, le certificat qui approche, la limite de débit.
+        services: vec![
+            ServiceView {
+                service: "proxmox-backup".into(),
+                state: Some("running".into()),
+                unit_state: Some("enabled".into()),
+                running: true,
+                enabled: Some(true),
+                ..Default::default()
+            },
+            ServiceView {
+                service: "proxmox-backup-proxy".into(),
+                state: Some("dead".into()),
+                unit_state: Some("enabled".into()),
+                running: false,
+                enabled: Some(true),
+                ..Default::default()
+            },
+        ],
+        packages: vec![PackageView {
+            package: "proxmox-backup-server".into(),
+            installed: Some("3.4.1-1".into()),
+            available: Some("3.4.2-1".into()),
+            running: Some("3.4.0".into()),
+            upgradable: true,
+            restart_pending: Some(true),
+            ..Default::default()
+        }],
+        certificates: vec![CertificateView {
+            filename: "proxy.pem".into(),
+            subject: Some("CN=pbs.lan".into()),
+            issuer: Some("CN=pbs.lan".into()),
+            not_after: Some(probed_at + 10 * DAY),
+            ..Default::default()
+        }],
+        traffic: vec![TrafficRuleView {
+            name: "tc-wan".into(),
+            networks: vec!["0.0.0.0/0".into()],
+            limit_in_bytes: Some(1.0e8),
+            limit_out_bytes: Some(5.0e7),
+            rate_in_bytes: Some(1_048_576.0),
+            rate_out_bytes: Some(0.0),
+            ..Default::default()
+        }],
+        tape: Some(TapeView {
+            jobs: vec![TapeJobView {
+                id: "t-weekly".into(),
+                datastore: "main".into(),
+                pool: Some("lto-weekly".into()),
+                drive: Some("lto8".into()),
+                schedule: Some("sat 22:00".into()),
+                last_run_state: Some("TASK ERROR: no free media in pool".into()),
+                last_run_end: Some(last_night - 6 * DAY),
+                ..Default::default()
+            }],
+            pools: vec![MediaPoolView {
+                name: "lto-weekly".into(),
+                allocation: Some("weekly".into()),
+                media_total: 2,
+                media_expired: 1,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
     }
 }
 
@@ -206,6 +279,10 @@ async fn avant_la_premiere_sonde_les_panneaux_sont_vides_mais_repondent() {
     let health = t.app.get(&format!("/api/targets/{}/pbs/health", t.id), Some(&t.cookie)).await;
     assert!(health.body["probed_at"].is_null());
     assert_eq!(health.body["datastores"], json!([]));
+    // Rien de lu n'est rien à montrer : surtout pas une section bande vide sur
+    // un serveur qui n'a pas de bande.
+    assert_eq!(health.body["services"], json!([]));
+    assert!(health.body["tape"].is_null());
 }
 
 #[tokio::test]
@@ -268,6 +345,18 @@ async fn le_calendrier_les_echecs_et_les_travaux_viennent_de_la_derniere_sonde()
     assert_eq!(health.body["datastores"][0]["dedup_factor"], 12.4);
     assert_eq!(health.body["disks"][0]["status"], "failed");
     assert_eq!(health.body["zpools"][0]["health"], "DEGRADED");
+    // Ce que la sonde a appris du nœud lui-même est servi tel quel.
+    assert_eq!(health.body["datastores"][0]["mount_status"], "nonremovable");
+    assert_eq!(health.body["datastores"][0]["active_writes"], 2.0);
+    assert_eq!(health.body["datastores"][0]["growth_bytes_per_day"], 4.2e9);
+    assert_eq!(health.body["datastores"][0]["counts"][0]["snapshots"], 97.0);
+    assert_eq!(health.body["services"][1]["service"], "proxmox-backup-proxy");
+    assert_eq!(health.body["services"][1]["running"], false);
+    assert_eq!(health.body["packages"][0]["restart_pending"], true);
+    assert_eq!(health.body["certificates"][0]["filename"], "proxy.pem");
+    assert_eq!(health.body["traffic"][0]["limit_in_bytes"], 1.0e8);
+    assert_eq!(health.body["tape"]["jobs"][0]["pool"], "lto-weekly");
+    assert_eq!(health.body["tape"]["pools"][0]["media_expired"], 1);
 }
 
 #[tokio::test]

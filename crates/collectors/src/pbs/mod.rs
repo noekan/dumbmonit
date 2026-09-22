@@ -38,6 +38,11 @@
 //! | `jobs` | `true` | Interroge les travaux planifiés (`/admin/sync`, `/admin/verify`, `/admin/prune`). |
 //! | `updates` | `true` | Interroge les mises à jour de paquets en attente. |
 //! | `disks` | `true` | Interroge les disques physiques et les pools ZFS du nœud. |
+//! | `services` | `true` | Interroge les unités systemd du nœud. |
+//! | `datastore_details` | `true` | Décomptes par type, opérations en cours et mode de maintenance de chaque datastore. |
+//! | `traffic_control` | `true` | Interroge les règles de limitation de débit et leur débit courant. |
+//! | `certificates` | `false` | Interroge les certificats — PBS exige `Sys.Modify` pour les lire. |
+//! | `tape` | `false` | Interroge l'étage bande : travaux, lecteurs, robotique, pools, médias. |
 //!
 //! # La vue, au-delà des métriques
 //!
@@ -56,12 +61,16 @@ mod client;
 mod jobs;
 mod metrics;
 mod model;
+mod node;
 mod options;
+mod tape;
 mod view;
 
 pub use view::{
-    DatastoreView, DiskSmart, DiskView, GcView, GroupView, HISTORY_DAYS, JobView, ProbeObserver,
-    ProbeView, SnapshotView, TaskLog, TaskView, ZpoolView,
+    CertificateView, DatastoreView, DiskSmart, DiskView, GcView, GroupView, HISTORY_DAYS, JobView,
+    MediaPoolView, PackageView, ProbeObserver, ProbeView, ServiceView, SnapshotView,
+    TapeChangerView, TapeDriveView, TapeJobView, TapeMediaView, TapeView, TaskLog, TaskView,
+    TrafficRuleView, TypeCountView, ZpoolView,
 };
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -78,8 +87,10 @@ use backup::{GroupKey, GroupSummary};
 use client::PbsClient;
 use jobs::JobKind;
 use model::{
-    AptUpdate, DatastoreUsage, DiskEntry, GcStatus, JobEntry, NamespaceEntry, NodeStatus,
-    SmartData, SnapshotEntry, TaskEntry, TaskLogLine, ZpoolEntry,
+    ActiveOperations, AptUpdate, CertificateInfo, DatastoreConfig, DatastoreStatus, DatastoreUsage,
+    DiskEntry, GcStatus, JobEntry, MediaPool, NamespaceEntry, NodeStatus, PackageVersion,
+    ServiceEntry, SmartData, SnapshotEntry, TapeBackupJob, TapeChanger, TapeDrive, TapeMedia,
+    TaskEntry, TaskLogLine, TrafficRule, ZpoolEntry,
 };
 use options::Options;
 
@@ -215,7 +226,24 @@ impl Collector for PbsCollector {
         };
         // Les inventaires sont indépendants : les enchaîner multiplierait
         // d'autant le temps passé sur un serveur lent.
-        let (node, usage, tasks, sync_jobs, verify_jobs, prune_jobs, updates, disks, zpools) = futures::join!(
+        let (
+            node,
+            usage,
+            tasks,
+            sync_jobs,
+            verify_jobs,
+            prune_jobs,
+            updates,
+            disks,
+            zpools,
+            services,
+            packages,
+            certificates,
+            traffic,
+            gc_list,
+            store_configs,
+            tape_inventory,
+        ) = futures::join!(
             pbs.get::<NodeStatus>("/nodes/localhost/status", &[]),
             pbs.get::<Vec<DatastoreUsage>>("/status/datastore-usage", &[]),
             pbs.get::<Vec<TaskEntry>>("/nodes/localhost/tasks", &tasks_query),
@@ -225,6 +253,20 @@ impl Collector for PbsCollector {
             optional_list::<AptUpdate>(&pbs, options.updates, "/nodes/localhost/apt/update"),
             optional_list::<DiskEntry>(&pbs, options.disks, "/nodes/localhost/disks/list"),
             optional_list::<ZpoolEntry>(&pbs, options.disks, "/nodes/localhost/disks/zfs"),
+            optional_list::<ServiceEntry>(&pbs, options.services, "/nodes/localhost/services"),
+            optional_list::<PackageVersion>(&pbs, options.updates, "/nodes/localhost/apt/versions"),
+            optional_list::<CertificateInfo>(
+                &pbs,
+                options.certificates,
+                "/nodes/localhost/certificates/info"
+            ),
+            optional_list::<TrafficRule>(&pbs, options.traffic_control, "/admin/traffic-control"),
+            // Un seul appel pour la GC de tous les datastores, là où il en
+            // fallait un par datastore — et il porte en plus la durée, la
+            // planification et le compte de chunks illisibles.
+            optional_list::<GcStatus>(&pbs, true, "/admin/gc"),
+            optional_list::<DatastoreConfig>(&pbs, options.datastore_details, "/config/datastore"),
+            collect_tape(&pbs, options.tape),
         );
 
         match node {
@@ -265,6 +307,60 @@ impl Collector for PbsCollector {
         if let Some(list) = settle(updates, &mut errors, target.id, "/nodes/localhost/apt/update") {
             samples.extend(jobs::updates_samples(&list, ts_ms));
         }
+        if let Some(list) = settle(services, &mut errors, target.id, "/nodes/localhost/services") {
+            samples.extend(node::service_samples(&list, ts_ms));
+            view.services = node::service_views(&list);
+        }
+        if let Some(list) =
+            settle(packages, &mut errors, target.id, "/nodes/localhost/apt/versions")
+        {
+            samples.extend(node::package_samples(&list, ts_ms));
+            view.packages = node::package_views(&list);
+        }
+        // Les certificats et les règles de débit sont facultatifs : l'appel est
+        // désactivé, ou le privilège manque. Dans les deux cas, rien à compter.
+        if let Some(Ok(list)) = certificates {
+            samples.extend(node::certificate_samples(&list, now_s, ts_ms));
+            view.certificates = node::certificate_views(&list);
+        }
+        if let Some(list) = settle(traffic, &mut errors, target.id, "/admin/traffic-control") {
+            samples.extend(node::traffic_samples(&list, ts_ms));
+            view.traffic = node::traffic_views(&list);
+        }
+        if let Some(inventory) = tape_inventory {
+            samples.extend(tape::tape_samples(&inventory, now_s, ts_ms));
+            view.tape = tape::tape_view(&inventory);
+        }
+
+        // La GC de tous les datastores en un appel, indexée par datastore : ce
+        // qu'il faut pour que chaque datastore n'ait plus à la demander.
+        let gc_by_store: BTreeMap<String, GcStatus> = match gc_list {
+            Some(Ok(list)) => list
+                .into_iter()
+                .filter_map(|status| Some((status.store.clone()?, status)))
+                .collect(),
+            // Un PBS trop ancien pour `/admin/gc`, ou un privilège absent : le
+            // repli par datastore prend le relais, ce n'est pas une erreur.
+            Some(Err(error)) => {
+                debug!(target_id = target.id, %error, "GC globale indisponible, repli par datastore");
+                BTreeMap::new()
+            }
+            None => BTreeMap::new(),
+        };
+
+        let maintenance_by_store: BTreeMap<String, String> =
+            match settle(store_configs, &mut errors, target.id, "/config/datastore") {
+                Some(configs) => {
+                    samples.extend(metrics::datastore_maintenance_samples(&configs, ts_ms));
+                    configs
+                        .iter()
+                        .filter_map(|config| {
+                            Some((config.name.clone(), config.maintenance_kind()?))
+                        })
+                        .collect()
+                }
+                None => BTreeMap::new(),
+            };
         // Les disques et les pools sont facultatifs deux fois : un PBS sans ZFS
         // répond une liste vide ou une erreur — ni l'une ni l'autre n'est un
         // défaut de collecte.
@@ -295,10 +391,16 @@ impl Collector for PbsCollector {
                 // Un datastore en erreur ne sera pas interrogé : chaque appel
                 // échouerait et attendrait le délai complet pour rien.
                 let outcomes = futures::future::join_all(
-                    selected
-                        .iter()
-                        .filter(|usage| usage.is_available())
-                        .map(|usage| collect_datastore(&pbs, &usage.store, &permits, ts_ms)),
+                    selected.iter().filter(|usage| usage.is_available()).map(|usage| {
+                        collect_datastore(
+                            &pbs,
+                            &usage.store,
+                            &permits,
+                            gc_by_store.get(&usage.store),
+                            options.datastore_details,
+                            ts_ms,
+                        )
+                    }),
                 )
                 .await;
 
@@ -320,6 +422,10 @@ impl Collector for PbsCollector {
                             gc_state_known.insert(outcome.store.clone());
                         }
                         entry.gc = outcome.gc;
+                        entry.counts = outcome.counts;
+                        entry.active_reads = outcome.active_reads;
+                        entry.active_writes = outcome.active_writes;
+                        entry.maintenance = maintenance_by_store.get(&outcome.store).cloned();
                     }
                 }
 
@@ -518,6 +624,35 @@ fn settle<T>(
     }
 }
 
+/// L'étage bande, ou `None` quand l'option est fermée.
+///
+/// Les cinq appels sont indulgents jusqu'au bout : un PBS sans support de
+/// bande, un `tape.cfg` illisible ou un privilège `Tape.Audit` absent répondent
+/// une erreur, et aucune de ces trois situations n'est un défaut de collecte.
+/// On ne renvoie donc que ce qui a abouti — rien, le plus souvent.
+async fn collect_tape(pbs: &PbsClient, enabled: bool) -> Option<tape::Tape> {
+    if !enabled {
+        return None;
+    }
+    async fn list<T: DeserializeOwned>(pbs: &PbsClient, path: &str) -> Vec<T> {
+        match pbs.get::<Vec<T>>(path, &[]).await {
+            Ok(list) => list,
+            Err(error) => {
+                debug!(path, %error, "étage bande non interrogeable, ignoré");
+                Vec::new()
+            }
+        }
+    }
+    let (jobs, drives, changers, pools, media) = futures::join!(
+        list::<TapeBackupJob>(pbs, "/tape/backup"),
+        list::<TapeDrive>(pbs, "/tape/drive"),
+        list::<TapeChanger>(pbs, "/tape/changer"),
+        list::<MediaPool>(pbs, "/config/media-pool"),
+        list::<TapeMedia>(pbs, "/tape/media/list"),
+    );
+    Some(tape::Tape { jobs, drives, changers, pools, media })
+}
+
 /// Ce qu'un datastore a livré.
 #[derive(Default)]
 struct DatastoreOutcome {
@@ -530,6 +665,10 @@ struct DatastoreOutcome {
     gc_last_success: Option<i64>,
     gc: Option<GcView>,
     dedup_factor: Option<f64>,
+    /// Groupes et instantanés par type de sauvegarde.
+    counts: Vec<view::TypeCountView>,
+    active_reads: Option<f64>,
+    active_writes: Option<f64>,
     errors: u32,
 }
 
@@ -543,22 +682,75 @@ async fn collect_datastore(
     pbs: &PbsClient,
     store: &str,
     permits: &Semaphore,
+    gc: Option<&GcStatus>,
+    details: bool,
     ts_ms: i64,
 ) -> DatastoreOutcome {
     let mut outcome = DatastoreOutcome { store: store.to_string(), ..Default::default() };
 
-    {
+    // `/admin/gc` a déjà tout dit pour ce datastore : inutile de le redemander.
+    // Sinon — vieux PBS, privilège absent — le statut par datastore prend le
+    // relais, exactement comme avant.
+    let fetched;
+    let status = match gc {
+        Some(status) => Some(status),
+        None => {
+            let _permit = permits.acquire().await.ok();
+            match pbs.get::<GcStatus>(&format!("/admin/datastore/{store}/gc"), &[]).await {
+                Ok(status) => {
+                    fetched = status;
+                    Some(&fetched)
+                }
+                Err(error) => {
+                    outcome.errors += 1;
+                    warn!(datastore = store, %error, "statut de GC indisponible");
+                    None
+                }
+            }
+        }
+    };
+    if let Some(status) = status {
+        outcome.samples.extend(metrics::gc_samples(store, status, ts_ms));
+        outcome.gc_last_success = metrics::gc_last_success(status);
+        outcome.dedup_factor = metrics::dedup_factor(status);
+        outcome.gc = Some(metrics::gc_view(status));
+    }
+
+    // Décomptes et opérations en cours : deux appels légers, une option pour
+    // les fermer sur un serveur que l'on veut laisser tranquille.
+    if details {
         let _permit = permits.acquire().await.ok();
-        match pbs.get::<GcStatus>(&format!("/admin/datastore/{store}/gc"), &[]).await {
+        // Sans `verbose`, PBS ne renvoie que les tailles, déjà connues.
+        match pbs
+            .get::<DatastoreStatus>(
+                &format!("/admin/datastore/{store}/status"),
+                &[("verbose", "1".to_string())],
+            )
+            .await
+        {
             Ok(status) => {
-                outcome.samples.extend(metrics::gc_samples(store, &status, ts_ms));
-                outcome.gc_last_success = metrics::gc_last_success(&status);
-                outcome.dedup_factor = metrics::dedup_factor(&status);
-                outcome.gc = Some(metrics::gc_view(&status));
+                outcome.samples.extend(metrics::counts_samples(store, &status, ts_ms));
+                outcome.counts = metrics::counts_views(&status);
             }
             Err(error) => {
-                outcome.errors += 1;
-                warn!(datastore = store, %error, "statut de GC indisponible");
+                debug!(datastore = store, %error, "décomptes du datastore indisponibles");
+            }
+        }
+        match pbs
+            .get::<ActiveOperations>(&format!("/admin/datastore/{store}/active-operations"), &[])
+            .await
+        {
+            Ok(operations) => {
+                outcome.samples.extend(metrics::active_operations_samples(
+                    store,
+                    &operations,
+                    ts_ms,
+                ));
+                outcome.active_reads = operations.read.map(|n| n.0);
+                outcome.active_writes = operations.write.map(|n| n.0);
+            }
+            Err(error) => {
+                debug!(datastore = store, %error, "opérations en cours indisponibles");
             }
         }
     }

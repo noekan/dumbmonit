@@ -10,6 +10,8 @@ form always matches what this version can monitor.
 | [SNMP device](snmp.md) | `snmp` | community or SNMP v3 | Switch, router, NAS, UPS, printer |
 | [Proxmox VE](proxmox.md) | `proxmox` | API token or username/password | Hypervisor, cluster |
 | [Proxmox Backup Server](pbs.md) | `pbs` | API token or username/password | Backup server |
+| [Proxmox Datacenter Manager](pdm.md) | `pdm` | API token | Console federating several PVE clusters and PBS instances |
+| [Proxmox Mail Gateway](pmg.md) | `pmg` | username/password | Mail gateway filtering spam and viruses |
 | [Synology DSM](synology.md) | `synology` | username/password | DiskStation, RackStation |
 | [Server with agent](agent.md) | `agent` | none (enrollment token) | Linux, Windows, Raspberry Pi |
 | [Website or web API](services.md#http) | `http` | none, username/password or token | Health page, REST API |

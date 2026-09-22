@@ -1185,6 +1185,19 @@ export interface PbsGc {
 	next_run: number | null;
 	removed_bytes: number | null;
 	pending_bytes: number | null;
+	duration_seconds: number | null;
+	disk_chunks: number | null;
+	pending_chunks: number | null;
+	removed_chunks: number | null;
+	/** Chunks the GC could not read and left in place: corruption, not space. */
+	bad_chunks: number | null;
+}
+
+export interface PbsTypeCount {
+	/** `vm`, `ct`, `host` or `other`. */
+	backup_type: string;
+	groups: number;
+	snapshots: number;
 }
 
 export interface PbsDatastore {
@@ -1198,6 +1211,127 @@ export interface PbsDatastore {
 	estimated_full_at: number | null;
 	dedup_factor: number | null;
 	gc: PbsGc | null;
+	/** `nonremovable`, `mounted`, `notmounted`, `unknown`. */
+	mount_status: string | null;
+	/** `filesystem` or `s3`. */
+	backend: string | null;
+	/** Maintenance type in force (`offline`, `read-only`…), if any. */
+	maintenance: string | null;
+	counts: PbsTypeCount[];
+	/** Measured growth from PBS's own history; negative when pruning wins. */
+	growth_bytes_per_day: number | null;
+	/** Days of history the growth and PBS's forecast are computed over. */
+	history_days: number | null;
+	active_reads: number | null;
+	active_writes: number | null;
+}
+
+export interface PbsService {
+	service: string;
+	description: string | null;
+	/** `running`, `dead`, `failed`… */
+	state: string | null;
+	/** `enabled`, `disabled`, `static`, `masked`… */
+	unit_state: string | null;
+	running: boolean;
+	/** `null` for a unit pulled in by another one, which is neither. */
+	enabled: boolean | null;
+}
+
+export interface PbsPackage {
+	package: string;
+	title: string | null;
+	installed: string | null;
+	available: string | null;
+	/** Version actually running, for the two packages that report one. */
+	running: string | null;
+	upgradable: boolean;
+	/** `true` when the upgraded package is installed but not yet running. */
+	restart_pending: boolean | null;
+}
+
+export interface PbsCertificate {
+	filename: string;
+	subject: string | null;
+	issuer: string | null;
+	fingerprint: string | null;
+	not_after: number | null;
+	san: string[];
+}
+
+export interface PbsTrafficRule {
+	name: string;
+	comment: string | null;
+	networks: string[];
+	timeframe: string[];
+	limit_in_bytes: number | null;
+	limit_out_bytes: number | null;
+	rate_in_bytes: number | null;
+	rate_out_bytes: number | null;
+}
+
+export interface PbsTapeJob {
+	id: string;
+	datastore: string;
+	namespace: string | null;
+	pool: string | null;
+	drive: string | null;
+	comment: string | null;
+	schedule: string | null;
+	next_run: number | null;
+	next_media_label: string | null;
+	last_run_state: string | null;
+	last_run_end: number | null;
+	last_run_upid: string | null;
+}
+
+export interface PbsTapeDrive {
+	name: string;
+	path: string | null;
+	vendor: string | null;
+	model: string | null;
+	serial: string | null;
+	changer: string | null;
+	state: string | null;
+}
+
+export interface PbsTapeChanger {
+	name: string;
+	path: string | null;
+	vendor: string | null;
+	model: string | null;
+	serial: string | null;
+	export_slots: string | null;
+}
+
+export interface PbsMediaPool {
+	name: string;
+	allocation: string | null;
+	retention: string | null;
+	comment: string | null;
+	encrypted: boolean;
+	media_total: number;
+	media_expired: number;
+	bytes_used: number | null;
+}
+
+export interface PbsTapeMedia {
+	label: string;
+	pool: string | null;
+	/** `full`, `writable`, `unknown`, `damaged`, `retired`. */
+	status: string | null;
+	location: string | null;
+	media_set: string | null;
+	expired: boolean;
+	bytes_used: number | null;
+}
+
+export interface PbsTape {
+	jobs: PbsTapeJob[];
+	drives: PbsTapeDrive[];
+	changers: PbsTapeChanger[];
+	pools: PbsMediaPool[];
+	media: PbsTapeMedia[];
 }
 
 export interface PbsDisk {
@@ -1229,6 +1363,12 @@ export interface PbsHealth {
 	datastores: PbsDatastore[];
 	disks: PbsDisk[];
 	zpools: PbsZpool[];
+	services: PbsService[];
+	packages: PbsPackage[];
+	certificates: PbsCertificate[];
+	traffic: PbsTrafficRule[];
+	/** `null` when the server has no tape tier. */
+	tape: PbsTape | null;
 }
 
 export interface PbsTaskLog {
@@ -1345,6 +1485,95 @@ export interface ProxmoxGuest {
 	uptime_seconds: number | null;
 	last_backup_age_seconds: number | null;
 	ha_state: string | null;
+	/** Cluster pool the guest belongs to, `null` when it is in none. */
+	pool: string | null;
+	/** Lock held right now (`backup`, `migrate`, …); left on, it blocks every operation. */
+	lock: string | null;
+	/** Operating system seen from inside, `null` without a guest agent. */
+	os: string | null;
+	/** First routable address reported from inside, `null` when none is known. */
+	ip: string | null;
+}
+
+/** One LVM thin pool of a node: a full one puts every guest on it read-only. */
+export interface ProxmoxThinPool {
+	name: string;
+	vg: string;
+	used_percent: number | null;
+	/** The metadata volume is far smaller and often fills first. */
+	metadata_used_percent: number | null;
+	size_bytes: number | null;
+}
+
+export interface ProxmoxVolumeGroup {
+	name: string;
+	used_percent: number | null;
+	size_bytes: number | null;
+}
+
+/** One node of the cluster: is it there, does it hold up, and what is wrong with it. */
+export interface ProxmoxNode {
+	name: string;
+	up: boolean;
+	cpu_percent: number | null;
+	memory_percent: number | null;
+	rootfs_percent: number | null;
+	uptime_seconds: number | null;
+	version: string | null;
+	/** Core Proxmox daemons that are not running on this node. */
+	services_down: string[];
+	/** Interfaces set to start at boot that are not up. */
+	interfaces_offline: string[];
+	thin_pools: ProxmoxThinPool[];
+	volume_groups: ProxmoxVolumeGroup[];
+}
+
+export interface ProxmoxCephOsd {
+	name: string;
+	host: string;
+	device_class: string;
+	up: boolean;
+	in: boolean;
+	used_percent: number | null;
+	used_bytes: number | null;
+	total_bytes: number | null;
+	apply_latency_ms: number | null;
+	commit_latency_ms: number | null;
+}
+
+export interface ProxmoxCephPool {
+	name: string;
+	used_percent: number | null;
+	used_bytes: number | null;
+	size: number | null;
+	min_size: number | null;
+	pg_num: number | null;
+	pg_num_optimal: number | null;
+	autoscale: string | null;
+}
+
+/**
+ * Ceph, when there is one. `available` is false both when the cluster has no
+ * Ceph and when it has not been probed yet — the panel simply stays hidden.
+ */
+export interface ProxmoxCeph {
+	available: boolean;
+	/** 0 OK, 1 WARN, 2 ERR, 3 unknown. */
+	health: number | null;
+	health_status: string | null;
+	bytes_used: number | null;
+	bytes_total: number | null;
+	used_percent: number | null;
+	osds_total: number | null;
+	osds_up: number | null;
+	osds_in: number | null;
+	osds: ProxmoxCephOsd[];
+	pools: ProxmoxCephPool[];
+	filesystems: string[];
+	/** OSD flags left set (`noout`, `norebalance`, …). */
+	flags: string[];
+	/** Health checks muted: what `HEALTH_OK` no longer tells you. */
+	muted_checks: string[];
 }
 
 // --- Synology DSM -------------------------------------------------------------
@@ -1497,4 +1726,326 @@ export interface PushMonitor {
 	grace_secs: number | null;
 	settings_error: string | null;
 	verdict: 'waiting' | 'on_time' | 'missed' | 'reported_down';
+}
+
+// --- Proxmox Datacenter Manager (crates/server/src/api/pdm.rs) --------------
+//
+// Times are Unix seconds, as PDM reports them (not server date strings).
+// Every measurement is nullable: an instance the console cannot reach says
+// nothing, and nothing is not zero.
+
+/** Totals the console computes for the whole estate (`/resources/status`). */
+export interface PdmEstate {
+	remotes: number | null;
+	remotes_failed: number | null;
+	nodes_online: number | null;
+	nodes_offline: number | null;
+	qemu_running: number | null;
+	qemu_stopped: number | null;
+	lxc_running: number | null;
+	lxc_stopped: number | null;
+	cpu_used_cores: number | null;
+	cpu_total_cores: number | null;
+	memory_used_bytes: number | null;
+	memory_total_bytes: number | null;
+	storage_used_bytes: number | null;
+	storage_total_bytes: number | null;
+	datastores: number | null;
+}
+
+/** One federated Proxmox VE cluster or Proxmox Backup Server. */
+export interface PdmRemote {
+	id: string;
+	/** `pve` or `pbs`, when the console says so. */
+	kind: string | null;
+	reachable: boolean;
+	/** What the console got back when it failed, verbatim. */
+	error: string | null;
+	version: string | null;
+	/** Another instance of the same product runs a newer version. */
+	version_behind: boolean;
+	nodes: string[];
+	nodes_online: number | null;
+	nodes_offline: number | null;
+	guests_running: number | null;
+	guests_stopped: number | null;
+	cpu_used_cores: number | null;
+	cpu_total_cores: number | null;
+	memory_used_bytes: number | null;
+	memory_total_bytes: number | null;
+	storage_used_bytes: number | null;
+	storage_total_bytes: number | null;
+	datastores: number | null;
+	/** `none`, `unknown`, `mixed` or `active`. */
+	subscription: string | null;
+	last_collection: number | null;
+	updates_pending: number | null;
+	tasks_failed: number;
+	memory_used_percent: number | null;
+	storage_used_percent: number | null;
+}
+
+export interface PdmRemotes {
+	probed_at: number | null;
+	version: string | null;
+	estate: PdmEstate;
+	remotes: PdmRemote[];
+}
+
+export type PdmTaskKind =
+	| 'backup'
+	| 'migrate'
+	| 'sync'
+	| 'verify'
+	| 'prune'
+	| 'gc'
+	| 'replication'
+	| 'update'
+	| 'other';
+
+export interface PdmFailure {
+	upid: string;
+	/** Federated instance the task ran on; empty for a task of the console itself. */
+	remote: string;
+	worker_type: string;
+	kind: PdmTaskKind;
+	worker_id: string;
+	node: string | null;
+	user: string | null;
+	start: number;
+	end: number | null;
+	/** Error message, without the `TASK ERROR:` prefix. */
+	error: string;
+}
+
+export interface PdmCertificate {
+	filename: string;
+	subject: string | null;
+	issuer: string | null;
+	not_after: number | null;
+}
+
+export interface PdmSubscription {
+	status: string | null;
+	message: string | null;
+	active_nodes: number | null;
+	total_nodes: number | null;
+}
+
+export interface PdmNode {
+	cpu_percent: number | null;
+	cpu_count: number | null;
+	cpu_model: string | null;
+	load1: number | null;
+	memory_used_bytes: number | null;
+	memory_total_bytes: number | null;
+	swap_used_bytes: number | null;
+	swap_total_bytes: number | null;
+	rootfs_used_bytes: number | null;
+	rootfs_total_bytes: number | null;
+	uptime_seconds: number | null;
+	kernel: string | null;
+	updates_pending: number | null;
+	certificates: PdmCertificate[];
+	subscription: PdmSubscription | null;
+}
+
+export interface PdmHealth {
+	probed_at: number | null;
+	version: string | null;
+	/** `null` when the console host is not read (option off, or missing privilege). */
+	node: PdmNode | null;
+	memory_used_percent: number | null;
+	rootfs_used_percent: number | null;
+	/** Soonest expiry first. */
+	certificates: PdmCertificate[];
+	subscription: PdmSubscription | null;
+}
+
+// ---------------------------------------------------------------------------
+// Proxmox Mail Gateway (`crates/server/src/api/pmg.rs`)
+// ---------------------------------------------------------------------------
+
+export interface PmgQueueDomain {
+	domain: string;
+	messages: number;
+}
+
+export interface PmgQueue {
+	/** `incoming`, `active`, `deferred` or `hold`. */
+	queue: string;
+	messages: number;
+	domains: number;
+	/**
+	 * Lower bound on the age of the oldest message, in seconds: qshape reports
+	 * age brackets, so this is the floor of the highest occupied one. `null`
+	 * when the queue is empty.
+	 */
+	oldest_age_seconds: number | null;
+	top_domains: PmgQueueDomain[];
+	/** True when the oldest message has been waiting for more than four hours. */
+	stuck: boolean;
+}
+
+export interface PmgQueues {
+	probed_at: number | null;
+	/** In reading order: incoming, active, deferred, hold. */
+	queues: PmgQueue[];
+	total_messages: number;
+	stuck: boolean;
+}
+
+/** Totals since local midnight on the gateway, as PMG aggregates them. */
+export interface PmgMail {
+	count_in: number | null;
+	count_out: number | null;
+	bytes_in: number | null;
+	bytes_out: number | null;
+	spam_in: number | null;
+	spam_out: number | null;
+	virus_in: number | null;
+	virus_out: number | null;
+	bounces_in: number | null;
+	bounces_out: number | null;
+	junk_in: number | null;
+	junk_out: number | null;
+	greylisted: number | null;
+	spf_rejects: number | null;
+	rbl_rejects: number | null;
+	pregreet_rejects: number | null;
+	avg_processing_seconds: number | null;
+}
+
+export interface PmgRecentPoint {
+	/** Start of the slice, Unix seconds. */
+	time: number;
+	timespan: number;
+	count_in: number;
+	count_out: number;
+	spam_in: number;
+	virus_in: number;
+}
+
+export interface PmgSpamScore {
+	/** `0` to `10`; `10` aggregates everything above. */
+	level: string;
+	count: number;
+	ratio_percent: number | null;
+}
+
+export interface PmgVirus {
+	name: string;
+	count: number;
+}
+
+/** Counts only: no subject, sender or message content ever leaves the gateway. */
+export interface PmgQuarantine {
+	spam_count: number | null;
+	spam_bytes: number | null;
+	spam_avg_level: number | null;
+	virus_count: number | null;
+	virus_bytes: number | null;
+	/** `null` unless the attachment quarantine option is on. */
+	attachment_count: number | null;
+}
+
+export interface PmgTraffic {
+	probed_at: number | null;
+	mail: PmgMail | null;
+	/** Oldest slice first. */
+	recent: PmgRecentPoint[];
+	spam_scores: PmgSpamScore[];
+	viruses: PmgVirus[];
+	quarantine: PmgQuarantine | null;
+}
+
+export interface PmgService {
+	service: string;
+	description: string | null;
+	state: string | null;
+	unit_state: string | null;
+	running: boolean;
+}
+
+export interface PmgSignature {
+	/** `main`, `daily`, `bytecode` for ClamAV; the channel for SpamAssassin. */
+	name: string;
+	version: string | null;
+	updated_at: number | null;
+	signatures: number | null;
+	update_available: boolean | null;
+	/** `virus` (ClamAV) or `spam` (SpamAssassin). */
+	family: string;
+	/** `null` when the database has never been dated. */
+	age_seconds: number | null;
+	stale: boolean;
+}
+
+export interface PmgCertificate {
+	filename: string;
+	subject: string | null;
+	issuer: string | null;
+	not_after: number | null;
+	san: string[];
+}
+
+export interface PmgSubscription {
+	status: string;
+	level: string | null;
+	next_due_date: string | null;
+}
+
+export interface PmgNode {
+	name: string;
+	uptime_seconds: number | null;
+	cpu_percent: number | null;
+	cpu_count: number | null;
+	loadavg: number[];
+	memory_used_bytes: number | null;
+	memory_total_bytes: number | null;
+	swap_used_bytes: number | null;
+	swap_total_bytes: number | null;
+	rootfs_used_bytes: number | null;
+	rootfs_total_bytes: number | null;
+	kernel: string | null;
+	/** API version on this node: in a cluster, the one left behind shows here. */
+	version: string | null;
+	insync: boolean | null;
+	clock_offset_seconds: number | null;
+	services: PmgService[];
+	virus_databases: PmgSignature[];
+	spam_rules: PmgSignature[];
+	certificates: PmgCertificate[];
+	subscription: PmgSubscription | null;
+	updates_pending: number | null;
+	updates_security_pending: number | null;
+	/** Virus databases then spam rules, each dated and judged. */
+	signatures: PmgSignature[];
+	/** Certificates expiring in less than fourteen days. */
+	expiring_certificates: PmgCertificate[];
+}
+
+export interface PmgClusterNode {
+	name: string;
+	ip: string | null;
+	/** `master` or `node`. */
+	role: string | null;
+	insync: boolean | null;
+	error: string | null;
+}
+
+export interface PmgStoppedService {
+	node: string;
+	service: string;
+	description: string | null;
+	state: string | null;
+}
+
+export interface PmgHealth {
+	probed_at: number | null;
+	version: string | null;
+	nodes: PmgNode[];
+	/** Empty on a standalone gateway: no cluster, not a degraded one. */
+	cluster: PmgClusterNode[];
+	stopped_services: PmgStoppedService[];
 }

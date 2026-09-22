@@ -522,13 +522,13 @@ mod tests {
     use super::*;
     use crate::collectors::agent::store;
 
-    struct Lab {
+    struct Bench {
         pool: SqlitePool,
         target_id: TargetId,
         _dir: tempfile::TempDir,
     }
 
-    async fn lab(key: &str) -> Lab {
+    async fn bench(key: &str) -> Bench {
         let dir = tempfile::tempdir().expect("répertoire temporaire");
         let pool = crate::db::open(&dir.path().join("test.db")).await.expect("base");
         let cipher = crate::db::init_cipher(&pool, "secret-de-test-suffisamment-long")
@@ -550,7 +550,7 @@ mod tests {
         };
         let registration =
             store::register(&pool, &cipher, &identity, token.id).await.expect("machine");
-        Lab { pool, target_id: registration.target_id, _dir: dir }
+        Bench { pool, target_id: registration.target_id, _dir: dir }
     }
 
     fn restart(name: &str) -> serde_json::Value {
@@ -559,60 +559,61 @@ mod tests {
 
     #[tokio::test]
     async fn a_command_goes_from_queued_to_running_to_done() {
-        let lab = lab("id-nas").await;
+        let bench = bench("id-nas").await;
         let record =
-            enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+            enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
                 .await
                 .expect("file");
         assert_eq!(record.status, CommandStatus::Queued);
         assert_eq!(record.requested_by.as_deref(), Some("ui"));
 
         let (target, pending) =
-            pending_for_key(&lab.pool, "id-nas").await.expect("lecture").expect("clé connue");
-        assert_eq!(target, lab.target_id);
+            pending_for_key(&bench.pool, "id-nas").await.expect("lecture").expect("clé connue");
+        assert_eq!(target, bench.target_id);
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].id, record.id);
         assert_eq!(pending[0].arg_str("name"), Some("web"));
         assert!(pending[0].created_at_ms > 0, "l'horodatage de création doit être lisible");
 
         let running = CommandReport { status: CommandStatus::Running, result: String::new() };
-        assert!(report(&lab.pool, "id-nas", record.id, &running).await.expect("compte rendu"));
-        let listed = list_for_target(&lab.pool, lab.target_id, 20).await.expect("liste");
+        assert!(report(&bench.pool, "id-nas", record.id, &running).await.expect("compte rendu"));
+        let listed = list_for_target(&bench.pool, bench.target_id, 20).await.expect("liste");
         assert_eq!(listed[0].status, CommandStatus::Running);
         assert!(listed[0].started_at.is_some());
         // Une commande en cours n'est plus proposée à l'agent.
-        let (_, pending) = pending_for_key(&lab.pool, "id-nas").await.unwrap().unwrap();
+        let (_, pending) = pending_for_key(&bench.pool, "id-nas").await.unwrap().unwrap();
         assert!(pending.is_empty());
 
         let done = CommandReport { status: CommandStatus::Done, result: "restarted".into() };
-        assert!(report(&lab.pool, "id-nas", record.id, &done).await.expect("compte rendu"));
-        let listed = list_for_target(&lab.pool, lab.target_id, 20).await.expect("liste");
+        assert!(report(&bench.pool, "id-nas", record.id, &done).await.expect("compte rendu"));
+        let listed = list_for_target(&bench.pool, bench.target_id, 20).await.expect("liste");
         assert_eq!(listed[0].status, CommandStatus::Done);
         assert_eq!(listed[0].result.as_deref(), Some("restarted"));
         assert!(listed[0].finished_at.is_some());
 
         // Un compte rendu tardif ne rouvre pas la commande.
         let late = CommandReport { status: CommandStatus::Running, result: String::new() };
-        assert!(report(&lab.pool, "id-nas", record.id, &late).await.expect("compte rendu"));
-        let listed = list_for_target(&lab.pool, lab.target_id, 20).await.expect("liste");
+        assert!(report(&bench.pool, "id-nas", record.id, &late).await.expect("compte rendu"));
+        let listed = list_for_target(&bench.pool, bench.target_id, 20).await.expect("liste");
         assert_eq!(listed[0].status, CommandStatus::Done);
     }
 
     #[tokio::test]
     async fn a_duplicate_command_is_refused_while_the_first_is_pending() {
-        let lab = lab("id-nas").await;
-        enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+        let bench = bench("id-nas").await;
+        enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
             .await
             .expect("première");
         let again =
-            enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui").await;
+            enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+                .await;
         assert!(matches!(again, Err(CommandError::Conflict(_))), "doublon accepté");
 
         // Un autre conteneur, ou un autre type, n'est pas un doublon.
-        enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("db"), "ui")
+        enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, &restart("db"), "ui")
             .await
             .expect("autre conteneur");
-        enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_UPDATE, &restart("web"), "ui")
+        enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_UPDATE, &restart("web"), "ui")
             .await
             .expect("autre type");
     }
@@ -629,22 +630,22 @@ mod tests {
 
     #[tokio::test]
     async fn a_stale_command_expires_instead_of_being_handed_out() {
-        let lab = lab("id-nas").await;
+        let bench = bench("id-nas").await;
         let record =
-            enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+            enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
                 .await
                 .expect("file");
-        age(&lab.pool, record.id, 11).await;
+        age(&bench.pool, record.id, 11).await;
 
-        let (_, pending) = pending_for_key(&lab.pool, "id-nas").await.unwrap().unwrap();
+        let (_, pending) = pending_for_key(&bench.pool, "id-nas").await.unwrap().unwrap();
         assert!(pending.is_empty());
-        let listed = list_for_target(&lab.pool, lab.target_id, 20).await.expect("liste");
+        let listed = list_for_target(&bench.pool, bench.target_id, 20).await.expect("liste");
         assert_eq!(listed[0].status, CommandStatus::Expired);
         assert_eq!(listed[0].result.as_deref(), Some(EXPIRED_RESULT));
         assert!(listed[0].finished_at.is_some());
         // La file est à nouveau libre pour ce conteneur.
         assert!(
-            !has_pending(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, "web").await.unwrap()
+            !has_pending(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, "web").await.unwrap()
         );
     }
 
@@ -652,100 +653,105 @@ mod tests {
     async fn a_stale_command_expires_even_if_the_agent_never_polls() {
         // Agent arrêté, trop ancien ou configuré sans actions : personne ne vient
         // lire la file. C'est le serveur qui doit la libérer.
-        let lab = lab("id-nas").await;
-        let old = enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
-            .await
-            .unwrap();
-        let fresh = enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_UPDATE, &restart("web"), "ui")
-            .await
-            .unwrap();
-        age(&lab.pool, old.id, 11).await;
-        age(&lab.pool, fresh.id, 9).await;
+        let bench = bench("id-nas").await;
+        let old =
+            enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+                .await
+                .unwrap();
+        let fresh =
+            enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_UPDATE, &restart("web"), "ui")
+                .await
+                .unwrap();
+        age(&bench.pool, old.id, 11).await;
+        age(&bench.pool, fresh.id, 9).await;
 
         // Une nouvelle demande bute encore sur l'ancienne.
         let again =
-            enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui").await;
+            enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+                .await;
         assert!(matches!(again, Err(CommandError::Conflict(_))));
 
-        assert_eq!(expire_stale(&lab.pool, None).await.unwrap(), 1);
-        let listed = list_for_target(&lab.pool, lab.target_id, 20).await.unwrap();
+        assert_eq!(expire_stale(&bench.pool, None).await.unwrap(), 1);
+        let listed = list_for_target(&bench.pool, bench.target_id, 20).await.unwrap();
         let by_id = |id| listed.iter().find(|c| c.id == id).unwrap();
         assert_eq!(by_id(old.id).status, CommandStatus::Expired);
         assert_eq!(by_id(fresh.id).status, CommandStatus::Queued, "neuf minutes : encore valable");
 
         // La file est libre : la même demande passe, et le second passage ne
         // touche à rien.
-        enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+        enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
             .await
             .expect("file libérée");
-        assert_eq!(expire_stale(&lab.pool, None).await.unwrap(), 0);
+        assert_eq!(expire_stale(&bench.pool, None).await.unwrap(), 0);
     }
 
     #[tokio::test]
     async fn a_queued_command_can_be_cancelled_but_not_a_running_one() {
-        let lab = lab("id-nas").await;
+        let bench = bench("id-nas").await;
         let record =
-            enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+            enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
                 .await
                 .unwrap();
 
         // Une autre cible ne la voit pas.
         assert!(matches!(
-            cancel(&lab.pool, lab.target_id + 1, record.id, "admin").await,
+            cancel(&bench.pool, bench.target_id + 1, record.id, "admin").await,
             Err(CommandError::NotFound)
         ));
-        cancel(&lab.pool, lab.target_id, record.id, "admin").await.expect("annulation");
-        let listed = list_for_target(&lab.pool, lab.target_id, 20).await.unwrap();
+        cancel(&bench.pool, bench.target_id, record.id, "admin").await.expect("annulation");
+        let listed = list_for_target(&bench.pool, bench.target_id, 20).await.unwrap();
         assert_eq!(listed[0].status, CommandStatus::Cancelled);
         assert!(listed[0].result.as_deref().unwrap_or("").contains("admin"));
         assert!(
-            !has_pending(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, "web").await.unwrap()
+            !has_pending(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, "web").await.unwrap()
         );
         // Annulée, elle n'est plus proposée à l'agent, et ne s'annule pas deux fois.
-        let (_, pending) = pending_for_key(&lab.pool, "id-nas").await.unwrap().unwrap();
+        let (_, pending) = pending_for_key(&bench.pool, "id-nas").await.unwrap().unwrap();
         assert!(pending.is_empty());
         assert!(matches!(
-            cancel(&lab.pool, lab.target_id, record.id, "admin").await,
+            cancel(&bench.pool, bench.target_id, record.id, "admin").await,
             Err(CommandError::Conflict(_))
         ));
 
         // En cours : trop tard, l'agent l'a déjà.
         let running =
-            enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+            enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
                 .await
                 .unwrap();
         let report_running =
             CommandReport { status: CommandStatus::Running, result: String::new() };
-        assert!(report(&lab.pool, "id-nas", running.id, &report_running).await.unwrap());
+        assert!(report(&bench.pool, "id-nas", running.id, &report_running).await.unwrap());
         assert!(matches!(
-            cancel(&lab.pool, lab.target_id, running.id, "admin").await,
+            cancel(&bench.pool, bench.target_id, running.id, "admin").await,
             Err(CommandError::Conflict(_))
         ));
-        assert!(has_pending(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, "web").await.unwrap());
+        assert!(
+            has_pending(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, "web").await.unwrap()
+        );
     }
 
     #[tokio::test]
     async fn another_machine_cannot_report_on_the_command() {
-        let lab = lab("id-nas").await;
+        let bench = bench("id-nas").await;
         let record =
-            enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+            enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
                 .await
                 .expect("file");
         let done = CommandReport { status: CommandStatus::Done, result: "x".into() };
-        assert!(!report(&lab.pool, "id-autre", record.id, &done).await.expect("compte rendu"));
-        assert!(pending_for_key(&lab.pool, "id-autre").await.unwrap().is_none());
-        let listed = list_for_target(&lab.pool, lab.target_id, 20).await.expect("liste");
+        assert!(!report(&bench.pool, "id-autre", record.id, &done).await.expect("compte rendu"));
+        assert!(pending_for_key(&bench.pool, "id-autre").await.unwrap().is_none());
+        let listed = list_for_target(&bench.pool, bench.target_id, 20).await.expect("liste");
         assert_eq!(listed[0].status, CommandStatus::Queued);
     }
 
     #[tokio::test]
     async fn policies_default_to_hands_off_and_round_trip() {
-        let lab = lab("id-nas").await;
+        let bench = bench("id-nas").await;
         assert_eq!(
-            get_policy(&lab.pool, lab.target_id, "web").await.unwrap(),
+            get_policy(&bench.pool, bench.target_id, "web").await.unwrap(),
             ContainerPolicy::default()
         );
-        assert!(list_active_policies(&lab.pool).await.unwrap().is_empty());
+        assert!(list_active_policies(&bench.pool).await.unwrap().is_empty());
 
         let wanted = ContainerPolicy {
             auto_restart: true,
@@ -753,32 +759,32 @@ mod tests {
             prune_old_image: false,
             only_in_maintenance: false,
         };
-        set_policy(&lab.pool, lab.target_id, "web", wanted).await.unwrap();
-        set_policy(&lab.pool, lab.target_id, "web", wanted).await.unwrap();
-        assert_eq!(get_policy(&lab.pool, lab.target_id, "web").await.unwrap(), wanted);
-        let all = list_policies(&lab.pool, lab.target_id).await.unwrap();
+        set_policy(&bench.pool, bench.target_id, "web", wanted).await.unwrap();
+        set_policy(&bench.pool, bench.target_id, "web", wanted).await.unwrap();
+        assert_eq!(get_policy(&bench.pool, bench.target_id, "web").await.unwrap(), wanted);
+        let all = list_policies(&bench.pool, bench.target_id).await.unwrap();
         assert_eq!(all.get("web"), Some(&wanted));
-        assert_eq!(list_active_policies(&lab.pool).await.unwrap().len(), 1);
+        assert_eq!(list_active_policies(&bench.pool).await.unwrap().len(), 1);
     }
 
     #[tokio::test]
     async fn the_last_command_per_container_and_its_instant_are_found() {
-        let lab = lab("id-nas").await;
+        let bench = bench("id-nas").await;
         assert!(
-            last_command_at(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, "web")
+            last_command_at(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, "web")
                 .await
                 .unwrap()
                 .is_none()
         );
-        enqueue(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, &restart("web"), "policy")
+        enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, &restart("web"), "policy")
             .await
             .unwrap();
-        let at = last_command_at(&lab.pool, lab.target_id, CMD_CONTAINER_RESTART, "web")
+        let at = last_command_at(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, "web")
             .await
             .unwrap()
             .expect("instant");
         assert!((Utc::now() - at).num_seconds().abs() < 5);
-        let latest = last_command_per_container(&lab.pool, lab.target_id).await.unwrap();
+        let latest = last_command_per_container(&bench.pool, bench.target_id).await.unwrap();
         assert_eq!(latest.get("web").map(|c| c.requested_by.as_deref()), Some(Some("policy")));
     }
 

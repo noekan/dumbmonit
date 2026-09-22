@@ -54,6 +54,21 @@ pub struct Options {
     pub updates: bool,
     /// Interroge les disques physiques (santé SMART, usure) et les pools ZFS.
     pub disks: bool,
+    /// Interroge les unités systemd du serveur.
+    pub services: bool,
+    /// Interroge les certificats servis par l'interface. Désactivé par défaut :
+    /// PBS garde cet appel derrière `Sys.Modify`, un privilège d'écriture qu'un
+    /// jeton de supervision n'a aucune raison d'avoir.
+    pub certificates: bool,
+    /// Interroge les règles de limitation de débit et leur débit courant.
+    pub traffic_control: bool,
+    /// Interroge, par datastore, les décomptes par type de sauvegarde, les
+    /// opérations en cours et le mode de maintenance.
+    pub datastore_details: bool,
+    /// Interroge l'étage bande : travaux, lecteurs, robotique, pools, médias.
+    /// Désactivé par défaut : cinq appels de plus pour la très grande majorité
+    /// des installations, qui n'ont pas de bande.
+    pub tape: bool,
 }
 
 impl Options {
@@ -81,6 +96,11 @@ impl Options {
             jobs: parse_bool_or(tag(target, "jobs"), true)?,
             updates: parse_bool_or(tag(target, "updates"), true)?,
             disks: parse_bool_or(tag(target, "disks"), true)?,
+            services: parse_bool_or(tag(target, "services"), true)?,
+            certificates: parse_bool_or(tag(target, "certificates"), false)?,
+            traffic_control: parse_bool_or(tag(target, "traffic_control"), true)?,
+            datastore_details: parse_bool_or(tag(target, "datastore_details"), true)?,
+            tape: parse_bool_or(tag(target, "tape"), false)?,
         })
     }
 
@@ -235,6 +255,29 @@ mod tests {
         assert!(options.datastores.is_empty());
         assert!(options.jobs, "les travaux planifiés sont suivis par défaut");
         assert!(options.updates, "les mises à jour en attente sont suivies par défaut");
+        assert!(options.services, "les unités du serveur sont suivies par défaut");
+        assert!(options.traffic_control);
+        assert!(options.datastore_details);
+        assert!(
+            !options.certificates,
+            "lire les certificats demande Sys.Modify : jamais par défaut"
+        );
+        assert!(!options.tape, "la bande reste un choix explicite");
+    }
+
+    #[test]
+    fn les_options_lourdes_souvrent_par_etiquette() {
+        let options =
+            Options::from_target(&cible(&[("tape", "true"), ("certificates", "1")])).unwrap();
+        assert!(options.tape && options.certificates);
+        let options = Options::from_target(&cible(&[
+            ("services", "no"),
+            ("traffic_control", "off"),
+            ("datastore_details", "0"),
+        ]))
+        .unwrap();
+        assert!(!options.services && !options.traffic_control && !options.datastore_details);
+        assert!(Options::from_target(&cible(&[("tape", "peut-être")])).is_err());
     }
 
     #[test]

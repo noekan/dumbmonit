@@ -112,6 +112,10 @@ pub struct NodeStatus {
     pub root: Option<Usage>,
     #[serde(default)]
     pub kversion: Option<String>,
+    /// Part du temps CPU passée à attendre les entrées-sorties, en ratio 0..1.
+    /// Sur un serveur de sauvegarde, c'est elle qui dit « les disques saturent ».
+    #[serde(default)]
+    pub wait: Option<Num>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -128,6 +132,8 @@ pub struct Usage {
     pub used: Option<Num>,
     #[serde(default)]
     pub avail: Option<Num>,
+    #[serde(default)]
+    pub free: Option<Num>,
 }
 
 /// Entrée de `GET /api2/json/status/datastore-usage`.
@@ -149,6 +155,22 @@ pub struct DatastoreUsage {
     /// chemin non monté…). Sa seule présence signifie « datastore indisponible ».
     #[serde(default)]
     pub error: Option<String>,
+    /// `nonremovable`, `mounted`, `notmounted`, `unknown`. Un datastore amovible
+    /// débranché répond `notmounted` sans `error` : il n'est pas en panne, il
+    /// n'est simplement pas là.
+    #[serde(default, rename = "mount-status")]
+    pub mount_status: Option<String>,
+    /// `filesystem` ou `s3`, selon où les chunks sont écrits (PBS 4).
+    #[serde(default, rename = "backend-type")]
+    pub backend_type: Option<String>,
+    /// Occupation mesurée par PBS, du plus ancien au plus récent, en fraction
+    /// de remplissage (0 à 1) — c'est ainsi que l'interface de PBS la trace.
+    /// Un trou — serveur arrêté, datastore absent — est un `null`.
+    #[serde(default)]
+    pub history: Vec<Option<Num>>,
+    /// Pas entre deux points de `history`, en secondes (1800 en pratique).
+    #[serde(default, rename = "history-delta")]
+    pub history_delta: Option<Num>,
 }
 
 impl DatastoreUsage {
@@ -381,6 +403,383 @@ pub struct GcStatus {
     pub schedule: Option<String>,
     #[serde(default, rename = "next-run")]
     pub next_run: Option<Num>,
+    /// `/admin/gc` seulement : le datastore auquel cette entrée se rapporte.
+    #[serde(default)]
+    pub store: Option<String>,
+    /// Durée du dernier passage, en secondes.
+    #[serde(default)]
+    pub duration: Option<Num>,
+    #[serde(default, rename = "disk-chunks")]
+    pub disk_chunks: Option<Num>,
+    #[serde(default, rename = "pending-chunks")]
+    pub pending_chunks: Option<Num>,
+    #[serde(default, rename = "removed-chunks")]
+    pub removed_chunks: Option<Num>,
+    /// Chunks illisibles que la GC a laissés en place : de la corruption, pas
+    /// de la place à reprendre.
+    #[serde(default, rename = "still-bad")]
+    pub still_bad: Option<Num>,
+}
+
+/// `GET /api2/json/admin/datastore/{store}/status?verbose=1`
+///
+/// Sans `verbose`, PBS ne renvoie que les tailles — déjà connues par
+/// `/status/datastore-usage`. Avec, il compte les groupes et les instantanés de
+/// chaque type de sauvegarde, tous espaces de noms confondus.
+#[derive(Debug, Default, Deserialize)]
+pub struct DatastoreStatus {
+    #[serde(default)]
+    pub counts: Option<TypeCounts>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct TypeCounts {
+    #[serde(default)]
+    pub vm: Option<TypeCount>,
+    #[serde(default)]
+    pub ct: Option<TypeCount>,
+    #[serde(default)]
+    pub host: Option<TypeCount>,
+    #[serde(default)]
+    pub other: Option<TypeCount>,
+}
+
+impl TypeCounts {
+    /// Les décomptes par type de sauvegarde, dans un ordre stable. Un type
+    /// absent — `null` chez PBS — est bien un zéro : le datastore n'en héberge
+    /// aucun, ce n'est pas une mesure manquante.
+    pub fn by_type(&self) -> Vec<(&'static str, f64, f64)> {
+        [("vm", &self.vm), ("ct", &self.ct), ("host", &self.host), ("other", &self.other)]
+            .into_iter()
+            .map(|(name, count)| {
+                let groups = count.as_ref().and_then(|c| c.groups).map_or(0.0, |n| n.0);
+                let snapshots = count.as_ref().and_then(|c| c.snapshots).map_or(0.0, |n| n.0);
+                (name, groups, snapshots)
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct TypeCount {
+    #[serde(default)]
+    pub groups: Option<Num>,
+    #[serde(default)]
+    pub snapshots: Option<Num>,
+}
+
+/// `GET /api2/json/admin/datastore/{store}/active-operations`
+///
+/// Le nombre de lectures et d'écritures en cours sur le datastore. Une GC qui
+/// traîne, un montage qui refuse de se défaire : c'est ici que l'on voit qui
+/// tient le datastore.
+#[derive(Debug, Default, Deserialize)]
+pub struct ActiveOperations {
+    #[serde(default)]
+    pub read: Option<Num>,
+    #[serde(default)]
+    pub write: Option<Num>,
+}
+
+/// Entrée de `GET /api2/json/config/datastore` : la configuration, dont le mode
+/// de maintenance — la raison la plus fréquente d'un refus de sauvegarde.
+#[derive(Debug, Default, Deserialize)]
+pub struct DatastoreConfig {
+    #[serde(default)]
+    pub name: String,
+    /// Chaîne de propriétés PBS : `type=offline,message="..."`, ou juste
+    /// `offline`. Absente quand le datastore fonctionne normalement.
+    #[serde(default, rename = "maintenance-mode")]
+    pub maintenance_mode: Option<String>,
+}
+
+impl DatastoreConfig {
+    /// Le type de maintenance déclaré (`offline`, `read-only`, `delete`,
+    /// `unmount`), ou `None` quand le datastore n'est pas en maintenance.
+    pub fn maintenance_kind(&self) -> Option<String> {
+        let raw = self.maintenance_mode.as_deref()?.trim();
+        if raw.is_empty() {
+            return None;
+        }
+        // `type=offline,message="disk swap"` ou la forme courte `offline`.
+        let kind = raw
+            .split(',')
+            .find_map(|part| part.trim().strip_prefix("type=").map(str::trim))
+            .unwrap_or_else(|| raw.split(',').next().unwrap_or(raw).trim());
+        (!kind.is_empty()).then(|| kind.to_string())
+    }
+}
+
+/// Entrée de `GET /api2/json/nodes/localhost/services`.
+///
+/// Sur un serveur sans systemd — un conteneur de démonstration — la liste est
+/// vide : cela veut dire « rien à dire », jamais « tout est éteint ».
+#[derive(Debug, Default, Deserialize)]
+pub struct ServiceEntry {
+    #[serde(default)]
+    pub service: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub desc: Option<String>,
+    /// `running`, `dead`, `stopped`, `failed`…
+    #[serde(default)]
+    pub state: Option<String>,
+    /// `enabled`, `disabled`, `static`, `masked`, `not-found`…
+    #[serde(default, rename = "unit-state")]
+    pub unit_state: Option<String>,
+}
+
+impl ServiceEntry {
+    pub fn is_running(&self) -> bool {
+        self.state.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("running"))
+    }
+
+    /// Vrai si l'unité doit démarrer au boot. Une unité `static` est tirée par
+    /// une autre : elle n'est ni activée ni désactivée, et n'a pas à alerter.
+    pub fn is_enabled(&self) -> Option<bool> {
+        match self.unit_state.as_deref()?.to_ascii_lowercase().as_str() {
+            "enabled" | "enabled-runtime" | "alias" | "indirect" => Some(true),
+            "disabled" | "masked" | "masked-runtime" => Some(false),
+            _ => None,
+        }
+    }
+}
+
+/// Entrée de `GET /api2/json/nodes/localhost/certificates/info`.
+///
+/// Demande `Sys.Modify` chez PBS — un privilège d'écriture : l'appel reste
+/// facultatif et désactivé par défaut, plutôt que d'exiger ce droit d'un jeton
+/// de supervision.
+#[derive(Debug, Default, Deserialize)]
+pub struct CertificateInfo {
+    #[serde(default)]
+    pub filename: Option<String>,
+    #[serde(default)]
+    pub fingerprint: Option<String>,
+    #[serde(default)]
+    pub issuer: Option<String>,
+    #[serde(default)]
+    pub subject: Option<String>,
+    /// Date Unix de fin de validité.
+    #[serde(default)]
+    pub notafter: Option<Num>,
+    #[serde(default)]
+    pub san: Vec<String>,
+}
+
+/// Entrée de `GET /api2/json/nodes/localhost/apt/versions`.
+///
+/// Les noms sont en `PascalCase`, hérités d'APT. `OldVersion` est la version
+/// **installée**, `Version` la version **disponible** — la nomenclature d'APT
+/// vue depuis une mise à niveau, pas depuis le présent. `ExtraInfo` porte, pour
+/// deux paquets seulement, la version réellement en cours d'exécution :
+/// « running version: 4.2.6 » et « running kernel: 6.8.12-4-pve ».
+#[derive(Debug, Default, Deserialize)]
+pub struct PackageVersion {
+    #[serde(default, rename = "Package")]
+    pub package: String,
+    #[serde(default, rename = "OldVersion")]
+    pub installed: Option<String>,
+    #[serde(default, rename = "Version")]
+    pub available: Option<String>,
+    #[serde(default, rename = "Title")]
+    pub title: Option<String>,
+    #[serde(default, rename = "ExtraInfo")]
+    pub extra_info: Option<String>,
+}
+
+impl PackageVersion {
+    /// Vrai si APT propose une version plus récente que celle installée.
+    /// Comparer les chaînes suffit ici : APT ne place dans `Version` que ce
+    /// qu'il considère comme une mise à niveau.
+    pub fn is_upgradable(&self) -> bool {
+        match (self.installed.as_deref(), self.available.as_deref()) {
+            (Some(installed), Some(available)) => installed != available,
+            _ => false,
+        }
+    }
+
+    /// La version en cours d'exécution annoncée par `ExtraInfo`, s'il y en a une.
+    pub fn running_version(&self) -> Option<&str> {
+        let info = self.extra_info.as_deref()?;
+        let value = info.split_once(':')?.1.trim();
+        (!value.is_empty()).then_some(value)
+    }
+}
+
+/// Vrai si le démon en cours d'exécution n'est plus celui qui est installé —
+/// un paquet mis à niveau sans redémarrage des services.
+///
+/// PBS annonce la version courte (`4.2.6`) et la version installée complète
+/// (`4.2.6-1`) : la comparaison se fait donc sur le préfixe, jusqu'au tiret de
+/// révision Debian. Toute forme inattendue donne « pas d'avis », jamais une
+/// alerte inventée.
+pub fn running_version_is_stale(installed: &str, running: &str) -> Option<bool> {
+    let (installed, running) = (installed.trim(), running.trim());
+    if installed.is_empty() || running.is_empty() {
+        return None;
+    }
+    if installed == running {
+        return Some(false);
+    }
+    let base = installed.split('-').next().unwrap_or(installed);
+    Some(base != running)
+}
+
+/// Entrée de `GET /api2/json/admin/traffic-control`.
+///
+/// `rate-in` et `rate-out` sont des chaînes lisibles (« 100 MB ») ; les débits
+/// courants sont des octets par seconde.
+#[derive(Debug, Default, Deserialize)]
+pub struct TrafficRule {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub comment: Option<String>,
+    #[serde(default, rename = "cur-rate-in")]
+    pub cur_rate_in: Option<Num>,
+    #[serde(default, rename = "cur-rate-out")]
+    pub cur_rate_out: Option<Num>,
+    #[serde(default, rename = "rate-in")]
+    pub rate_in: Option<String>,
+    #[serde(default, rename = "rate-out")]
+    pub rate_out: Option<String>,
+    #[serde(default)]
+    pub timeframe: Vec<String>,
+    #[serde(default)]
+    pub network: Vec<String>,
+}
+
+/// Lit un débit tel que PBS l'écrit : « 100 MB », « 1.5 GB », « 500 KB », ou un
+/// nombre nu d'octets par seconde. Les préfixes sont décimaux, comme chez PBS.
+pub fn parse_rate(raw: &str) -> Option<f64> {
+    let raw = raw.trim();
+    let (number, unit) = match raw.find(|c: char| c.is_alphabetic()) {
+        Some(index) => (raw[..index].trim(), raw[index..].trim()),
+        None => (raw, ""),
+    };
+    let value: f64 = number.parse().ok()?;
+    let factor = match unit.to_ascii_uppercase().trim_end_matches('B') {
+        "" => 1.0,
+        "K" => 1_000.0,
+        "M" => 1_000_000.0,
+        "G" => 1_000_000_000.0,
+        "T" => 1_000_000_000_000.0,
+        _ => return None,
+    };
+    Some(value * factor)
+}
+
+/// Entrée de `GET /api2/json/tape/backup` : un travail de sauvegarde sur bande,
+/// avec l'état de son dernier passage.
+#[derive(Debug, Default, Deserialize)]
+pub struct TapeBackupJob {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub store: String,
+    #[serde(default)]
+    pub pool: Option<String>,
+    #[serde(default)]
+    pub drive: Option<String>,
+    #[serde(default)]
+    pub ns: Option<String>,
+    #[serde(default)]
+    pub comment: Option<String>,
+    #[serde(default)]
+    pub schedule: Option<String>,
+    #[serde(default, rename = "next-run")]
+    pub next_run: Option<Num>,
+    #[serde(default, rename = "next-media-label")]
+    pub next_media_label: Option<String>,
+    #[serde(default, rename = "last-run-state")]
+    pub last_run_state: Option<String>,
+    #[serde(default, rename = "last-run-endtime")]
+    pub last_run_endtime: Option<Num>,
+    #[serde(default, rename = "last-run-upid")]
+    pub last_run_upid: Option<String>,
+}
+
+impl TapeBackupJob {
+    pub fn last_run_ok(&self) -> Option<bool> {
+        self.last_run_state.as_deref().map(state_is_success)
+    }
+}
+
+/// Entrée de `GET /api2/json/tape/drive`.
+#[derive(Debug, Default, Deserialize)]
+pub struct TapeDrive {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub vendor: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub serial: Option<String>,
+    #[serde(default)]
+    pub changer: Option<String>,
+    /// `idle`, `reading`, `writing`, `cleaning`… Absent si le lecteur n'a pas
+    /// répondu à l'interrogation SCSI.
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub activity: Option<String>,
+}
+
+/// Entrée de `GET /api2/json/tape/changer`.
+#[derive(Debug, Default, Deserialize)]
+pub struct TapeChanger {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub vendor: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub serial: Option<String>,
+    #[serde(default, rename = "export-slots")]
+    pub export_slots: Option<String>,
+}
+
+/// Entrée de `GET /api2/json/config/media-pool`.
+#[derive(Debug, Default, Deserialize)]
+pub struct MediaPool {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub allocation: Option<String>,
+    #[serde(default)]
+    pub retention: Option<String>,
+    #[serde(default)]
+    pub comment: Option<String>,
+    #[serde(default)]
+    pub encrypt: Option<String>,
+}
+
+/// Entrée de `GET /api2/json/tape/media/list`.
+#[derive(Debug, Default, Deserialize)]
+pub struct TapeMedia {
+    #[serde(default, rename = "label-text")]
+    pub label_text: Option<String>,
+    #[serde(default)]
+    pub pool: Option<String>,
+    /// `full`, `writable`, `unknown`, `damaged`, `retired`.
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub location: Option<String>,
+    #[serde(default)]
+    pub expired: Option<Num>,
+    #[serde(default, rename = "bytes-used")]
+    pub bytes_used: Option<Num>,
+    #[serde(default, rename = "media-set-name")]
+    pub media_set_name: Option<String>,
 }
 
 /// Entrée de `GET /api2/json/nodes/localhost/disks/list` : un disque physique,

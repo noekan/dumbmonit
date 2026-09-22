@@ -871,6 +871,511 @@ pub struct TicketResponse {
     pub ticket: String,
 }
 
+/// Entrée de `GET /api2/json/cluster/resources`.
+///
+/// Un seul appel décrit l'intégralité du cluster : nœuds, invités, stockages et
+/// pools, avec leur état et leurs mesures. C'est la seule source qui voit les
+/// invités d'un nœud injoignable — le proxy répond pour lui à partir du cache du
+/// cluster, avec un `status` à `unknown` et aucune mesure.
+#[derive(Debug, Default, Deserialize)]
+pub struct ResourceEntry {
+    #[serde(rename = "type", default)]
+    pub resource_type: Option<String>,
+    #[serde(default)]
+    pub node: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub vmid: Option<Num>,
+    #[serde(default)]
+    pub template: Option<Num>,
+    #[serde(default)]
+    pub cpu: Option<Num>,
+    #[serde(default)]
+    pub maxcpu: Option<Num>,
+    #[serde(default)]
+    pub mem: Option<Num>,
+    #[serde(default)]
+    pub maxmem: Option<Num>,
+    #[serde(default)]
+    pub disk: Option<Num>,
+    #[serde(default)]
+    pub maxdisk: Option<Num>,
+    #[serde(default)]
+    pub netin: Option<Num>,
+    #[serde(default)]
+    pub netout: Option<Num>,
+    #[serde(default)]
+    pub diskread: Option<Num>,
+    #[serde(default)]
+    pub diskwrite: Option<Num>,
+    #[serde(default)]
+    pub uptime: Option<Num>,
+    #[serde(default)]
+    pub pool: Option<String>,
+    #[serde(default)]
+    pub lock: Option<String>,
+}
+
+impl ResourceEntry {
+    /// Type d'invité de l'entrée, ou `None` si ce n'en est pas un.
+    ///
+    /// `openvz` est l'ancien nom des conteneurs, encore renvoyé par les clusters
+    /// mis à jour depuis PVE 3 : le traiter comme du LXC vaut mieux que l'ignorer.
+    pub fn guest_kind(&self) -> Option<&'static str> {
+        match self.resource_type.as_deref() {
+            Some("qemu") => Some("qemu"),
+            Some("lxc" | "openvz") => Some("lxc"),
+            _ => None,
+        }
+    }
+
+    pub fn vmid(&self) -> Option<i64> {
+        self.vmid.map(|n| n.0 as i64)
+    }
+
+    /// Ce que l'entrée dit d'un invité, dans la forme des listes par nœud.
+    ///
+    /// Recopier plutôt que dupliquer la conversion en métriques : le tableau des
+    /// invités est alors produit par le même code, que l'inventaire vienne de
+    /// `/cluster/resources` ou de la tournée des nœuds.
+    pub fn to_guest_entry(&self) -> GuestEntry {
+        GuestEntry {
+            vmid: self.vmid.unwrap_or_default(),
+            name: self.name.clone(),
+            status: self.status.clone(),
+            cpu: self.cpu,
+            cpus: self.maxcpu,
+            mem: self.mem,
+            maxmem: self.maxmem,
+            disk: self.disk,
+            maxdisk: self.maxdisk,
+            netin: self.netin,
+            netout: self.netout,
+            diskread: self.diskread,
+            diskwrite: self.diskwrite,
+            uptime: self.uptime,
+            template: self.template,
+            // `/cluster/resources` ne porte pas l'état QEMU détaillé : une machine
+            // en pause y est simplement « running ». Le détail vient de
+            // `status/current`, quand l'option `guest_agent` est active.
+            qmpstatus: None,
+            lock: self.lock.clone(),
+        }
+    }
+}
+
+/// Un point de `GET /api2/json/cluster/metrics/export`.
+///
+/// C'est le flux que consomment les « metric servers » de Proxmox (InfluxDB,
+/// Graphite) : tout ce que `pvestatd` mesure, à la résolution de la RRD, pour
+/// tout le cluster en un appel.
+#[derive(Debug, Default, Deserialize)]
+pub struct MetricsExport {
+    #[serde(default)]
+    pub data: Vec<MetricPoint>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct MetricPoint {
+    /// `node/pve1`, `qemu/100`, `lxc/200`, `storage/pve1/local`.
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub metric: Option<String>,
+    #[serde(default)]
+    pub timestamp: Option<Num>,
+    #[serde(rename = "type", default)]
+    pub point_type: Option<String>,
+    #[serde(default)]
+    pub value: Option<Num>,
+}
+
+/// Entrée de `GET /api2/json/nodes/{node}/services`.
+#[derive(Debug, Default, Deserialize)]
+pub struct ServiceEntry {
+    #[serde(default)]
+    pub service: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// `SubState` de systemd : `running`, `dead`, `exited`, `failed`…
+    #[serde(default)]
+    pub state: Option<String>,
+    /// `ActiveState` de systemd : `active`, `inactive`, `failed`…
+    #[serde(rename = "active-state", default)]
+    pub active_state: Option<String>,
+    /// `UnitFileState` : `enabled`, `disabled`, `masked`, `static`…
+    #[serde(rename = "unit-state", default)]
+    pub unit_state: Option<String>,
+}
+
+impl ServiceEntry {
+    /// Nom court de l'unité, tel qu'il apparaît en étiquette.
+    pub fn unit(&self) -> &str {
+        self.service
+            .as_deref()
+            .or(self.name.as_deref())
+            .map(|unit| unit.trim_end_matches(".service"))
+            .unwrap_or_default()
+    }
+
+    /// Vrai si systemd considère l'unité en marche.
+    ///
+    /// `active-state` est le champ fiable ; les versions qui ne le renvoient pas
+    /// laissent `state` faire foi.
+    pub fn is_running(&self) -> bool {
+        match self.active_state.as_deref() {
+            Some(state) => state == "active",
+            None => self.state.as_deref() == Some("running"),
+        }
+    }
+
+    pub fn has_failed(&self) -> bool {
+        self.active_state.as_deref() == Some("failed") || self.state.as_deref() == Some("failed")
+    }
+
+    /// Vrai si l'unité est censée tourner en permanence.
+    ///
+    /// `static` et `disabled` couvrent les unités à la demande (`pvebanner`,
+    /// `pve-guests`) : les compter parmi les services arrêtés ferait clignoter
+    /// l'alerte sur un nœud parfaitement sain.
+    pub fn is_enabled(&self) -> bool {
+        matches!(self.unit_state.as_deref(), Some("enabled" | "enabled-runtime") | None)
+    }
+}
+
+/// Entrée de `GET /api2/json/nodes/{node}/network`.
+#[derive(Debug, Default, Deserialize)]
+pub struct NetworkInterface {
+    pub iface: String,
+    #[serde(rename = "type", default)]
+    pub iface_type: Option<String>,
+    #[serde(default)]
+    pub active: Option<Num>,
+    #[serde(default)]
+    pub exists: Option<Num>,
+    #[serde(default)]
+    pub autostart: Option<Num>,
+    #[serde(default)]
+    pub mtu: Option<Num>,
+}
+
+/// Entrée de `GET /api2/json/nodes/{node}/netstat` : compteurs d'une interface
+/// virtuelle d'invité (`tap100i0` pour une VM, `veth200i0` pour un conteneur).
+#[derive(Debug, Default, Deserialize)]
+pub struct NetstatEntry {
+    #[serde(default)]
+    pub dev: Option<String>,
+    #[serde(default)]
+    pub vmid: Option<Num>,
+    #[serde(rename = "in", default)]
+    pub bytes_in: Option<Num>,
+    #[serde(rename = "out", default)]
+    pub bytes_out: Option<Num>,
+}
+
+/// `GET /api2/json/nodes/{node}/disks/lvm` : l'arbre des groupes de volumes.
+#[derive(Debug, Default, Deserialize)]
+pub struct LvmTree {
+    #[serde(default)]
+    pub children: Vec<LvmNode>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct LvmNode {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub size: Option<Num>,
+    #[serde(default)]
+    pub free: Option<Num>,
+    #[serde(default)]
+    pub children: Vec<LvmNode>,
+}
+
+/// Entrée de `GET /api2/json/nodes/{node}/disks/lvmthin`.
+#[derive(Debug, Default, Deserialize)]
+pub struct ThinPool {
+    #[serde(default)]
+    pub lv: Option<String>,
+    #[serde(default)]
+    pub vg: Option<String>,
+    #[serde(default)]
+    pub lv_size: Option<Num>,
+    #[serde(default)]
+    pub used: Option<Num>,
+    #[serde(default)]
+    pub metadata_size: Option<Num>,
+    #[serde(default)]
+    pub metadata_used: Option<Num>,
+}
+
+/// Entrée de `GET /api2/json/nodes/{node}/disks/directory`.
+#[derive(Debug, Default, Deserialize)]
+pub struct DirectoryMount {
+    #[serde(default)]
+    pub device: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(rename = "type", default)]
+    pub fs_type: Option<String>,
+}
+
+/// `GET /api2/json/nodes/{node}/ceph/osd` : l'arbre CRUSH.
+///
+/// Les nœuds de l'arbre n'ont pas de forme stable d'une version de Ceph à
+/// l'autre : seules les clés lues ici sont déclarées, tout le reste est ignoré.
+#[derive(Debug, Default, Deserialize)]
+pub struct CephOsdTree {
+    #[serde(default)]
+    pub root: Option<CephCrushNode>,
+    /// Drapeaux OSD, joints par des virgules. Absent quand aucun n'est posé.
+    #[serde(default)]
+    pub flags: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct CephCrushNode {
+    #[serde(default)]
+    pub id: Option<Num>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(rename = "type", default)]
+    pub node_type: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(rename = "in", default)]
+    pub in_cluster: Option<Num>,
+    #[serde(default)]
+    pub device_class: Option<String>,
+    #[serde(default)]
+    pub crush_weight: Option<Num>,
+    #[serde(default)]
+    pub reweight: Option<Num>,
+    #[serde(default)]
+    pub total_space: Option<Num>,
+    #[serde(default)]
+    pub bytes_used: Option<Num>,
+    #[serde(default)]
+    pub percent_used: Option<Num>,
+    #[serde(default)]
+    pub commit_latency_ms: Option<Num>,
+    #[serde(default)]
+    pub apply_latency_ms: Option<Num>,
+    #[serde(default)]
+    pub children: Vec<CephCrushNode>,
+}
+
+impl CephCrushNode {
+    pub fn is_osd(&self) -> bool {
+        self.node_type.as_deref() == Some("osd")
+    }
+
+    /// Nom affichable : `osd.3`, ou l'identifiant numérique à défaut.
+    pub fn osd_name(&self) -> String {
+        match self.name.as_deref() {
+            Some(name) if !name.is_empty() => name.to_string(),
+            _ => self.id.map(|id| format!("osd.{}", id.0 as i64)).unwrap_or_default(),
+        }
+    }
+}
+
+/// Entrée de `GET /api2/json/nodes/{node}/ceph/pool`.
+#[derive(Debug, Default, Deserialize)]
+pub struct CephPool {
+    #[serde(default)]
+    pub pool_name: Option<String>,
+    #[serde(default)]
+    pub size: Option<Num>,
+    #[serde(default)]
+    pub min_size: Option<Num>,
+    #[serde(default)]
+    pub pg_num: Option<Num>,
+    #[serde(default)]
+    pub pg_num_final: Option<Num>,
+    #[serde(default)]
+    pub pg_autoscale_mode: Option<String>,
+    #[serde(default)]
+    pub crush_rule_name: Option<String>,
+    #[serde(rename = "type", default)]
+    pub pool_type: Option<String>,
+    #[serde(default)]
+    pub bytes_used: Option<Num>,
+    /// Fraction 0..1 sur les versions récentes ; certaines livrent un pourcentage.
+    #[serde(default)]
+    pub percent_used: Option<Num>,
+}
+
+/// Entrée de `GET /api2/json/nodes/{node}/ceph/fs`.
+#[derive(Debug, Default, Deserialize)]
+pub struct CephFs {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub metadata_pool: Option<String>,
+    #[serde(default)]
+    pub data_pool: Option<String>,
+}
+
+/// Entrée de `GET /api2/json/cluster/ceph/flags`.
+#[derive(Debug, Default, Deserialize)]
+pub struct CephFlag {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub value: Option<Num>,
+}
+
+/// Entrée de `GET /api2/json/cluster/ceph/health-mute`.
+#[derive(Debug, Default, Deserialize)]
+pub struct CephHealthMute {
+    #[serde(default)]
+    pub code: Option<String>,
+    #[serde(default)]
+    pub sticky: Option<Num>,
+}
+
+/// `GET /api2/json/cluster/ha/status/manager_status`.
+///
+/// Réponse libre côté schéma : seules les clés lues sont déclarées, et chacune
+/// peut manquer selon la version ou l'état du gestionnaire.
+#[derive(Debug, Default, Deserialize)]
+pub struct HaManagerStatus {
+    #[serde(default)]
+    pub manager_status: Option<HaManagerCore>,
+    #[serde(default)]
+    pub lrm_status: std::collections::BTreeMap<String, HaLrmStatus>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct HaManagerCore {
+    #[serde(default)]
+    pub master_node: Option<String>,
+    #[serde(default)]
+    pub timestamp: Option<Num>,
+    /// `online`, `unknown`, `fence`, `gone`, `maintenance`.
+    #[serde(default)]
+    pub node_status: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct HaLrmStatus {
+    /// `active`, `maintenance`, `restart`, `shutdown`.
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub timestamp: Option<Num>,
+}
+
+/// `GET /api2/json/cluster/backup/{id}/included_volumes` : l'arbre des invités
+/// couverts par un travail planifié et, pour chacun, le sort de ses volumes.
+#[derive(Debug, Default, Deserialize)]
+pub struct IncludedVolumes {
+    #[serde(default)]
+    pub children: Vec<IncludedGuest>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct IncludedGuest {
+    /// VMID de l'invité.
+    #[serde(default)]
+    pub id: Option<Num>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(rename = "type", default)]
+    pub guest_type: Option<String>,
+    #[serde(default)]
+    pub children: Vec<IncludedVolume>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct IncludedVolume {
+    #[serde(default)]
+    pub included: Option<Num>,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+impl IncludedVolume {
+    pub fn is_included(&self) -> bool {
+        Num::flag(self.included)
+    }
+
+    /// Vrai si l'exclusion est normale et ne mérite pas d'être signalée.
+    ///
+    /// Un lecteur de CD, une image `cloudinit` ou une entrée qui n'est pas un
+    /// volume ne sont jamais sauvegardés, par construction : les compter ferait
+    /// crier l'alerte sur chaque machine du parc.
+    pub fn exclusion_is_expected(&self) -> bool {
+        let reason = self.reason.as_deref().unwrap_or("").to_ascii_lowercase();
+        const EXPECTED: [&str; 5] = ["cd-rom", "cdrom", "not a volume", "cloudinit", "cloud-init"];
+        EXPECTED.iter().any(|motif| reason.contains(motif))
+    }
+}
+
+/// Réponse d'un appel à l'agent QEMU : `{"result": …}`.
+#[derive(Debug, Default, Deserialize)]
+pub struct AgentOsInfo {
+    #[serde(default)]
+    pub result: AgentOsResult,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct AgentOsResult {
+    /// `debian`, `mswindows`, `alpine`…
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(rename = "pretty-name", default)]
+    pub pretty_name: Option<String>,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(rename = "version-id", default)]
+    pub version_id: Option<String>,
+    #[serde(rename = "kernel-release", default)]
+    pub kernel_release: Option<String>,
+}
+
+/// `GET /nodes/{node}/qemu/{vmid}/agent/network-get-interfaces`.
+#[derive(Debug, Default, Deserialize)]
+pub struct AgentInterfaces {
+    #[serde(default)]
+    pub result: Vec<AgentInterface>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct AgentInterface {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(rename = "ip-addresses", default)]
+    pub ip_addresses: Vec<AgentIpAddress>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct AgentIpAddress {
+    #[serde(rename = "ip-address", default)]
+    pub ip_address: Option<String>,
+}
+
+/// Entrée de `GET /nodes/{node}/lxc/{vmid}/interfaces`.
+///
+/// Les conteneurs n'ont pas d'agent : PVE lit leurs adresses depuis l'espace de
+/// noms réseau, et renvoie une forme à part, plus simple que celle de l'agent.
+#[derive(Debug, Default, Deserialize)]
+pub struct LxcInterface {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub inet: Option<String>,
+    #[serde(default)]
+    pub inet6: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

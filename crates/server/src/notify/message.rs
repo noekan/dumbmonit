@@ -784,13 +784,13 @@ mod tests {
         // Deux « Service down » sur le même équipement se distinguent par l'URL.
         let mut service = item("Service down", NotifyReason::Firing, Severity::Warning);
         service.series_key =
-            r#"dumbmonit_probe_success{host="bad",probe="http",target="25",url="http://lab/x6"}"#
+            r#"dumbmonit_probe_success{host="bad",probe="http",target="25",url="http://host/x6"}"#
                 .to_string();
-        assert!(render(&group(vec![service])).text.contains("Service down — http://lab/x6 —"));
+        assert!(render(&group(vec![service])).text.contains("Service down — http://host/x6 —"));
 
         // Une série sans autre étiquette que celles de l'équipement n'ajoute rien.
         let mut host = item("Device unreachable", NotifyReason::Firing, Severity::Critical);
-        host.series_key = r#"dumbmonit_up{host="nas",tag_site="lab",target="1"}"#.to_string();
+        host.series_key = r#"dumbmonit_up{host="nas",tag_site="cellar",target="1"}"#.to_string();
         assert!(
             render(&group(vec![host])).text.starts_with("🔴 Critical · Device unreachable — 95 %")
         );
@@ -805,10 +805,10 @@ mod tests {
         );
         assert_eq!(
             series_identity(
-                r#"m{host="nas",result="fail",target="13",task="Lab VMs",task_id="6"}"#
+                r#"m{host="nas",result="fail",target="13",task="Office VMs",task_id="6"}"#
             )
             .as_deref(),
-            Some("Lab VMs")
+            Some("Office VMs")
         );
         assert_eq!(
             series_identity(r#"m{host="nas",mountpoint="/data",target="1"}"#).as_deref(),

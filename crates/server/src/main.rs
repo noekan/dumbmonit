@@ -95,6 +95,14 @@ async fn run(config: Config) -> Result<()> {
             .with_observer(collectors::pbs_history::sqlite_observer(pool.clone())),
     ));
     registry.register(Arc::new(
+        collectors::PdmCollector::new()
+            .with_observer(collectors::pdm_history::sqlite_observer(pool.clone())),
+    ));
+    registry.register(Arc::new(
+        collectors::PmgCollector::new()
+            .with_observer(collectors::pmg_history::sqlite_observer(pool.clone())),
+    ));
+    registry.register(Arc::new(
         collectors::SynologyCollector::new()
             .with_abb_history(collectors::synology_history::sqlite_history(pool.clone())),
     ));

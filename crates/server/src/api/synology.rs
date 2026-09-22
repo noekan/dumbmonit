@@ -467,17 +467,22 @@ mod tests {
             serie(
                 "dumbmonit_abb_task_last_status",
                 0.0,
-                &[("task_id", "6"), ("task", "Lab VMs"), ("source_type", "vm"), ("result", "fail")],
+                &[
+                    ("task_id", "6"),
+                    ("task", "Office VMs"),
+                    ("source_type", "vm"),
+                    ("result", "fail"),
+                ],
             ),
             serie(
                 "dumbmonit_abb_task_enabled",
                 1.0,
-                &[("task_id", "6"), ("task", "Lab VMs"), ("source_type", "vm")],
+                &[("task_id", "6"), ("task", "Office VMs"), ("source_type", "vm")],
             ),
             serie(
                 "dumbmonit_abb_task_last_success_seconds",
                 7200.0,
-                &[("task_id", "6"), ("task", "Lab VMs")],
+                &[("task_id", "6"), ("task", "Office VMs")],
             ),
             serie(
                 "dumbmonit_abb_task_last_status",
@@ -492,7 +497,7 @@ mod tests {
         ];
         let tasks = build_tasks(&series);
         assert_eq!(tasks.len(), 2);
-        assert_eq!(tasks[0].name, "Lab VMs");
+        assert_eq!(tasks[0].name, "Office VMs");
         assert_eq!(tasks[0].result, "fail");
         assert_eq!(tasks[0].last_status, Some(0.0));
         assert_eq!(tasks[0].enabled, Some(true));

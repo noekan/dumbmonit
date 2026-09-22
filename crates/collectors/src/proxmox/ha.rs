@@ -8,7 +8,7 @@
 use dumbmonit_proto::Sample;
 
 use super::metrics::{GuestKind, gauge};
-use super::model::HaStatusEntry;
+use super::model::{HaManagerStatus, HaStatusEntry};
 
 /// États dans lesquels le gestionnaire a renoncé à relancer la ressource.
 const ERROR_STATES: [&str; 3] = ["error", "fence", "recovery"];
@@ -77,6 +77,66 @@ pub fn ha_samples(entries: &[HaStatusEntry], ts_ms: i64) -> Vec<Sample> {
     // Toujours publié, même à zéro : c'est ce qui distingue « HA sans ressource »
     // de « HA non collectée ».
     samples.push(gauge("ha_resources_total", f64::from(resources), ts_ms));
+    samples
+}
+
+/// Délai au-delà duquel l'horodatage d'un LRM est considéré périmé.
+///
+/// Le gestionnaire réécrit son état toutes les dix secondes ; un nœud dont
+/// l'horodatage a deux minutes ne surveille plus rien, et ses machines HA ne
+/// seront ni relancées ni déplacées.
+const LRM_STALE_SECONDS: f64 = 120.0;
+
+/// `GET /cluster/ha/status/manager_status`.
+///
+/// `status/current` donne une liste de lignes déjà mises en forme pour
+/// l'interface ; `manager_status` donne la structure elle-même, et deux choses
+/// qu'on ne trouve nulle part ailleurs : l'avis du gestionnaire sur chaque nœud
+/// (`online`, `fence`, `gone`, `maintenance`) et l'horodatage de chaque LRM,
+/// qui dit si l'agent local répond encore.
+pub fn manager_samples(status: &HaManagerStatus, now_s: i64, ts_ms: i64) -> Vec<Sample> {
+    let mut samples = Vec::new();
+
+    if let Some(core) = &status.manager_status {
+        if let Some(master) = core.master_node.as_deref().filter(|node| !node.is_empty()) {
+            samples.push(gauge("ha_master_info", 1.0, ts_ms).with_label("node", master));
+        }
+        if let Some(timestamp) = core.timestamp {
+            samples.push(gauge(
+                "ha_manager_age_seconds",
+                (now_s as f64 - timestamp.0).max(0.0),
+                ts_ms,
+            ));
+        }
+        for (node, state) in &core.node_status {
+            samples.push(
+                gauge("ha_node_online", if state == "online" { 1.0 } else { 0.0 }, ts_ms)
+                    .with_label("node", node.clone()),
+            );
+            samples.push(
+                gauge("ha_node_status_info", 1.0, ts_ms)
+                    .with_label("node", node.clone())
+                    .with_label("status", state.clone()),
+            );
+        }
+    }
+
+    for (node, lrm) in &status.lrm_status {
+        let mut push = |sample: Sample| samples.push(sample.with_label("node", node.clone()));
+        push(
+            gauge("ha_lrm_mode_info", 1.0, ts_ms)
+                .with_label("mode", lrm.mode.clone().unwrap_or_default())
+                .with_label("state", lrm.state.clone().unwrap_or_default()),
+        );
+        // Sans horodatage, on ne conclut rien : le LRM d'un nœud qui vient de
+        // rejoindre le cluster n'a pas encore écrit.
+        if let Some(timestamp) = lrm.timestamp {
+            let age = (now_s as f64 - timestamp.0).max(0.0);
+            push(gauge("ha_lrm_age_seconds", age, ts_ms));
+            push(gauge("ha_lrm_stale", if age > LRM_STALE_SECONDS { 1.0 } else { 0.0 }, ts_ms));
+        }
+    }
+
     samples
 }
 
@@ -184,5 +244,58 @@ mod tests {
         assert_eq!(parse_sid("ct:200"), Some((GuestKind::Lxc, "200")));
         assert_eq!(parse_sid("bizarre"), None);
         assert_eq!(parse_sid("fs:1"), None);
+    }
+
+    /// `GET /cluster/ha/status/manager_status` d'un cluster dont pve2 est parti :
+    /// le gestionnaire le voit « unknown » et son LRM n'écrit plus.
+    const MANAGER_STATUS: &str = r#"{"data":{
+      "quorum":{"node":"pve1","quorate":"1"},
+      "manager_status":{"master_node":"pve1","timestamp":1789510630,
+        "node_status":{"pve1":"online","pve2":"unknown"},
+        "service_status":{"vm:100":{"node":"pve1","state":"started","uid":"abc"}}},
+      "lrm_status":{
+        "pve1":{"mode":"active","state":"wait_for_agent_lock","timestamp":1789510634,"results":{}},
+        "pve2":{"mode":"active","state":"active","timestamp":1789510000,"results":{}}}
+    }}"#;
+
+    #[test]
+    fn le_gestionnaire_designe_son_maitre_et_juge_chaque_noeud() {
+        let status =
+            serde_json::from_str::<Envelope<HaManagerStatus>>(MANAGER_STATUS).unwrap().data;
+        let samples = manager_samples(&status, 1_789_510_640, 1000);
+
+        assert_eq!(valeur(&samples, r#"proxmox_ha_master_info{node="pve1"}"#), Some(1.0));
+        assert_eq!(valeur(&samples, r#"proxmox_ha_node_online{node="pve1"}"#), Some(1.0));
+        assert_eq!(valeur(&samples, r#"proxmox_ha_node_online{node="pve2"}"#), Some(0.0));
+        assert_eq!(
+            valeur(&samples, r#"proxmox_ha_node_status_info{node="pve2",status="unknown"}"#),
+            Some(1.0)
+        );
+        assert_eq!(valeur(&samples, "proxmox_ha_manager_age_seconds"), Some(10.0));
+    }
+
+    #[test]
+    fn un_lrm_qui_necrit_plus_est_signale() {
+        let status =
+            serde_json::from_str::<Envelope<HaManagerStatus>>(MANAGER_STATUS).unwrap().data;
+        let samples = manager_samples(&status, 1_789_510_640, 1000);
+
+        assert_eq!(valeur(&samples, r#"proxmox_ha_lrm_stale{node="pve1"}"#), Some(0.0));
+        assert_eq!(valeur(&samples, r#"proxmox_ha_lrm_stale{node="pve2"}"#), Some(1.0));
+        assert_eq!(valeur(&samples, r#"proxmox_ha_lrm_age_seconds{node="pve2"}"#), Some(640.0));
+        assert_eq!(
+            valeur(
+                &samples,
+                r#"proxmox_ha_lrm_mode_info{mode="active",node="pve1",state="wait_for_agent_lock"}"#
+            ),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn une_reponse_vide_ne_produit_rien_et_ne_panique_pas() {
+        let status =
+            serde_json::from_str::<Envelope<HaManagerStatus>>(r#"{"data":{}}"#).unwrap().data;
+        assert!(manager_samples(&status, 1_000, 1000).is_empty());
     }
 }

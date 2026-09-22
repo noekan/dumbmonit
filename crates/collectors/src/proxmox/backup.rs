@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 use dumbmonit_proto::Sample;
 
 use super::metrics::{GuestKind, gauge};
-use super::model::{BackupJob, BackupVolume, NotBackedUp, TaskEntry};
+use super::model::{BackupJob, BackupVolume, IncludedVolumes, NotBackedUp, TaskEntry};
 
 /// Identité d'un invité, pour étiqueter les séries de sauvegarde de façon
 /// lisible dans une notification.
@@ -292,6 +292,61 @@ pub fn guest_backup_samples(
     samples
 }
 
+/// `GET /cluster/backup/{id}/included_volumes` : le contenu réel d'un travail.
+///
+/// `/cluster/backup` dit quels invités un travail vise ; il ne dit pas quels
+/// *disques* de ces invités finiront dans l'archive. Une machine dont le volume
+/// de données porte `backup=0` est sauvegardée tous les soirs, avec succès, et
+/// il n'y a pourtant rien dedans — c'est la panne de sauvegarde la plus
+/// silencieuse qui soit, et elle ne se découvre qu'en restaurant.
+///
+/// Les exclusions normales — lecteur de CD, image `cloudinit`, entrée qui n'est
+/// pas un volume — sont comptées dans les totaux mais jamais signalées par
+/// invité : sans ce tri, chaque machine dotée d'un lecteur virtuel lèverait une
+/// alerte.
+pub fn included_volume_samples(job: &str, tree: &IncludedVolumes, ts_ms: i64) -> Vec<Sample> {
+    let mut samples = Vec::new();
+    let mut included = 0u32;
+    let mut excluded = 0u32;
+
+    for guest in &tree.children {
+        let Some(vmid) = guest.id.map(|id| (id.0 as i64).to_string()) else { continue };
+        let name = guest.name.clone().unwrap_or_else(|| vmid.clone());
+        let kind = guest.guest_type.clone().unwrap_or_default();
+
+        let mut surprises: BTreeMap<String, u32> = BTreeMap::new();
+        for volume in &guest.children {
+            if volume.is_included() {
+                included += 1;
+                continue;
+            }
+            excluded += 1;
+            if volume.exclusion_is_expected() {
+                continue;
+            }
+            let reason = volume.reason.clone().unwrap_or_default();
+            *surprises.entry(reason).or_default() += 1;
+        }
+
+        for (reason, count) in surprises {
+            samples.push(
+                gauge("backup_job_guest_excluded_volumes", f64::from(count), ts_ms)
+                    .with_label("job", job)
+                    .with_label("vmid", vmid.clone())
+                    .with_label("name", name.clone())
+                    .with_label("type", kind.clone())
+                    .with_label("reason", reason),
+            );
+        }
+    }
+
+    let mut push = |sample: Sample| samples.push(sample.with_label("job", job));
+    push(gauge("backup_job_guests", tree.children.len() as f64, ts_ms));
+    push(gauge("backup_job_volumes_included", f64::from(included), ts_ms));
+    push(gauge("backup_job_volumes_excluded", f64::from(excluded), ts_ms));
+    samples
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,7 +548,7 @@ mod tests {
 
     /// `GET /cluster/backup`
     const BACKUP_JOBS: &str = r#"{"data":[
-      {"id":"backup-7a2b3c","type":"vzdump","enabled":1,"schedule":"01:00","starttime":"01:00","storage":"pbs-lab","mode":"snapshot","all":1,"exclude":"9000,101","compress":"zstd","mailnotification":"failure","notes-template":"{{guestname}}","prune-backups":"keep-last=3","next-run":1789520400,"comment":"nightly, everything but the template","repeat-missed":0}
+      {"id":"backup-7a2b3c","type":"vzdump","enabled":1,"schedule":"01:00","starttime":"01:00","storage":"pbs-main","mode":"snapshot","all":1,"exclude":"9000,101","compress":"zstd","mailnotification":"failure","notes-template":"{{guestname}}","prune-backups":"keep-last=3","next-run":1789520400,"comment":"nightly, everything but the template","repeat-missed":0}
     ]}"#;
 
     /// `GET /cluster/backup-info/not-backed-up`
@@ -522,7 +577,7 @@ mod tests {
 
         let samples = cluster_job_samples(&jobs, &absents, &invites(), &runs, JOB_NOW, 1000);
 
-        let job = r#"{job="backup-7a2b3c",schedule="01:00",storage="pbs-lab"}"#;
+        let job = r#"{job="backup-7a2b3c",schedule="01:00",storage="pbs-main"}"#;
         assert_eq!(valeur(&samples, &format!("proxmox_backup_job_enabled{job}")), Some(1.0));
         assert_eq!(
             valeur(&samples, &format!("proxmox_backup_job_next_run_seconds{job}")),
@@ -568,5 +623,64 @@ mod tests {
         let recente = JobRun { start: 200, ok: false };
         assert_eq!(ancienne.latest(recente), recente);
         assert_eq!(recente.latest(ancienne), recente);
+    }
+
+    /// `GET /cluster/backup/backup-7a2b3c/included_volumes` : la VM 101 a un
+    /// disque de données exclu à la main, la 100 n'a que son lecteur de CD.
+    const INCLUDED_VOLUMES: &str = r#"{"data":{"children":[
+      {"id":100,"name":"router-vm","type":"qemu","children":[
+        {"id":"scsi0","name":"local-lvm:vm-100-disk-0","included":true,"reason":"because"},
+        {"id":"ide2","name":"local:iso/debian.iso","included":false,"reason":"CD-ROM"}]},
+      {"id":101,"name":"win11-desktop","type":"qemu","children":[
+        {"id":"scsi0","name":"local-lvm:vm-101-disk-0","included":true,"reason":"because"},
+        {"id":"scsi1","name":"local-lvm:vm-101-disk-1","included":false,"reason":"disk excluded from backup"}]},
+      {"id":200,"name":"pihole","type":"lxc","children":[
+        {"id":"rootfs","name":"local-lvm:vm-200-disk-0","included":true,"reason":"because"}]}
+    ]}}"#;
+
+    #[test]
+    fn un_disque_exclu_a_la_main_est_signale_par_invite() {
+        let tree =
+            serde_json::from_str::<Envelope<IncludedVolumes>>(INCLUDED_VOLUMES).unwrap().data;
+        let samples = included_volume_samples("backup-7a2b3c", &tree, 1000);
+
+        assert_eq!(
+            valeur(
+                &samples,
+                r#"proxmox_backup_job_guest_excluded_volumes{job="backup-7a2b3c",name="win11-desktop",reason="disk excluded from backup",type="qemu",vmid="101"}"#
+            ),
+            Some(1.0)
+        );
+        // Le lecteur de CD de la 100 est exclu, mais c'est l'ordre normal des
+        // choses : aucune série par invité.
+        assert!(!samples.iter().any(|s| s.metric == "proxmox_backup_job_guest_excluded_volumes"
+            && s.labels["vmid"] == "100"));
+    }
+
+    #[test]
+    fn les_totaux_dun_travail_comptent_toutes_les_exclusions() {
+        let tree =
+            serde_json::from_str::<Envelope<IncludedVolumes>>(INCLUDED_VOLUMES).unwrap().data;
+        let samples = included_volume_samples("backup-7a2b3c", &tree, 1000);
+        let job = r#"{job="backup-7a2b3c"}"#;
+        assert_eq!(valeur(&samples, &format!("proxmox_backup_job_guests{job}")), Some(3.0));
+        assert_eq!(
+            valeur(&samples, &format!("proxmox_backup_job_volumes_included{job}")),
+            Some(3.0)
+        );
+        assert_eq!(
+            valeur(&samples, &format!("proxmox_backup_job_volumes_excluded{job}")),
+            Some(2.0),
+            "le lecteur de CD compte dans le total, pas dans l'alerte"
+        );
+    }
+
+    #[test]
+    fn un_travail_sans_invite_publie_des_totaux_a_zero() {
+        let tree = serde_json::from_str::<Envelope<IncludedVolumes>>(r#"{"data":{"children":[]}}"#)
+            .unwrap()
+            .data;
+        let samples = included_volume_samples("vide", &tree, 1000);
+        assert_eq!(valeur(&samples, r#"proxmox_backup_job_guests{job="vide"}"#), Some(0.0));
     }
 }

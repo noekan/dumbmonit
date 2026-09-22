@@ -1,15 +1,17 @@
-//! Tableau des invités d'un hyperviseur Proxmox VE : `GET /api/targets/{id}/proxmox/guests`.
+//! Ce que l'interface lit d'un hyperviseur Proxmox VE.
 //!
-//! L'interface pourrait recomposer ce tableau elle-même à partir des séries,
-//! mais il lui faudrait une douzaine de requêtes et la logique de recollement
-//! par VMID — et chaque page qui le montrerait la referait. Tout part donc
-//! d'ici : quatre requêtes instantanées à VictoriaMetrics, recollées par VMID,
-//! une ligne par machine virtuelle ou conteneur avec ce qu'un administrateur
-//! cherche d'un coup d'œil (état, processeur, mémoire, disque, réseau, âge de la
-//! dernière sauvegarde, haute disponibilité).
+//! Trois vues, trois routes : les invités, les nœuds, Ceph.
+//!
+//! L'interface pourrait les recomposer elle-même à partir des séries, mais il
+//! lui faudrait une vingtaine de requêtes et toute la logique de recollement par
+//! VMID, par nœud et par OSD — et chaque page qui les montrerait la referait.
+//! Tout part donc d'ici : quelques requêtes instantanées à VictoriaMetrics,
+//! recollées en lignes prêtes à afficher.
 //!
 //! Rien n'est mis en cache ni interrogé sur l'hyperviseur : la réponse reflète
-//! la dernière collecte, en quelques millisecondes.
+//! la dernière collecte, en quelques millisecondes. Tout ce qui peut manquer est
+//! `null` ou une liste vide, jamais zéro : un pool à provisionnement fin dont
+//! l'occupation est inconnue ne doit pas se lire « vide ».
 
 use std::collections::BTreeMap;
 
@@ -25,7 +27,10 @@ use crate::state::AppState;
 use crate::tsdb::InstantSeries;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/targets/{id}/proxmox/guests", get(list_guests))
+    Router::new()
+        .route("/targets/{id}/proxmox/guests", get(list_guests))
+        .route("/targets/{id}/proxmox/nodes", get(list_nodes))
+        .route("/targets/{id}/proxmox/ceph", get(read_ceph))
 }
 
 /// Une ligne du tableau : ce que la dernière collecte sait d'un invité.
@@ -68,19 +73,22 @@ pub struct GuestView {
     pub last_backup_age_seconds: Option<f64>,
     /// État de la ressource HA (`started`, `stopped`, `error`…), `null` hors HA.
     pub ha_state: Option<String>,
+    /// Pool du cluster auquel l'invité appartient, `null` s'il n'en a pas.
+    pub pool: Option<String>,
+    /// Verrou en cours (`backup`, `migrate`, `snapshot`…), `null` sinon. Posé
+    /// depuis des heures, il bloque toute opération sur la machine.
+    pub lock: Option<String>,
+    /// Système d'exploitation rapporté de l'intérieur, `null` sans agent.
+    pub os: Option<String>,
+    /// Première adresse routable connue, `null` si aucune n'est rapportée.
+    pub ip: Option<String>,
 }
 
 pub async fn list_guests(
     State(state): State<AppState>,
     Path(id): Path<TargetId>,
 ) -> ApiResult<Json<Vec<GuestView>>> {
-    let target = db::targets::get(&state.pool, &state.cipher, id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound(format!("Device {id} not found.")))?;
-    if target.kind != "proxmox" {
-        return Err(ApiError::BadRequest("This device is not a Proxmox VE hypervisor.".into()));
-    }
-
+    let target = proxmox_target(&state, id).await?;
     let window = lookback(&target);
     let (q_gauges, q_rates, q_backups, q_ha) = (
         gauges_query(id, window),
@@ -111,7 +119,8 @@ fn lookback(target: &Target) -> u64 {
 
 const GAUGES: &str = "status_info|running|cpu_percent|cpu_count|memory_used_bytes|\
                       memory_total_bytes|memory_percent|balloon_bytes|disk_used_bytes|\
-                      disk_total_bytes|disk_used_percent|agent_running|uptime_seconds";
+                      disk_total_bytes|disk_used_percent|agent_running|uptime_seconds|\
+                      pool_info|locked|os_info|ip_info";
 
 fn gauges_query(id: TargetId, window: u64) -> String {
     format!(
@@ -180,6 +189,14 @@ fn assemble(
             "disk_used_percent" => guest.disk_percent = Some(value),
             "agent_running" => guest.agent = Some(value > 0.0),
             "uptime_seconds" => guest.uptime_seconds = Some(value),
+            "pool_info" => guest.pool = Some(label(series, "pool")).filter(|p| !p.is_empty()),
+            "locked" => guest.lock = Some(label(series, "lock")).filter(|l| !l.is_empty()),
+            "os_info" => guest.os = Some(label(series, "os")).filter(|os| !os.is_empty()),
+            // Un invité peut annoncer plusieurs adresses ; la première suffit à
+            // le reconnaître, et le tableau n'a de place que pour une.
+            "ip_info" if guest.ip.is_none() => {
+                guest.ip = Some(label(series, "ip")).filter(|ip| !ip.is_empty());
+            }
             _ => {}
         }
     }
@@ -226,6 +243,11 @@ fn assemble(
             guest.disk_write_bps = None;
             guest.uptime_seconds = None;
             guest.agent = None;
+            // Le système et l'adresse sont rapportés de l'intérieur : une
+            // machine éteinte ne dit plus rien, et la dernière valeur connue
+            // ferait croire le contraire.
+            guest.os = None;
+            guest.ip = None;
             if guest.kind == "qemu" {
                 guest.disk_used_bytes = None;
                 guest.disk_percent = None;
@@ -256,6 +278,377 @@ fn metric(series: &InstantSeries) -> &str {
         .get("__name__")
         .map(String::as_str)
         .and_then(|name| name.strip_prefix("dumbmonit_proxmox_guest_"))
+        .unwrap_or_default()
+}
+
+// --- Nœuds -------------------------------------------------------------------
+
+/// Un nœud du cluster, vu de l'extérieur : est-il là, tient-il debout, et
+/// qu'est-ce qui cloche chez lui.
+#[derive(Debug, Default, Serialize, PartialEq)]
+pub struct NodeView {
+    pub name: String,
+    pub up: bool,
+    pub cpu_percent: Option<f64>,
+    pub memory_percent: Option<f64>,
+    pub rootfs_percent: Option<f64>,
+    pub uptime_seconds: Option<f64>,
+    /// Version de `pve-manager` installée sur ce nœud-ci.
+    pub version: Option<String>,
+    /// Démons du nœud arrêtés ou en échec, par leur nom d'unité.
+    pub services_down: Vec<String>,
+    /// Interfaces déclarées au démarrage qui ne sont pas montées.
+    pub interfaces_offline: Vec<String>,
+    pub thin_pools: Vec<ThinPoolView>,
+    pub volume_groups: Vec<VolumeGroupView>,
+}
+
+#[derive(Debug, Default, Serialize, PartialEq)]
+pub struct ThinPoolView {
+    pub name: String,
+    pub vg: String,
+    pub used_percent: Option<f64>,
+    /// Les métadonnées ont leur propre volume, bien plus petit : c'est souvent
+    /// lui qui sature le premier, et il met le pool en lecture seule.
+    pub metadata_used_percent: Option<f64>,
+    pub size_bytes: Option<f64>,
+}
+
+#[derive(Debug, Default, Serialize, PartialEq)]
+pub struct VolumeGroupView {
+    pub name: String,
+    pub used_percent: Option<f64>,
+    pub size_bytes: Option<f64>,
+}
+
+/// Séries à une valeur par nœud.
+const NODE_GAUGES: &str = "up|cpu_percent|memory_percent|rootfs_percent|uptime_seconds";
+
+/// Séries dont chaque point décrit un enfant du nœud : un démon, une interface,
+/// un pool, un groupe de volumes, ou la version du nœud lui-même.
+const NODE_PARTS: &str = "pve_version_info|service_running|interface_offline|\
+                          thinpool_used_percent|thinpool_metadata_used_percent|\
+                          thinpool_size_bytes|lvm_vg_used_percent|lvm_vg_size_bytes";
+
+fn node_query(id: TargetId, window: u64, names: &str) -> String {
+    format!(
+        "last_over_time({{__name__=~\"dumbmonit_proxmox_node_({names})\", \
+         target=\"{id}\"}}[{window}s]) keep_metric_names"
+    )
+}
+
+pub async fn list_nodes(
+    State(state): State<AppState>,
+    Path(id): Path<TargetId>,
+) -> ApiResult<Json<Vec<NodeView>>> {
+    let target = proxmox_target(&state, id).await?;
+    let window = lookback(&target);
+    let (q_gauges, q_parts) =
+        (node_query(id, window, NODE_GAUGES), node_query(id, window, NODE_PARTS));
+    let (gauges, parts) =
+        futures::join!(state.victoria.query(&q_gauges), state.victoria.query(&q_parts));
+    let gauges = gauges.map_err(|error| ApiError::BadRequest(format!("{error:#}")))?;
+    let parts = parts.map_err(|error| ApiError::BadRequest(format!("{error:#}")))?;
+    Ok(Json(assemble_nodes(&gauges, &parts)))
+}
+
+fn assemble_nodes(gauges: &[InstantSeries], parts: &[InstantSeries]) -> Vec<NodeView> {
+    let mut nodes: BTreeMap<String, NodeView> = BTreeMap::new();
+    // Les pools et les groupes sont indexés à part : une série par mesure, et il
+    // en faut deux ou trois pour composer une ligne.
+    let mut thin: BTreeMap<(String, String, String), ThinPoolView> = BTreeMap::new();
+    let mut groups: BTreeMap<(String, String), VolumeGroupView> = BTreeMap::new();
+
+    for series in gauges {
+        let Some((node, value)) = node_identity(series) else { continue };
+        let view = nodes.entry(node.clone()).or_insert_with(|| NodeView {
+            name: node,
+            // Sans série `up`, un nœud qui n'apparaît que par ses enfants est
+            // présumé debout : c'est bien lui qui a répondu.
+            up: true,
+            ..Default::default()
+        });
+        match node_metric(series) {
+            "up" => view.up = value > 0.0,
+            "cpu_percent" => view.cpu_percent = Some(value),
+            "memory_percent" => view.memory_percent = Some(value),
+            "rootfs_percent" => view.rootfs_percent = Some(value),
+            "uptime_seconds" => view.uptime_seconds = Some(value),
+            _ => {}
+        }
+    }
+
+    for series in parts {
+        let Some((node, value)) = node_identity(series) else { continue };
+        let view = nodes.entry(node.clone()).or_insert_with(|| NodeView {
+            name: node.clone(),
+            up: true,
+            ..Default::default()
+        });
+        match node_metric(series) {
+            "pve_version_info" => {
+                view.version = Some(label(series, "version")).filter(|v| !v.is_empty());
+            }
+            "service_running" if value == 0.0 => view.services_down.push(label(series, "service")),
+            "interface_offline" if value > 0.0 => {
+                view.interfaces_offline.push(label(series, "iface"));
+            }
+            metric if metric.starts_with("thinpool_") => {
+                let key = (node, label(series, "vg"), label(series, "pool"));
+                let pool = thin.entry(key.clone()).or_insert_with(|| ThinPoolView {
+                    name: key.2.clone(),
+                    vg: key.1.clone(),
+                    ..Default::default()
+                });
+                match metric {
+                    "thinpool_used_percent" => pool.used_percent = Some(value),
+                    "thinpool_metadata_used_percent" => pool.metadata_used_percent = Some(value),
+                    "thinpool_size_bytes" => pool.size_bytes = Some(value),
+                    _ => {}
+                }
+            }
+            metric if metric.starts_with("lvm_vg_") => {
+                let key = (node, label(series, "vg"));
+                let group = groups.entry(key.clone()).or_insert_with(|| VolumeGroupView {
+                    name: key.1.clone(),
+                    ..Default::default()
+                });
+                match metric {
+                    "lvm_vg_used_percent" => group.used_percent = Some(value),
+                    "lvm_vg_size_bytes" => group.size_bytes = Some(value),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for ((node, _, _), pool) in thin {
+        if let Some(view) = nodes.get_mut(&node) {
+            view.thin_pools.push(pool);
+        }
+    }
+    for ((node, _), group) in groups {
+        if let Some(view) = nodes.get_mut(&node) {
+            view.volume_groups.push(group);
+        }
+    }
+
+    let mut list: Vec<NodeView> = nodes.into_values().collect();
+    for view in &mut list {
+        view.services_down.sort();
+        view.interfaces_offline.sort();
+    }
+    list
+}
+
+// --- Ceph --------------------------------------------------------------------
+
+/// L'état de Ceph, quand il y en a un.
+///
+/// `available` distingue « pas de Ceph sur ce cluster » de « Ceph pas encore
+/// collecté » : sans lui, les deux se ressemblent et l'interface ne saurait pas
+/// s'il faut afficher la section.
+#[derive(Debug, Default, Serialize, PartialEq)]
+pub struct CephView {
+    pub available: bool,
+    /// 0 OK, 1 WARN, 2 ERR, 3 inconnu.
+    pub health: Option<f64>,
+    pub health_status: Option<String>,
+    pub bytes_used: Option<f64>,
+    pub bytes_total: Option<f64>,
+    pub used_percent: Option<f64>,
+    pub osds_total: Option<f64>,
+    pub osds_up: Option<f64>,
+    pub osds_in: Option<f64>,
+    pub osds: Vec<CephOsdView>,
+    pub pools: Vec<CephPoolView>,
+    pub filesystems: Vec<String>,
+    /// Drapeaux OSD posés (`noout`, `norebalance`…). Oubliés après une
+    /// maintenance, ils laissent le cluster sans rééquilibrage.
+    pub flags: Vec<String>,
+    /// Contrôles de santé mis en sourdine : ce que `HEALTH_OK` ne dit plus.
+    pub muted_checks: Vec<String>,
+}
+
+#[derive(Debug, Default, Serialize, PartialEq)]
+pub struct CephOsdView {
+    pub name: String,
+    pub host: String,
+    pub device_class: String,
+    pub up: bool,
+    #[serde(rename = "in")]
+    pub in_cluster: bool,
+    pub used_percent: Option<f64>,
+    pub used_bytes: Option<f64>,
+    pub total_bytes: Option<f64>,
+    pub apply_latency_ms: Option<f64>,
+    pub commit_latency_ms: Option<f64>,
+}
+
+#[derive(Debug, Default, Serialize, PartialEq)]
+pub struct CephPoolView {
+    pub name: String,
+    pub used_percent: Option<f64>,
+    pub used_bytes: Option<f64>,
+    pub size: Option<f64>,
+    pub min_size: Option<f64>,
+    pub pg_num: Option<f64>,
+    pub pg_num_optimal: Option<f64>,
+    pub autoscale: Option<String>,
+}
+
+fn ceph_query(id: TargetId, window: u64) -> String {
+    format!(
+        "last_over_time({{__name__=~\"dumbmonit_proxmox_ceph_.*\", \
+         target=\"{id}\"}}[{window}s]) keep_metric_names"
+    )
+}
+
+pub async fn read_ceph(
+    State(state): State<AppState>,
+    Path(id): Path<TargetId>,
+) -> ApiResult<Json<CephView>> {
+    let target = proxmox_target(&state, id).await?;
+    let series = state
+        .victoria
+        .query(&ceph_query(id, lookback(&target)))
+        .await
+        .map_err(|error| ApiError::BadRequest(format!("{error:#}")))?;
+    Ok(Json(assemble_ceph(&series)))
+}
+
+fn assemble_ceph(series: &[InstantSeries]) -> CephView {
+    let mut view = CephView::default();
+    let mut osds: BTreeMap<String, CephOsdView> = BTreeMap::new();
+    let mut pools: BTreeMap<String, CephPoolView> = BTreeMap::new();
+
+    for point in series {
+        let Some(value) = number(point) else { continue };
+        let Some(metric) = point
+            .metric
+            .get("__name__")
+            .and_then(|name| name.strip_prefix("dumbmonit_proxmox_ceph_"))
+        else {
+            continue;
+        };
+        // Une seule série suffit à prouver que Ceph est là : le collecteur ne
+        // publie rien du tout quand il n'y en a pas.
+        view.available = true;
+
+        match metric {
+            "health" => view.health = Some(value),
+            "health_info" => {
+                view.health_status = Some(label(point, "status")).filter(|s| !s.is_empty());
+            }
+            "bytes_used" => view.bytes_used = Some(value),
+            "bytes_total" => view.bytes_total = Some(value),
+            "used_percent" => view.used_percent = Some(value),
+            "osds_total" => view.osds_total = Some(value),
+            "osds_up" => view.osds_up = Some(value),
+            "osds_in" => view.osds_in = Some(value),
+            "flag" if value > 0.0 => view.flags.push(label(point, "flag")),
+            "health_mute_info" => view.muted_checks.push(label(point, "code")),
+            "fs_info" => view.filesystems.push(label(point, "name")),
+            metric if metric.starts_with("osd_") => {
+                let name = label(point, "osd");
+                if name.is_empty() {
+                    continue;
+                }
+                let osd = osds.entry(name.clone()).or_insert_with(|| CephOsdView {
+                    name,
+                    host: label(point, "host"),
+                    device_class: label(point, "device_class"),
+                    ..Default::default()
+                });
+                match metric {
+                    "osd_up" => osd.up = value > 0.0,
+                    "osd_in" => osd.in_cluster = value > 0.0,
+                    "osd_used_percent" => osd.used_percent = Some(value),
+                    "osd_used_bytes" => osd.used_bytes = Some(value),
+                    "osd_total_bytes" => osd.total_bytes = Some(value),
+                    "osd_apply_latency_ms" => osd.apply_latency_ms = Some(value),
+                    "osd_commit_latency_ms" => osd.commit_latency_ms = Some(value),
+                    _ => {}
+                }
+            }
+            metric if metric.starts_with("pool_") => {
+                let name = label(point, "pool");
+                if name.is_empty() {
+                    continue;
+                }
+                let pool = pools
+                    .entry(name.clone())
+                    .or_insert_with(|| CephPoolView { name, ..Default::default() });
+                match metric {
+                    "pool_used_percent" => pool.used_percent = Some(value),
+                    "pool_used_bytes" => pool.used_bytes = Some(value),
+                    "pool_size" => pool.size = Some(value),
+                    "pool_min_size" => pool.min_size = Some(value),
+                    "pool_pg_num" => pool.pg_num = Some(value),
+                    "pool_pg_num_optimal" => pool.pg_num_optimal = Some(value),
+                    "pool_info" => {
+                        pool.autoscale = Some(label(point, "autoscale")).filter(|a| !a.is_empty());
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Les OSD se lisent dans l'ordre de leur numéro, pas dans celui du
+    // dictionnaire : `osd.10` vient après `osd.9`.
+    view.osds = osds.into_values().collect();
+    view.osds.sort_by_key(|osd| osd_rank(&osd.name));
+    view.pools = pools.into_values().collect();
+    // Un drapeau posé est annoncé par `/cluster/ceph/flags` et, en secours, par
+    // l'arbre CRUSH : sans dédoublonnage il apparaîtrait deux fois.
+    for list in [&mut view.flags, &mut view.muted_checks, &mut view.filesystems] {
+        list.sort();
+        list.dedup();
+    }
+    view
+}
+
+/// Numéro d'un OSD, pour trier `osd.2` avant `osd.10`.
+fn osd_rank(name: &str) -> (i64, String) {
+    let number = name.rsplit('.').next().and_then(|tail| tail.parse().ok()).unwrap_or(i64::MAX);
+    (number, name.to_string())
+}
+
+// --- Commun ------------------------------------------------------------------
+
+/// Charge la cible et refuse tout ce qui n'est pas un hyperviseur.
+async fn proxmox_target(state: &AppState, id: TargetId) -> Result<Target, ApiError> {
+    let target = db::targets::get(&state.pool, &state.cipher, id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("Device {id} not found.")))?;
+    if target.kind != "proxmox" {
+        return Err(ApiError::BadRequest("This device is not a Proxmox VE hypervisor.".into()));
+    }
+    Ok(target)
+}
+
+/// Valeur d'une série, ou `None` si elle est illisible.
+fn number(series: &InstantSeries) -> Option<f64> {
+    let value: f64 = series.value.1.parse().ok()?;
+    value.is_finite().then_some(value)
+}
+
+/// Nœud et valeur d'une série, ou `None` si l'un des deux manque.
+fn node_identity(series: &InstantSeries) -> Option<(String, f64)> {
+    let node = series.metric.get("node").filter(|node| !node.is_empty())?.clone();
+    Some((node, number(series)?))
+}
+
+/// Nom de la métrique sans son préfixe `dumbmonit_proxmox_node_`.
+fn node_metric(series: &InstantSeries) -> &str {
+    series
+        .metric
+        .get("__name__")
+        .map(String::as_str)
+        .and_then(|name| name.strip_prefix("dumbmonit_proxmox_node_"))
         .unwrap_or_default()
 }
 
@@ -423,5 +816,162 @@ mod tests {
         assert!(query.contains("[300s]"));
         assert!(query.ends_with("keep_metric_names"));
         assert!(rates_query(12, 300).starts_with("rate("));
+    }
+
+    #[test]
+    fn les_series_dun_noeud_sont_recollees_en_une_ligne() {
+        let pve1 = [("node", "pve1")];
+        let gauges = vec![
+            serie("dumbmonit_proxmox_node_up", &pve1, 1.0),
+            serie("dumbmonit_proxmox_node_cpu_percent", &pve1, 4.2),
+            serie("dumbmonit_proxmox_node_memory_percent", &pve1, 60.0),
+            serie("dumbmonit_proxmox_node_uptime_seconds", &pve1, 86_400.0),
+            serie("dumbmonit_proxmox_node_up", &[("node", "pve2")], 0.0),
+        ];
+        let parts = vec![
+            serie(
+                "dumbmonit_proxmox_node_pve_version_info",
+                &[("node", "pve1"), ("version", "8.2.4")],
+                1.0,
+            ),
+            serie(
+                "dumbmonit_proxmox_node_service_running",
+                &[("node", "pve1"), ("service", "pvestatd")],
+                0.0,
+            ),
+            serie(
+                "dumbmonit_proxmox_node_service_running",
+                &[("node", "pve1"), ("service", "pveproxy")],
+                1.0,
+            ),
+            serie(
+                "dumbmonit_proxmox_node_interface_offline",
+                &[("node", "pve1"), ("iface", "vmbr1")],
+                1.0,
+            ),
+            serie(
+                "dumbmonit_proxmox_node_thinpool_used_percent",
+                &[("node", "pve1"), ("vg", "pve"), ("pool", "data")],
+                96.0,
+            ),
+            serie(
+                "dumbmonit_proxmox_node_thinpool_metadata_used_percent",
+                &[("node", "pve1"), ("vg", "pve"), ("pool", "data")],
+                88.0,
+            ),
+            serie(
+                "dumbmonit_proxmox_node_lvm_vg_used_percent",
+                &[("node", "pve1"), ("vg", "pve")],
+                72.0,
+            ),
+        ];
+
+        let list = assemble_nodes(&gauges, &parts);
+        assert_eq!(list.len(), 2);
+        let pve1 = &list[0];
+        assert_eq!(pve1.name, "pve1");
+        assert!(pve1.up);
+        assert_eq!(pve1.cpu_percent, Some(4.2));
+        assert_eq!(pve1.version.as_deref(), Some("8.2.4"));
+        assert_eq!(pve1.services_down, vec!["pvestatd"], "un démon en marche n'est pas listé");
+        assert_eq!(pve1.interfaces_offline, vec!["vmbr1"]);
+        assert_eq!(pve1.thin_pools.len(), 1);
+        assert_eq!(pve1.thin_pools[0].used_percent, Some(96.0));
+        assert_eq!(pve1.thin_pools[0].metadata_used_percent, Some(88.0));
+        assert_eq!(pve1.volume_groups[0].used_percent, Some(72.0));
+        assert!(!list[1].up, "pve2 n'a pas répondu");
+        assert_eq!(list[1].thin_pools.len(), 0);
+    }
+
+    #[test]
+    fn sans_serie_ceph_la_vue_dit_quil_ny_en_a_pas() {
+        let view = assemble_ceph(&[]);
+        assert!(!view.available);
+        assert!(view.osds.is_empty());
+    }
+
+    #[test]
+    fn les_osd_sont_recolles_et_ranges_par_numero() {
+        let osd =
+            |name: &'static str| vec![("osd", name), ("host", "pve1"), ("device_class", "ssd")];
+        let series = vec![
+            serie("dumbmonit_proxmox_ceph_health", &[], 1.0),
+            serie("dumbmonit_proxmox_ceph_health_info", &[("status", "HEALTH_WARN")], 1.0),
+            serie("dumbmonit_proxmox_ceph_osds_total", &[], 3.0),
+            serie("dumbmonit_proxmox_ceph_osd_up", &osd("osd.10"), 1.0),
+            serie("dumbmonit_proxmox_ceph_osd_up", &osd("osd.2"), 0.0),
+            serie("dumbmonit_proxmox_ceph_osd_in", &osd("osd.2"), 1.0),
+            serie("dumbmonit_proxmox_ceph_osd_used_percent", &osd("osd.2"), 91.0),
+            serie("dumbmonit_proxmox_ceph_pool_used_percent", &[("pool", "cephpool")], 20.9),
+            serie(
+                "dumbmonit_proxmox_ceph_pool_info",
+                &[("pool", "cephpool"), ("autoscale", "warn"), ("type", "replicated")],
+                1.0,
+            ),
+            serie("dumbmonit_proxmox_ceph_flag", &[("flag", "noout")], 1.0),
+            // Le même drapeau, vu de l'arbre CRUSH : une seule ligne attendue.
+            serie("dumbmonit_proxmox_ceph_flag", &[("flag", "noout")], 1.0),
+            serie("dumbmonit_proxmox_ceph_flag", &[("flag", "noscrub")], 0.0),
+            serie("dumbmonit_proxmox_ceph_health_mute_info", &[("code", "OSD_NEARFULL")], 1.0),
+            serie("dumbmonit_proxmox_ceph_fs_info", &[("name", "cephfs")], 1.0),
+        ];
+
+        let view = assemble_ceph(&series);
+        assert!(view.available);
+        assert_eq!(view.health, Some(1.0));
+        assert_eq!(view.health_status.as_deref(), Some("HEALTH_WARN"));
+        assert_eq!(view.osds.len(), 2);
+        assert_eq!(view.osds[0].name, "osd.2", "osd.2 passe avant osd.10");
+        assert!(!view.osds[0].up);
+        assert!(view.osds[0].in_cluster);
+        assert_eq!(view.osds[0].used_percent, Some(91.0));
+        assert_eq!(view.osds[0].host, "pve1");
+        assert_eq!(view.pools.len(), 1);
+        assert_eq!(view.pools[0].autoscale.as_deref(), Some("warn"));
+        assert_eq!(view.flags, vec!["noout"], "un drapeau non posé n'est pas listé");
+        assert_eq!(view.muted_checks, vec!["OSD_NEARFULL"]);
+        assert_eq!(view.filesystems, vec!["cephfs"]);
+    }
+
+    #[test]
+    fn le_pool_le_verrou_le_systeme_et_ladresse_rejoignent_la_ligne_de_linvite() {
+        let vm = invite("100", "router-vm", "pve1", "qemu");
+        let mut status = vm.clone();
+        status.push(("status", "running"));
+        let mut pool = vm.clone();
+        pool.push(("pool", "production"));
+        let mut lock = vm.clone();
+        lock.push(("lock", "backup"));
+        let mut os = vm.clone();
+        os.push(("os", "Debian GNU/Linux 12 (bookworm)"));
+        let mut ip = vm.clone();
+        ip.push(("ip", "192.168.10.50"));
+        let gauges = vec![
+            serie("dumbmonit_proxmox_guest_status_info", &status, 1.0),
+            serie("dumbmonit_proxmox_guest_pool_info", &pool, 1.0),
+            serie("dumbmonit_proxmox_guest_locked", &lock, 1.0),
+            serie("dumbmonit_proxmox_guest_os_info", &os, 1.0),
+            serie("dumbmonit_proxmox_guest_ip_info", &ip, 1.0),
+        ];
+        let list = assemble(&gauges, &[], &[], &[]);
+        assert_eq!(list[0].pool.as_deref(), Some("production"));
+        assert_eq!(list[0].lock.as_deref(), Some("backup"));
+        assert_eq!(list[0].os.as_deref(), Some("Debian GNU/Linux 12 (bookworm)"));
+        assert_eq!(list[0].ip.as_deref(), Some("192.168.10.50"));
+    }
+
+    #[test]
+    fn une_machine_arretee_ne_garde_ni_systeme_ni_adresse() {
+        let vm = invite("101", "win11", "pve1", "qemu");
+        let mut status = vm.clone();
+        status.push(("status", "stopped"));
+        let mut os = vm.clone();
+        os.push(("os", "Microsoft Windows 11"));
+        let gauges = vec![
+            serie("dumbmonit_proxmox_guest_status_info", &status, 1.0),
+            serie("dumbmonit_proxmox_guest_os_info", &os, 1.0),
+        ];
+        let list = assemble(&gauges, &[], &[], &[]);
+        assert_eq!(list[0].os, None);
     }
 }

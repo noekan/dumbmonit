@@ -262,6 +262,48 @@ const PROXMOX_LOGIN: CredentialView = CredentialView {
     fields: &[proxmox_user_field("dumbmonit@pve"), PASSWORD_FIELD],
 };
 
+/// Jeton d'API Proxmox Datacenter Manager. La console ne rend son ticket de
+/// session que dans un cookie `HttpOnly` : le jeton est la seule forme
+/// d'identifiant utilisable par une sonde, et de toute façon la bonne.
+const PDM_TOKEN: CredentialView = CredentialView {
+    kind: "api_token",
+    label: PROXMOX_TOKEN_LABEL,
+    help: PROXMOX_TOKEN_HELP,
+    fields: &[token_id_field("dumbmonit@pdm!monitor"), TOKEN_SECRET_FIELD],
+};
+
+/// Connexion à Proxmox Mail Gateway : un utilisateur et son mot de passe.
+///
+/// PMG 9 ne délivre pas de jeton d'API — c'est la seule des quatre consoles
+/// Proxmox dans ce cas : le ticket est le mécanisme normal, et le seul que
+/// l'interface propose de créer.
+const PMG_LOGIN: CredentialView = CredentialView {
+    kind: "username_password",
+    label: "Username / password (recommended)",
+    help: "Opens a two-hour session, renewed automatically. Proxmox Mail Gateway does not issue API tokens: this is its normal way in.",
+    fields: &[
+        cred_text(
+            "username",
+            "User name",
+            "User and realm, as in \"dumbmonit@pmg\".",
+            "dumbmonit@pmg",
+        ),
+        PASSWORD_FIELD,
+    ],
+};
+
+/// Jeton d'API, pour une passerelle qui en accepterait un.
+///
+/// PMG 9 n'en crée pas ; l'option existe pour une version ultérieure ou une
+/// passerelle placée derrière un frontal qui en attend un, et le collecteur
+/// envoie alors `Authorization: PMGAPIToken=…` comme pour PVE et PBS.
+const PMG_TOKEN: CredentialView = CredentialView {
+    kind: "api_token",
+    label: "API token",
+    help: "Only if your gateway offers API tokens: Proxmox Mail Gateway 9 and earlier do not create any. Use the username and password instead.",
+    fields: &[token_id_field("dumbmonit@pmg!monitor"), TOKEN_SECRET_FIELD],
+};
+
 const PBS_LOGIN: CredentialView = CredentialView {
     kind: "username_password",
     label: PROXMOX_LOGIN_LABEL,
@@ -746,6 +788,54 @@ const PROXMOX_OPTIONS: &[OptionView] = &[
         "Subscription status and APT repositories of each node (enterprise without subscription, unreadable sources).",
         true,
     ),
+    boolean(
+        "cluster_resources",
+        "Read the cluster inventory",
+        "One call lists every node, guest, storage and pool of the cluster. Keep it on: it is the only source that still sees the guests of a node that stopped answering, and it saves two calls per node.",
+        true,
+    ),
+    boolean(
+        "services",
+        "Watch node services",
+        "State of the Proxmox daemons of each node (pvestatd, pveproxy, pve-cluster, corosync…) and the version installed on it. A stopped pvestatd leaves the whole cluster showing frozen numbers.",
+        true,
+    ),
+    boolean(
+        "network",
+        "Watch node networking",
+        "Bridges, bonds and VLANs of each node with their link state, plus the traffic counters of each guest network card.",
+        true,
+    ),
+    boolean(
+        "lvm",
+        "Watch LVM and thin pools",
+        "Volume groups, LVM thin pools (data and metadata fill) and PVE-managed directory mounts. A full thin pool puts every guest on it read-only.",
+        true,
+    ),
+    boolean(
+        "ceph_detail",
+        "Watch Ceph in detail",
+        "Per-OSD state, usage and latency, per-pool usage, CephFS, OSD flags and muted health checks. Needs \"Watch Ceph\" to be on; silently skipped when Ceph is not set up.",
+        true,
+    ),
+    boolean(
+        "backup_volumes",
+        "Check what backup jobs include",
+        "For each scheduled job, which guests it covers and which of their disks it actually writes. Catches a job that succeeds every night while skipping a data disk.",
+        true,
+    ),
+    boolean(
+        "guest_os",
+        "Read guest OS and addresses",
+        "Operating system and IP addresses seen from inside each running guest (QEMU guest agent for VMs, the container namespace for containers). Refreshed once an hour, not at every probe.",
+        true,
+    ),
+    boolean(
+        "metrics_export",
+        "Ingest the full RRD metric stream",
+        "Reads /cluster/metrics/export, the stream Proxmox's own metric servers consume: everything pvestatd measures, including per-node pressure stall (PSI), and every point since the last probe rather than just the current one. Off by default: the series it adds (…_rrd_…) partly repeat the ones already collected. Needs Sys.Audit on \"/\".",
+        false,
+    ),
 ];
 
 /// Options lues par `collectors/pbs/options.rs`.
@@ -798,6 +888,193 @@ const PBS_OPTIONS: &[OptionView] = &[
         "disks",
         "Watch disks and ZFS pools",
         "Reads the physical disks (SMART verdict, SSD wear) and the ZFS pools of the backup server (/nodes/localhost/disks). Needs Sys.Audit on \"/system\"; silently skipped otherwise.",
+        true,
+    ),
+    boolean(
+        "services",
+        "Watch the server's services",
+        "Reads the systemd units of the backup server and reports whether the ones it cannot do without are running. Needs Sys.Audit on \"/system\"; silently skipped otherwise.",
+        true,
+    ),
+    boolean(
+        "datastore_details",
+        "Read datastore detail",
+        "Two more calls per datastore: how many machines and snapshots it holds, what is reading or writing it right now, and whether it is held for maintenance. Cheap, and it explains a garbage collection that will not finish.",
+        true,
+    ),
+    boolean(
+        "traffic_control",
+        "Watch traffic limits",
+        "Reads the rate limits configured on the backup server and what they are carrying right now. Needs Sys.Audit; silently skipped otherwise.",
+        true,
+    ),
+    boolean(
+        "certificates",
+        "Watch certificate expiry",
+        "Reads the certificate the web interface serves and warns before it expires. Off by default: Proxmox Backup Server guards this one call behind Sys.Modify, a write privilege a monitoring token should not be given. Turn it on only if you granted it.",
+        false,
+    ),
+    boolean(
+        "tape",
+        "Watch tape backups",
+        "Reads the tape tier: backup jobs and their last run, drives, changers, media pools and the tapes themselves. Off by default, since most installations have no tape hardware. Needs Tape.Audit on \"/tape\".",
+        false,
+    ),
+];
+
+/// Options lues par `collectors/pdm/options.rs`.
+const PDM_OPTIONS: &[OptionView] = &[
+    number("port", "API port", "Used if the address does not give a port.", "8443", "8443"),
+    insecure_tls(
+        "Proxmox Datacenter Manager ships with a self-signed certificate by default: enable this if the connection is refused for that reason.",
+    ),
+    number(
+        "request_timeout_seconds",
+        "Timeout per request (seconds)",
+        "Time allowed for each API call, from 1 to 120. The console relays calls to every federated instance, so one slow site holds the whole answer.",
+        "20",
+        "20",
+    ),
+    text(
+        "node",
+        "Console node name",
+        "Name of the node that runs the console. A Datacenter Manager has a single node and calls it \"localhost\".",
+        "localhost",
+        "localhost",
+    ),
+    number(
+        "task_lookback_hours",
+        "Task window (hours)",
+        "Older tasks are not counted among the failures, from 1 to 8760.",
+        "24",
+        "24",
+    ),
+    number(
+        "max_age_seconds",
+        "Accepted cache age (seconds)",
+        "How stale the console's own inventory may be before it queries the federated instances again, from 0 to 3600. Zero asks for fresh data on every probe, which puts every cluster back on the line.",
+        "60",
+        "60",
+    ),
+    text(
+        "remotes",
+        "Monitored instances",
+        "Names of the federated instances to monitor, separated by commas. Empty: every instance.",
+        "site-a, site-b",
+        "",
+    ),
+    number(
+        "max_remotes",
+        "Instance version limit",
+        "Maximum number of instances asked for their version on each probe, from 1 to 1000.",
+        "100",
+        "100",
+    ),
+    boolean(
+        "versions",
+        "Read each instance version",
+        "One call per federated instance, to report its version and to flag the ones left behind their peers. An instance that does not answer counts as unreachable.",
+        true,
+    ),
+    boolean(
+        "tasks",
+        "Watch tasks across instances",
+        "Reads the task list of every federated instance to report the failures. Needs Resource.Audit; silently skipped otherwise.",
+        true,
+    ),
+    boolean(
+        "node_status",
+        "Watch the console host",
+        "Reads the CPU, memory, root filesystem, uptime, certificates and subscription of the machine running the console. Needs Sys.Audit on \"/system\"; silently skipped otherwise.",
+        true,
+    ),
+    boolean(
+        "updates",
+        "Count pending updates",
+        "Lists the packages waiting for an update on the console itself. Needs Sys.Audit; silently skipped otherwise.",
+        true,
+    ),
+    boolean(
+        "remote_updates",
+        "Count updates on each instance",
+        "Reads the console's update summary for the federated instances. Off by default: the console guards that path with Resource.Modify, a write privilege a monitoring account has no reason to hold.",
+        false,
+    ),
+];
+
+/// Options lues par `collectors/pmg/options.rs`.
+const PMG_OPTIONS: &[OptionView] = &[
+    number("port", "API port", "Used if the address does not give a port.", "8006", "8006"),
+    insecure_tls(
+        "Proxmox Mail Gateway ships with a self-signed certificate by default: enable this if the connection is refused for that reason.",
+    ),
+    number(
+        "request_timeout_seconds",
+        "Timeout per request (seconds)",
+        "Time allowed for each API call, from 1 to 120. Reading a queue runs a Postfix command on the gateway and can take a few seconds.",
+        "15",
+        "15",
+    ),
+    text(
+        "node",
+        "Monitored node",
+        "Name of the cluster node to monitor. Empty: every node the gateway lists.",
+        "mail1",
+        "",
+    ),
+    number(
+        "recent_hours",
+        "Traffic window (hours)",
+        "How far back the traffic curve goes, from 1 to 24. The daily totals always cover the current day.",
+        "12",
+        "12",
+    ),
+    boolean(
+        "queues",
+        "Watch the mail queues",
+        "Reads the incoming, active, deferred and hold queues and the age of the oldest message in each. A growing deferred queue is the first sign that mail is stuck.",
+        true,
+    ),
+    boolean(
+        "quarantine",
+        "Count the quarantines",
+        "Reads how many messages the spam and virus quarantines hold, and how much disk they use. Counts only: no subject, sender or message content is ever read.",
+        true,
+    ),
+    boolean(
+        "attachment_quarantine",
+        "Also count the attachment quarantine",
+        "That quarantine has no count call: it has to be listed to be counted. Off by default; only the number of entries is kept.",
+        false,
+    ),
+    boolean(
+        "signatures",
+        "Watch the signature databases",
+        "Reads the age of the ClamAV virus databases and of the SpamAssassin rule channels. Out-of-date signatures fail silently: the gateway keeps filtering, badly.",
+        true,
+    ),
+    boolean(
+        "services",
+        "Watch the services",
+        "Reads the state of postfix, pmg-smtp-filter, pmgpolicy and the other units of each node.",
+        true,
+    ),
+    boolean(
+        "certificates",
+        "Watch the certificates",
+        "Reads the certificates the web interface serves and warns before they expire.",
+        true,
+    ),
+    boolean(
+        "updates",
+        "Count pending updates",
+        "Lists the packages waiting for an update on each node. Needs the Audit role; silently skipped otherwise.",
+        true,
+    ),
+    boolean(
+        "subscription",
+        "Read the subscription",
+        "Reads the subscription status of each node. An installation without a key reports \"notfound\", which is not an error.",
         true,
     ),
 ];
@@ -883,6 +1160,7 @@ fn describe(kind: &'static str) -> CollectorView {
                     "Create the user's API token. Privilege separation is off, so the token simply inherits the user's rights.\npveum user token add dumbmonit@pve monitor --privsep 0",
                     "The command prints a table with full-tokenid and value. Copy full-tokenid into DumbMonit's Token ID field and value (the UUID) into its Secret field. The secret is shown once: if it is lost, remove the token and create a new one.\ndumbmonit@pve!monitor",
                     "Optional, to count pending updates and pending security fixes: Proxmox guards that list with Sys.Modify. Grant it on /nodes only; without it the collector skips the list silently.\npveum role add DumbMonitUpdates --privs Sys.Modify\npveum aclmod /nodes -user dumbmonit@pve -role DumbMonitUpdates",
+                    "Optional, on Proxmox VE 8 and later, to read the operating system and IP addresses of each VM from inside it: that pair of guest-agent calls moved to its own privilege. Add it to the role; on Proxmox VE 7 the privilege does not exist and VM.Monitor already covers it.\npveum role modify DumbMonit --privs \"Datastore.Audit Sys.Audit VM.Audit VM.Monitor VM.GuestAgent.Audit\"",
                     "Prefer the web UI? The same steps live under Datacenter → Permissions: Users, Roles, Add → User Permission, then API Tokens with \"Privilege Separation\" unticked.",
                     "In DumbMonit, enter the address of any node (port 8006 by default).",
                 ],
@@ -894,7 +1172,7 @@ fn describe(kind: &'static str) -> CollectorView {
         "pbs" => CollectorView {
             kind,
             label: "Proxmox Backup Server",
-            summary: "Backup server: backup calendar per machine, failed tasks with their logs, sync/verify/prune/GC jobs, datastores and disks.",
+            summary: "Backup server: backup calendar per machine, failed tasks with their logs, sync/verify/prune/GC jobs, datastores, disks, services and tape.",
             examples: &["Proxmox Backup Server"],
             credential_types: &["api_token", "username_password"],
             credentials: &[PBS_TOKEN, PBS_LOGIN],
@@ -905,16 +1183,63 @@ fn describe(kind: &'static str) -> CollectorView {
                 steps: &[
                     "Open a shell on the backup server (in the web UI: Administration → Shell; or SSH) and create a user reserved for monitoring. It needs no password: the token is what logs in.\nproxmox-backup-manager user create dumbmonit@pbs --comment \"DumbMonit monitoring\"",
                     "Create the user's API token. The command prints the token id and its secret: copy both now, PBS never shows the secret again.\nproxmox-backup-manager user generate-token dumbmonit@pbs monitor",
-                    "Give the token the exact read-only minimum, per path. DatastoreAudit on /datastore (Datastore.Audit) reads the datastores, snapshots, verify and prune jobs and GC; Audit on /system (Sys.Audit) reads the node status, the task list and task logs, the disks and ZFS pools. In PBS a token has its own permissions, so the ACL names the token, not the user.\nproxmox-backup-manager acl update /datastore DatastoreAudit --auth-id 'dumbmonit@pbs!monitor'\nproxmox-backup-manager acl update /system Audit --auth-id 'dumbmonit@pbs!monitor'",
-                    "Optional: RemoteAudit on /remote (Remote.Audit) lists the sync jobs; Audit on / (Sys.Audit at the top level) lists pending package updates. Without them those two items are silently skipped, nothing else changes. Audit on / alone also covers /datastore and /system if you prefer one line.\nproxmox-backup-manager acl update /remote RemoteAudit --auth-id 'dumbmonit@pbs!monitor'\nproxmox-backup-manager acl update / Audit --auth-id 'dumbmonit@pbs!monitor'",
+                    "Give the read-only minimum, per path — to the token and to the user that owns it. A token's effective privileges are the intersection of its own ACL and its user's: granted to the token alone, they amount to nothing at all, and PBS reports that nowhere. Every line is therefore written twice. DatastoreAudit on /datastore (Datastore.Audit) reads the datastores, snapshots, verify and prune jobs and GC; Audit on /system (Sys.Audit) reads the node status, the task list and task logs, the services, the traffic-control rules, the disks and ZFS pools.\nproxmox-backup-manager acl update /datastore DatastoreAudit --auth-id 'dumbmonit@pbs'\nproxmox-backup-manager acl update /datastore DatastoreAudit --auth-id 'dumbmonit@pbs!monitor'\nproxmox-backup-manager acl update /system Audit --auth-id 'dumbmonit@pbs'\nproxmox-backup-manager acl update /system Audit --auth-id 'dumbmonit@pbs!monitor'",
+                    "Optional, and twice as well. RemoteAudit on /remote (Remote.Audit) shows the sync jobs that pull from a remote: the built-in Audit role covers Sys.Audit and Datastore.Audit only, and without Remote.Audit such a job is not refused, it is simply absent from the job list. TapeAudit on /tape (Tape.Audit) reads the tape tier. Audit on / (Sys.Audit at the top level) lists pending package updates, and also covers /datastore and /system if you prefer fewer lines. Without them those items are silently skipped, nothing else changes. Nothing here can write: the collector only performs GETs.\nproxmox-backup-manager acl update /remote RemoteAudit --auth-id 'dumbmonit@pbs'\nproxmox-backup-manager acl update /remote RemoteAudit --auth-id 'dumbmonit@pbs!monitor'\nproxmox-backup-manager acl update /tape TapeAudit --auth-id 'dumbmonit@pbs'\nproxmox-backup-manager acl update /tape TapeAudit --auth-id 'dumbmonit@pbs!monitor'\nproxmox-backup-manager acl update / Audit --auth-id 'dumbmonit@pbs'\nproxmox-backup-manager acl update / Audit --auth-id 'dumbmonit@pbs!monitor'",
                     "Copy the token id into DumbMonit's Token ID field and the secret into its Secret field.\ndumbmonit@pbs!monitor",
-                    "Prefer the web UI? Configuration → Access Control: Users → Add, then API Tokens → Add, then Permissions → Add → API Token Permission with path /datastore and role DatastoreAudit, and again with path /system and role Audit.",
+                    "Before leaving the shell, check what the token can actually read. The command prints its effective privileges, path by path; an empty result means the user is missing the ACL the token has — the case where the device looks perfectly alive and reports nothing.\nproxmox-backup-manager user permissions 'dumbmonit@pbs!monitor'",
+                    "Prefer the web UI? Configuration → Access Control: Users → Add, then API Tokens → Add, then Permissions → Add. Add each permission twice, once as User Permission for dumbmonit@pbs and once as API Token Permission for dumbmonit@pbs!monitor: with path /datastore and role DatastoreAudit, then again with path /system and role Audit. A token permission on its own grants nothing.",
                     "In DumbMonit, enter the server address, for example \"pbs.lan\" or \"pbs.lan:8007\".",
                 ],
                 warning: "Do not reuse the account you log in with: a leaked token would then manage every backup. The Audit role can only read. PBS also uses a self-signed certificate by default: if the connection is refused for that reason, tick \"Accept an unverifiable certificate\" in the options.",
                 doc_url: "https://pbs.proxmox.com/docs/user-management.html#api-tokens",
             },
             options: PBS_OPTIONS,
+        },
+        "pdm" => CollectorView {
+            kind,
+            label: "Proxmox Datacenter Manager",
+            summary: "The console that federates several Proxmox VE clusters and backup servers: which instances it reaches, the whole estate at a glance, failed tasks and the console's own health.",
+            examples: &["Proxmox Datacenter Manager"],
+            credential_types: &["api_token"],
+            credentials: &[PDM_TOKEN],
+            address_hint: "dc.lan",
+            default_port: 8443,
+            setup: Setup {
+                title: "Create a read-only user and token in Proxmox Datacenter Manager",
+                steps: &[
+                    "In the console, open Configuration → Access Control → Users and click Add. Name the account as follows and leave the password empty: the token is what logs in.\ndumbmonit@pdm",
+                    "Still under Access Control, open API Tokens → Add, pick that user and name the token \"monitor\". The console shows the secret once: copy it now.\ndumbmonit@pdm!monitor",
+                    "Give both the user and the token the Auditor role on / (the top of the tree, so the whole estate). Auditor carries System.Audit, Resource.Audit and Access.Audit, and can change nothing. A token never has more rights than its user, so the permission is granted twice: Permissions → Add → User Permission, then again with API Token Permission.",
+                    "Copy the token id into DumbMonit's Token ID field and the secret into its Secret field.",
+                    "In DumbMonit, enter the console address, for example \"dc.lan\" or \"dc.lan:8443\".",
+                ],
+                warning: "Do not reuse the account you log in with: a leaked token would then control every cluster the console federates at once. The Auditor role can only read. The console also uses a self-signed certificate by default: if the connection is refused for that reason, tick \"Accept an unverifiable certificate\" in the options. Two items need more than Auditor and are simply skipped without it: the per-instance metric collection status, and the update summary of the federated instances.",
+                doc_url: "https://pve.proxmox.com/wiki/Proxmox_Datacenter_Manager_Roadmap",
+            },
+            options: PDM_OPTIONS,
+        },
+        "pmg" => CollectorView {
+            kind,
+            label: "Proxmox Mail Gateway",
+            summary: "Mail gateway: postfix queues and stuck mail, traffic filtered for spam and viruses, quarantine sizes, signature database age, services and cluster.",
+            examples: &["Proxmox Mail Gateway"],
+            credential_types: &["username_password", "api_token"],
+            credentials: &[PMG_LOGIN, PMG_TOKEN],
+            address_hint: "mail.lan",
+            default_port: 8006,
+            setup: Setup {
+                title: "Create a read-only user in Proxmox Mail Gateway",
+                steps: &[
+                    "In the web interface: Configuration → User Management → Users → Add. Name the account as follows, give it a long password used nowhere else, and tick Enabled.\ndumbmonit@pmg",
+                    "Set its Role to Audit. That is the exact read-only minimum for everything DumbMonit reads: node status, services, postfix queues, mail statistics, quarantine counts, ClamAV and SpamAssassin database age, cluster status, certificates, subscription and pending updates. Audit can change nothing, release nothing from quarantine and read no message.",
+                    "Prefer a shell? The same account in one command, then set the password.\npmgsh create /access/users --userid dumbmonit@pmg --role audit --enable 1 --comment \"DumbMonit monitoring\"",
+                    "In DumbMonit, enter the gateway address, for example \"mail.lan\" or \"mail.lan:8006\", then this account's user name (realm included) and password.",
+                    "Proxmox Mail Gateway does not issue API tokens, unlike Proxmox VE and Proxmox Backup Server: the username and password are the way in. DumbMonit opens one two-hour session and renews it, rather than logging in on every measurement.",
+                ],
+                warning: "Do not reuse the account you log in with: the Audit role above can only read, and cannot release a quarantined message or change a rule. Proxmox Mail Gateway also uses a self-signed certificate by default: if the connection is refused for that reason, tick \"Accept an unverifiable certificate\" in the options.",
+                doc_url: "https://pmg.proxmox.com/pmg-docs/pmg-admin-guide.html#pmgconfig_userman",
+            },
+            options: PMG_OPTIONS,
         },
         "synology" => CollectorView {
             kind,
@@ -1175,8 +1500,8 @@ mod tests {
     /// Les types enregistrés dans `main.rs`. Un type ajouté là-bas sans notice ici
     /// s'afficherait sous son nom brut, sans explication ni exemple d'adresse.
     const KINDS_ENREGISTRES: &[&str] = &[
-        "snmp", "proxmox", "pbs", "synology", "agent", "http", "tcp", "dns", "ping", "tls", "push",
-        "dummy",
+        "snmp", "proxmox", "pbs", "pdm", "pmg", "synology", "agent", "http", "tcp", "dns", "ping",
+        "tls", "push", "dummy",
     ];
 
     #[test]
@@ -1271,6 +1596,14 @@ mod tests {
                     "zfs",
                     "packages",
                     "subscription",
+                    "cluster_resources",
+                    "services",
+                    "network",
+                    "lvm",
+                    "ceph_detail",
+                    "backup_volumes",
+                    "guest_os",
+                    "metrics_export",
                 ],
             ),
             (
@@ -1285,6 +1618,47 @@ mod tests {
                     "jobs",
                     "updates",
                     "disks",
+                    "services",
+                    "datastore_details",
+                    "traffic_control",
+                    "certificates",
+                    "tape",
+                ],
+            ),
+            (
+                "pdm",
+                &[
+                    "port",
+                    "insecure_tls",
+                    "request_timeout_seconds",
+                    "node",
+                    "task_lookback_hours",
+                    "max_age_seconds",
+                    "remotes",
+                    "max_remotes",
+                    "versions",
+                    "tasks",
+                    "node_status",
+                    "updates",
+                    "remote_updates",
+                ],
+            ),
+            (
+                "pmg",
+                &[
+                    "port",
+                    "insecure_tls",
+                    "request_timeout_seconds",
+                    "node",
+                    "recent_hours",
+                    "queues",
+                    "quarantine",
+                    "attachment_quarantine",
+                    "signatures",
+                    "services",
+                    "certificates",
+                    "updates",
+                    "subscription",
                 ],
             ),
             ("synology", &["scheme", "port", "insecure_tls", "request_timeout_seconds", "abb"]),
@@ -1354,6 +1728,16 @@ mod tests {
         assert_eq!(defaut("pbs", "request_timeout_seconds"), "15");
         assert_eq!(defaut("pbs", "task_lookback_hours"), "24");
         assert_eq!(defaut("pbs", "max_groups"), "500");
+        assert_eq!(defaut("pdm", "port"), "8443");
+        assert_eq!(defaut("pdm", "request_timeout_seconds"), "20");
+        assert_eq!(defaut("pdm", "node"), "localhost");
+        assert_eq!(defaut("pdm", "max_age_seconds"), "60");
+        assert_eq!(defaut("pdm", "max_remotes"), "100");
+        assert_eq!(defaut("pdm", "remote_updates"), "false");
+        assert_eq!(defaut("pmg", "port"), "8006");
+        assert_eq!(defaut("pmg", "request_timeout_seconds"), "15");
+        assert_eq!(defaut("pmg", "recent_hours"), "12");
+        assert_eq!(defaut("pmg", "attachment_quarantine"), "false");
         assert_eq!(defaut("synology", "request_timeout_seconds"), "15");
         assert_eq!(defaut("synology", "abb"), "true");
         assert_eq!(
@@ -1399,7 +1783,7 @@ mod tests {
     /// `dumbmonit_proto::Credential` sait recomposer.
     #[test]
     fn un_jeton_proxmox_se_saisit_en_deux_champs() {
-        for kind in ["proxmox", "pbs"] {
+        for kind in ["proxmox", "pbs", "pmg"] {
             let view = describe(kind);
             let token = view.credentials.iter().find(|c| c.kind == "api_token").unwrap();
             let keys: Vec<&str> = token.fields.iter().map(|f| f.key).collect();
@@ -1443,6 +1827,8 @@ mod tests {
         let attendus = [
             ("proxmox", "dumbmonit@pve"),
             ("pbs", "dumbmonit@pbs"),
+            ("pdm", "dumbmonit@pdm"),
+            ("pmg", "dumbmonit@pmg"),
             ("synology", "dumbmonit"),
             ("agent", "token"),
         ];
@@ -1489,6 +1875,8 @@ mod tests {
         let docs: &[(&str, &str)] = &[
             ("proxmox", include_str!("../../../../docs/devices/proxmox.md")),
             ("pbs", include_str!("../../../../docs/devices/pbs.md")),
+            ("pdm", include_str!("../../../../docs/devices/pdm.md")),
+            ("pmg", include_str!("../../../../docs/devices/pmg.md")),
             ("synology", include_str!("../../../../docs/devices/synology.md")),
             ("agent", include_str!("../../../../docs/devices/agent.md")),
             ("push", include_str!("../../../../docs/devices/push.md")),

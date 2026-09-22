@@ -20,8 +20,8 @@ use axum::Router;
 use axum::extract::{Path, Query, State};
 use axum::routing::get;
 use dumbmonit_collectors::pbs::{
-    self, DatastoreView, DiskSmart, DiskView, HISTORY_DAYS, JobView, ProbeView, SnapshotView,
-    TaskLog, TaskView, ZpoolView,
+    self, CertificateView, DatastoreView, DiskSmart, DiskView, HISTORY_DAYS, JobView, PackageView,
+    ProbeView, ServiceView, SnapshotView, TapeView, TaskLog, TaskView, TrafficRuleView, ZpoolView,
 };
 use dumbmonit_proto::{Target, TargetId};
 use serde::{Deserialize, Serialize};
@@ -526,6 +526,17 @@ pub struct HealthView {
     pub datastores: Vec<DatastoreView>,
     pub disks: Vec<DiskView>,
     pub zpools: Vec<ZpoolView>,
+    /// Unités systemd du serveur. Vide quand l'option est fermée ou quand le
+    /// serveur n'en a déclaré aucune : dans les deux cas, rien à montrer.
+    pub services: Vec<ServiceView>,
+    /// Versions des paquets Proxmox : installée, disponible, en exécution.
+    pub packages: Vec<PackageView>,
+    /// Certificats servis par l'interface ; vide sans le privilège que PBS
+    /// exige pour les lire.
+    pub certificates: Vec<CertificateView>,
+    pub traffic: Vec<TrafficRuleView>,
+    /// L'étage bande, ou `null` quand le serveur n'en a pas.
+    pub tape: Option<TapeView>,
 }
 
 async fn health(
@@ -541,6 +552,13 @@ async fn health(
         datastores: view.datastores,
         disks: view.disks,
         zpools: view.zpools,
+        services: view.services,
+        packages: view.packages,
+        certificates: view.certificates,
+        traffic: view.traffic,
+        // Une bandothèque vide vaut pas de bandothèque : la section disparaît
+        // plutôt que de s'afficher vide sur les installations qui n'en ont pas.
+        tape: view.tape.filter(|tape| !tape.is_empty()),
     }))
 }
 

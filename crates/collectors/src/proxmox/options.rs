@@ -76,6 +76,29 @@ pub struct Options {
     pub packages: bool,
     /// Abonnement et dépôts APT (`/nodes/{node}/subscription`, `apt/repositories`).
     pub subscription: bool,
+    /// Inventaire du cluster en un appel (`/cluster/resources`). Coupé, on
+    /// retombe sur les listes par nœud — et l'on perd les invités des nœuds
+    /// injoignables.
+    pub cluster_resources: bool,
+    /// Flux RRD complet (`/cluster/metrics/export`). Éteint par défaut : il
+    /// double partiellement les séries déjà collectées.
+    pub metrics_export: bool,
+    /// Démons du nœud et sa version (`/nodes/{node}/services`, `version`).
+    pub services: bool,
+    /// Interfaces réseau et compteurs par carte d'invité (`/nodes/{node}/network`,
+    /// `netstat`).
+    pub network: bool,
+    /// Groupes de volumes, pools à provisionnement fin et montages gérés
+    /// (`/nodes/{node}/disks/{lvm,lvmthin,directory}`).
+    pub lvm: bool,
+    /// Détail Ceph : OSD, pools, systèmes de fichiers, drapeaux, sourdines.
+    pub ceph_detail: bool,
+    /// Volumes réellement couverts par chaque travail de sauvegarde
+    /// (`/cluster/backup/{id}/included_volumes`).
+    pub backup_volumes: bool,
+    /// Système et adresses de chaque invité en marche (agent QEMU `get-osinfo`
+    /// et `network-get-interfaces`, `interfaces` pour les conteneurs).
+    pub guest_os: bool,
 }
 
 impl Options {
@@ -115,6 +138,16 @@ impl Options {
             zfs: parse_bool_or(tag(target, "zfs"), true)?,
             packages: parse_bool_or(tag(target, "packages"), true)?,
             subscription: parse_bool_or(tag(target, "subscription"), true)?,
+            cluster_resources: parse_bool_or(tag(target, "cluster_resources"), true)?,
+            // Seul inventaire éteint par défaut : ses séries `*_rrd_*` répètent
+            // en partie ce que la collecte publie déjà sous de meilleurs noms.
+            metrics_export: parse_bool_or(tag(target, "metrics_export"), false)?,
+            services: parse_bool_or(tag(target, "services"), true)?,
+            network: parse_bool_or(tag(target, "network"), true)?,
+            lvm: parse_bool_or(tag(target, "lvm"), true)?,
+            ceph_detail: parse_bool_or(tag(target, "ceph_detail"), true)?,
+            backup_volumes: parse_bool_or(tag(target, "backup_volumes"), true)?,
+            guest_os: parse_bool_or(tag(target, "guest_os"), true)?,
         })
     }
 
@@ -282,14 +315,22 @@ mod tests {
         assert!(options.zfs);
         assert!(options.packages);
         assert!(options.subscription);
+        assert!(options.cluster_resources);
+        assert!(options.services);
+        assert!(options.network);
+        assert!(options.lvm);
+        assert!(options.ceph_detail);
+        assert!(options.backup_volumes);
+        assert!(options.guest_os);
+        assert!(!options.metrics_export, "le flux RRD complet se demande explicitement");
     }
 
-    /// Lecture d'un drapeau d'inventaire, pour parcourir les douze en boucle.
+    /// Lecture d'un drapeau d'inventaire, pour les parcourir tous en boucle.
     type Lecture = fn(&Options) -> bool;
 
     #[test]
     fn chaque_inventaire_complementaire_se_coupe_par_etiquette() {
-        let cas: [(&str, Lecture); 12] = [
+        let cas: [(&str, Lecture); 19] = [
             ("ha", |o| o.ha),
             ("backup_jobs", |o| o.backup_jobs),
             ("scan_snapshots", |o| o.scan_snapshots),
@@ -302,6 +343,13 @@ mod tests {
             ("zfs", |o| o.zfs),
             ("packages", |o| o.packages),
             ("subscription", |o| o.subscription),
+            ("cluster_resources", |o| o.cluster_resources),
+            ("services", |o| o.services),
+            ("network", |o| o.network),
+            ("lvm", |o| o.lvm),
+            ("ceph_detail", |o| o.ceph_detail),
+            ("backup_volumes", |o| o.backup_volumes),
+            ("guest_os", |o| o.guest_os),
         ];
         for (etiquette, lire) in cas {
             let options = Options::from_target(&cible(&[(etiquette, "false")])).unwrap();
@@ -309,6 +357,13 @@ mod tests {
             let error = Options::from_target(&cible(&[(etiquette, "jamais")])).unwrap_err();
             assert!(matches!(error, ProbeError::Config(_)));
         }
+    }
+
+    #[test]
+    fn le_flux_rrd_sallume_par_etiquette() {
+        let options = Options::from_target(&cible(&[("metrics_export", "true")])).unwrap();
+        assert!(options.metrics_export);
+        assert!(Options::from_target(&cible(&[("metrics_export", "jamais")])).is_err());
     }
 
     #[test]

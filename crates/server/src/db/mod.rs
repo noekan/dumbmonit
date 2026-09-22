@@ -1,6 +1,8 @@
 pub mod abb_runs;
 pub mod alerts;
 pub mod pbs;
+pub mod pdm;
+pub mod pmg;
 pub mod status_pages;
 pub mod targets;
 

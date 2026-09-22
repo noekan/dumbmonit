@@ -550,7 +550,7 @@ mod tests {
     #[test]
     fn le_mot_detat_suit_le_qmpstatus_dune_machine_en_pause() {
         let guests: Vec<GuestEntry> = extraire(
-            r#"{"data":[{"vmid":103,"name":"lab","status":"running","qmpstatus":"paused","cpu":0}]}"#,
+            r#"{"data":[{"vmid":103,"name":"sandbox","status":"running","qmpstatus":"paused","cpu":0}]}"#,
         );
         let samples = guest_samples("pve1", GuestKind::Qemu, &guests, 1000);
         let etat = samples.iter().find(|s| s.metric == "proxmox_guest_status_info").unwrap();
@@ -558,7 +558,7 @@ mod tests {
         assert_eq!(
             valeur(
                 &samples,
-                r#"proxmox_guest_running{name="lab",node="pve1",type="qemu",vmid="103"}"#
+                r#"proxmox_guest_running{name="sandbox",node="pve1",type="qemu",vmid="103"}"#
             ),
             Some(1.0)
         );
@@ -637,8 +637,8 @@ mod tests {
     /// le certificat de pveproxy expire dans sept jours.
     const CERTIFICATES: &str = r#"{"data":[
       {"filename":"pve-root-ca.pem","subject":"CN=Proxmox Virtual Environment,OU=homelab,O=PVE Cluster Manager CA","issuer":"CN=Proxmox Virtual Environment,OU=homelab,O=PVE Cluster Manager CA","notbefore":1723241835,"notafter":2038601835,"fingerprint":"11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00","public-key-type":"rsaEncryption","public-key-bits":4096,"pem":"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"},
-      {"filename":"pve-ssl.pem","subject":"OU=PVE Cluster Node,O=Proxmox Virtual Environment,CN=pve1.lab","issuer":"CN=Proxmox Virtual Environment,OU=homelab,O=PVE Cluster Manager CA","notbefore":1783894638,"notafter":1815430638,"san":["pve1","pve1.lab","192.168.10.11"],"fingerprint":"AB:CD:AB:CD:EF","public-key-type":"rsaEncryption","public-key-bits":2048,"pem":"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"},
-      {"filename":"pveproxy-ssl.pem","subject":"CN=pve1.lab.example.net","issuer":"C=US,O=Let's Encrypt,CN=R11","notbefore":1783894638,"notafter":1790115438,"san":["pve1.lab.example.net"],"fingerprint":"12:34:12:34:56","public-key-type":"id-ecPublicKey","public-key-bits":256,"pem":"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"}
+      {"filename":"pve-ssl.pem","subject":"OU=PVE Cluster Node,O=Proxmox Virtual Environment,CN=pve1.home.arpa","issuer":"CN=Proxmox Virtual Environment,OU=homelab,O=PVE Cluster Manager CA","notbefore":1783894638,"notafter":1815430638,"san":["pve1","pve1.home.arpa","192.168.10.11"],"fingerprint":"AB:CD:AB:CD:EF","public-key-type":"rsaEncryption","public-key-bits":2048,"pem":"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"},
+      {"filename":"pveproxy-ssl.pem","subject":"CN=pve1.example.net","issuer":"C=US,O=Let's Encrypt,CN=R11","notbefore":1783894638,"notafter":1790115438,"san":["pve1.example.net"],"fingerprint":"12:34:12:34:56","public-key-type":"id-ecPublicKey","public-key-bits":256,"pem":"-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"}
     ]}"#;
 
     #[test]
@@ -651,7 +651,7 @@ mod tests {
         assert_eq!(
             valeur(
                 &samples,
-                r#"proxmox_node_certificate_expiry_days{filename="pveproxy-ssl.pem",node="pve1",subject="CN=pve1.lab.example.net"}"#
+                r#"proxmox_node_certificate_expiry_days{filename="pveproxy-ssl.pem",node="pve1",subject="CN=pve1.example.net"}"#
             ),
             Some(7.0)
         );

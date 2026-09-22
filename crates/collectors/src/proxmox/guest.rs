@@ -11,7 +11,10 @@
 use dumbmonit_proto::Sample;
 
 use super::metrics::{GuestKind, gauge, guest_labels};
-use super::model::{AgentFilesystem, AgentFsInfo, GuestEntry, QemuStatus};
+use super::model::{
+    AgentFilesystem, AgentFsInfo, AgentInterfaces, AgentOsInfo, GuestEntry, LxcInterface,
+    QemuStatus,
+};
 
 /// Séries tirées de l'état détaillé d'une machine virtuelle en marche.
 pub fn qemu_status_samples(
@@ -92,6 +95,136 @@ pub fn fs_samples(node: &str, guest: &GuestEntry, info: &AgentFsInfo, ts_ms: i64
 /// Agent activé mais muet : la machine démarre, ou l'agent n'est pas installé.
 pub fn agent_silent_sample(node: &str, guest: &GuestEntry, ts_ms: i64) -> Sample {
     guest_labels(gauge("guest_agent_running", 0.0, ts_ms), node, guest, GuestKind::Qemu)
+}
+
+/// Nombre d'adresses retenues par invité.
+///
+/// Une machine peut en porter des dizaines (conteneurs Docker, réseaux
+/// virtuels) : les publier toutes remplirait la base de séries éphémères. Les
+/// quatre premières adresses routables suffisent à identifier la machine sur le
+/// réseau, ce qui est le seul but.
+const MAX_ADDRESSES: usize = 4;
+
+/// `GET /nodes/{node}/qemu/{vmid}/agent/get-osinfo` : le système installé.
+///
+/// Proxmox ne connaît que le type d'OS déclaré dans la configuration (`l26`,
+/// `win11`), pas ce qui tourne réellement. L'agent, lui, lit
+/// `/etc/os-release` — c'est la seule façon de savoir qu'une machine est restée
+/// en Debian 11 alors que tout le reste du parc est en 12.
+pub fn os_samples(node: &str, guest: &GuestEntry, info: &AgentOsInfo, ts_ms: i64) -> Vec<Sample> {
+    let os = &info.result;
+    // Sans nom ni version, l'agent a répondu quelque chose d'inexploitable :
+    // mieux vaut pas de série qu'une série vide qui occuperait une ligne.
+    if os.name.is_none() && os.pretty_name.is_none() && os.version.is_none() {
+        return Vec::new();
+    }
+
+    let pretty = os
+        .pretty_name
+        .clone()
+        .or_else(|| match (&os.name, &os.version) {
+            (Some(name), Some(version)) => Some(format!("{name} {version}")),
+            (Some(name), None) => Some(name.clone()),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    vec![guest_labels(
+        gauge("guest_os_info", 1.0, ts_ms)
+            .with_label("os", pretty)
+            .with_label("os_id", os.id.clone().unwrap_or_default())
+            .with_label(
+                "os_version",
+                os.version_id.clone().or(os.version.clone()).unwrap_or_default(),
+            )
+            .with_label("kernel", os.kernel_release.clone().unwrap_or_default()),
+        node,
+        guest,
+        GuestKind::Qemu,
+    )]
+}
+
+/// `GET /nodes/{node}/qemu/{vmid}/agent/network-get-interfaces` : les adresses
+/// de la machine, vues de l'intérieur.
+pub fn agent_address_samples(
+    node: &str,
+    guest: &GuestEntry,
+    interfaces: &AgentInterfaces,
+    ts_ms: i64,
+) -> Vec<Sample> {
+    let addresses = interfaces.result.iter().flat_map(|iface| {
+        let name = iface.name.clone().unwrap_or_default();
+        iface
+            .ip_addresses
+            .iter()
+            .filter_map(move |address| Some((name.clone(), address.ip_address.clone()?)))
+    });
+    address_samples(node, guest, GuestKind::Qemu, addresses, ts_ms)
+}
+
+/// `GET /nodes/{node}/lxc/{vmid}/interfaces` : les adresses d'un conteneur.
+///
+/// Un conteneur n'a pas d'agent : PVE lit directement son espace de noms réseau,
+/// ce qui rend l'information disponible sans rien installer dedans.
+pub fn lxc_address_samples(
+    node: &str,
+    guest: &GuestEntry,
+    interfaces: &[LxcInterface],
+    ts_ms: i64,
+) -> Vec<Sample> {
+    let addresses = interfaces.iter().flat_map(|iface| {
+        let name = iface.name.clone().unwrap_or_default();
+        [iface.inet.clone(), iface.inet6.clone()]
+            .into_iter()
+            .flatten()
+            // PVE renvoie ici des adresses en notation CIDR.
+            .map(move |address| {
+                (name.clone(), address.split('/').next().unwrap_or_default().to_string())
+            })
+    });
+    address_samples(node, guest, GuestKind::Lxc, addresses, ts_ms)
+}
+
+/// Retient les adresses routables et en fait des séries de présence.
+fn address_samples(
+    node: &str,
+    guest: &GuestEntry,
+    kind: GuestKind,
+    addresses: impl Iterator<Item = (String, String)>,
+    ts_ms: i64,
+) -> Vec<Sample> {
+    let mut samples = Vec::new();
+    let mut kept = 0usize;
+
+    for (iface, address) in addresses {
+        if !is_routable(&address) {
+            continue;
+        }
+        if kept >= MAX_ADDRESSES {
+            break;
+        }
+        kept += 1;
+        samples.push(guest_labels(
+            gauge("guest_ip_info", 1.0, ts_ms).with_label("iface", iface).with_label("ip", address),
+            node,
+            guest,
+            kind,
+        ));
+    }
+
+    samples
+}
+
+/// Vrai si l'adresse sert à joindre la machine depuis ailleurs.
+///
+/// La boucle locale et le lien-local IPv6 sont présents sur toute machine et
+/// n'identifient rien ; les publier ferait trois séries de bruit par invité.
+fn is_routable(address: &str) -> bool {
+    let address = address.trim();
+    !(address.is_empty()
+        || address == "::1"
+        || address.starts_with("127.")
+        || address.to_ascii_lowercase().starts_with("fe80:"))
 }
 
 #[cfg(test)]
@@ -243,5 +376,92 @@ mod tests {
         let sample = agent_silent_sample("pve1", &machine(), 1000);
         assert_eq!(sample.series_key(), format!("proxmox_guest_agent_running{{{ID}}}"));
         assert_eq!(sample.value, 0.0);
+    }
+
+    /// `GET /nodes/pve1/qemu/100/agent/get-osinfo` d'un Debian 12.
+    const OSINFO: &str = r##"{"data":{"result":{"id":"debian","kernel-release":"6.1.0-18-amd64",
+      "kernel-version":"#1 SMP PREEMPT_DYNAMIC Debian 6.1.76-1","machine":"x86_64",
+      "name":"Debian GNU/Linux","pretty-name":"Debian GNU/Linux 12 (bookworm)",
+      "version":"12 (bookworm)","version-id":"12"}}}"##;
+
+    /// `GET /nodes/pve1/qemu/100/agent/network-get-interfaces`.
+    const AGENT_INTERFACES: &str = r#"{"data":{"result":[
+      {"name":"lo","hardware-address":"00:00:00:00:00:00","ip-addresses":[
+        {"ip-address":"127.0.0.1","ip-address-type":"ipv4","prefix":8},
+        {"ip-address":"::1","ip-address-type":"ipv6","prefix":128}]},
+      {"name":"ens18","hardware-address":"bc:24:11:2a:3b:4c","ip-addresses":[
+        {"ip-address":"192.168.10.50","ip-address-type":"ipv4","prefix":24},
+        {"ip-address":"fe80::be24:11ff:fe2a:3b4c","ip-address-type":"ipv6","prefix":64}]}
+    ]}}"#;
+
+    #[test]
+    fn le_systeme_rapporte_par_lagent_devient_une_serie_de_presence() {
+        let info = serde_json::from_str::<Envelope<AgentOsInfo>>(OSINFO).unwrap().data;
+        let samples = os_samples("pve1", &machine(), &info, 1000);
+        assert_eq!(samples.len(), 1);
+        assert_eq!(
+            samples[0].series_key(),
+            r#"proxmox_guest_os_info{kernel="6.1.0-18-amd64",name="router-vm",node="pve1",os="Debian GNU/Linux 12 (bookworm)",os_id="debian",os_version="12",type="qemu",vmid="100"}"#
+        );
+    }
+
+    #[test]
+    fn un_agent_qui_ne_dit_rien_du_systeme_ne_produit_pas_de_serie_vide() {
+        let info = serde_json::from_str::<Envelope<AgentOsInfo>>(r#"{"data":{"result":{}}}"#)
+            .unwrap()
+            .data;
+        assert!(os_samples("pve1", &machine(), &info, 1000).is_empty());
+    }
+
+    #[test]
+    fn seules_les_adresses_joignables_sont_publiees() {
+        let interfaces =
+            serde_json::from_str::<Envelope<AgentInterfaces>>(AGENT_INTERFACES).unwrap().data;
+        let samples = agent_address_samples("pve1", &machine(), &interfaces, 1000);
+        assert_eq!(samples.len(), 1, "ni boucle locale ni lien-local");
+        assert_eq!(
+            valeur(
+                &samples,
+                r#"proxmox_guest_ip_info{iface="ens18",ip="192.168.10.50",name="router-vm",node="pve1",type="qemu",vmid="100"}"#
+            ),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn les_adresses_dun_conteneur_perdent_leur_masque() {
+        let interfaces: Vec<LxcInterface> = serde_json::from_str::<Envelope<Vec<LxcInterface>>>(
+            r#"{"data":[
+              {"name":"lo","hwaddr":"00:00:00:00:00:00","hardware-address":"00:00:00:00:00:00","inet":"127.0.0.1/8","inet6":"::1/128"},
+              {"name":"eth0","hwaddr":"bc:24:11:00:00:01","hardware-address":"bc:24:11:00:00:01","inet":"192.168.10.60/24"}]}"#,
+        )
+        .unwrap()
+        .data;
+        let conteneur: GuestEntry =
+            serde_json::from_str(r#"{"vmid":200,"name":"pihole","status":"running"}"#).unwrap();
+        let samples = lxc_address_samples("pve1", &conteneur, &interfaces, 1000);
+        assert_eq!(samples.len(), 1);
+        assert_eq!(
+            valeur(
+                &samples,
+                r#"proxmox_guest_ip_info{iface="eth0",ip="192.168.10.60",name="pihole",node="pve1",type="lxc",vmid="200"}"#
+            ),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn le_nombre_dadresses_publiees_est_borne() {
+        let mut liste = Vec::new();
+        for index in 0..10 {
+            liste.push(LxcInterface {
+                name: Some(format!("eth{index}")),
+                inet: Some(format!("10.0.0.{index}/24")),
+                ..Default::default()
+            });
+        }
+        let conteneur: GuestEntry =
+            serde_json::from_str(r#"{"vmid":200,"status":"running"}"#).unwrap();
+        assert_eq!(lxc_address_samples("pve1", &conteneur, &liste, 1000).len(), MAX_ADDRESSES);
     }
 }

@@ -41,6 +41,14 @@
 //! | `zfs` | `true` | État et capacité des pools ZFS. |
 //! | `packages` | `true` | Versions des paquets Proxmox, pour signaler un changement entre deux interrogations. |
 //! | `subscription` | `true` | Abonnement et dépôts APT du nœud. |
+//! | `cluster_resources` | `true` | Inventaire du cluster en un appel ; voit les invités d'un nœud injoignable. |
+//! | `services` | `true` | Démons du nœud (`pvestatd`, `pveproxy`, `corosync`…) et sa version. |
+//! | `network` | `true` | Ponts, agrégats et VLAN du nœud, et les compteurs par carte d'invité. |
+//! | `lvm` | `true` | Groupes de volumes, pools à provisionnement fin, montages gérés. |
+//! | `ceph_detail` | `true` | OSD, pools, CephFS, drapeaux et sourdines de santé. |
+//! | `backup_volumes` | `true` | Volumes qu'un travail de sauvegarde couvre réellement. |
+//! | `guest_os` | `true` | Système et adresses de chaque invité, rafraîchis une fois par heure. |
+//! | `metrics_export` | `false` | Flux RRD complet du cluster (`/cluster/metrics/export`), pression système comprise. |
 
 mod apt;
 mod auth;
@@ -48,12 +56,15 @@ mod backup;
 mod ceph;
 mod client;
 mod disks;
+mod export;
 mod guest;
 mod ha;
 mod metrics;
 mod model;
+mod node;
 mod options;
 mod replication;
+mod resources;
 mod snapshots;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -71,12 +82,15 @@ use backup::{Archive, GuestIndex, GuestRef, JobRun};
 use client::PveClient;
 use metrics::GuestKind;
 use model::{
-    AgentFsInfo, AptPackage, AptVersion, BackupJob, CephStatus, CertificateInfo,
-    ClusterStatusEntry, DiskEntry, GuestEntry, HaStatusEntry, NodeListEntry, NodeStatus,
-    NotBackedUp, QemuStatus, ReplicationJob, Repositories, SmartReport, Snapshot, StorageEntry,
-    Subscription, TaskEntry, ZfsPool,
+    AgentFsInfo, AgentInterfaces, AgentOsInfo, AptPackage, AptVersion, BackupJob, CephFlag, CephFs,
+    CephHealthMute, CephOsdTree, CephPool, CephStatus, CertificateInfo, ClusterStatusEntry,
+    DirectoryMount, DiskEntry, GuestEntry, HaManagerStatus, HaStatusEntry, IncludedVolumes,
+    LvmTree, LxcInterface, MetricsExport, NetstatEntry, NetworkInterface, NodeListEntry,
+    NodeStatus, NotBackedUp, Num, QemuStatus, ReplicationJob, Repositories, ResourceEntry,
+    ServiceEntry, SmartReport, Snapshot, StorageEntry, Subscription, TaskEntry, ThinPool, ZfsPool,
 };
 use options::Options;
+use resources::GuestSummary;
 
 use crate::http;
 
@@ -93,6 +107,24 @@ const SNAPSHOT_PARALLELISM: usize = 4;
 /// Versions de paquets retenues d'une interrogation à l'autre, par nœud.
 type PackageMemories = BTreeMap<String, apt::PackageMemory>;
 
+/// Durée de validité des faits d'un invité — système et adresses.
+///
+/// Un système d'exploitation ne change pas entre deux minutes, une adresse
+/// presque jamais. Les redemander à chaque interrogation coûterait deux appels
+/// à l'agent par machine en marche, soit plus que tout le reste de la collecte
+/// sur un parc de cinquante machines. On les garde une heure et on les republie
+/// à chaque tour, pour que la série reste continue.
+const GUEST_FACTS_TTL_SECONDS: i64 = 3_600;
+
+/// Faits d'un invité, avec la date à laquelle ils ont été demandés.
+struct GuestFact {
+    fetched_at: i64,
+    samples: Vec<Sample>,
+}
+
+/// Faits de tous les invités d'une cible, par VMID.
+type GuestFacts = HashMap<i64, GuestFact>;
+
 #[derive(Default)]
 pub struct ProxmoxCollector {
     /// Tickets en cache, un par cible. Sans ce cache, chaque interrogation ouvrirait
@@ -101,6 +133,12 @@ pub struct ProxmoxCollector {
     /// Versions des paquets vues à la dernière interrogation, par cible puis par
     /// nœud : c'est la référence qui permet de dire « ce nœud a été mis à jour ».
     packages: Mutex<HashMap<TargetId, PackageMemories>>,
+    /// Système et adresses de chaque invité, rafraîchis une fois par heure.
+    facts: Mutex<HashMap<TargetId, GuestFacts>>,
+    /// Horodatage du dernier point lu dans le flux RRD, par cible : c'est lui qui
+    /// dit à Proxmox où reprendre, et qui évite de republier deux fois le même
+    /// point.
+    export_cursor: Mutex<HashMap<TargetId, i64>>,
 }
 
 impl ProxmoxCollector {
@@ -126,6 +164,123 @@ impl ProxmoxCollector {
     fn ticket_slot(&self, id: TargetId) -> Arc<tokio::sync::Mutex<Option<Ticket>>> {
         let mut cache = self.tickets.lock().unwrap_or_else(|poison| poison.into_inner());
         cache.entry(id).or_default().clone()
+    }
+
+    /// Lit le flux RRD du cluster et le traduit en échantillons.
+    ///
+    /// La reprise se fait à l'horodatage du dernier point vu : Proxmox renvoie
+    /// alors uniquement ce qui s'est passé depuis, à la minute. Une cible
+    /// interrogée toutes les cinq minutes récupère ainsi les cinq points de
+    /// l'intervalle, au lieu de n'en garder qu'un.
+    ///
+    /// Tout échoue en silence : l'endpoint demande `Sys.Audit` sur `/`, et
+    /// n'existe pas avant PVE 7.
+    async fn collect_rrd_export(
+        &self,
+        pve: &PveClient,
+        options: &Options,
+        id: TargetId,
+        now_s: i64,
+    ) -> Vec<Sample> {
+        if !options.metrics_export {
+            return Vec::new();
+        }
+
+        let since = self
+            .export_cursor
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .get(&id)
+            .copied();
+        let start = since.unwrap_or(now_s - export::INITIAL_HISTORY_SECONDS);
+        let query = [("history", "1".to_string()), ("start-time", start.max(0).to_string())];
+
+        let response =
+            pve.get_unless::<MetricsExport>("/cluster/metrics/export", &query, &OPTIONAL_STATUSES);
+        let stream = match response.await {
+            Ok(Some(stream)) => stream,
+            Ok(None) => {
+                debug!(target_id = id, "flux RRD non lisible : Sys.Audit manquant sur « / »");
+                return Vec::new();
+            }
+            Err(error) => {
+                debug!(target_id = id, %error, "flux RRD indisponible");
+                return Vec::new();
+            }
+        };
+
+        let export = export::export_samples(&stream, since);
+        if let Some(latest) = export.latest_timestamp {
+            self.export_cursor
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .insert(id, latest);
+        }
+        debug!(
+            target_id = id,
+            points = export.samples.len(),
+            unknown = export.unknown,
+            "flux RRD lu"
+        );
+        export.samples
+    }
+
+    /// Système et adresses des invités en marche, rafraîchis une fois par heure.
+    ///
+    /// Le verrou n'est jamais tenu pendant un appel réseau : on lit la mémoire,
+    /// on relâche, on interroge, on réécrit. Les faits déjà connus sont
+    /// republiés à l'horodatage de cette collecte, de sorte que la série ne
+    /// clignote pas entre deux rafraîchissements.
+    async fn guest_fact_samples(
+        &self,
+        pve: &PveClient,
+        id: TargetId,
+        guests: &GuestIndex,
+        running: &BTreeSet<i64>,
+        now_s: i64,
+        ts_ms: i64,
+    ) -> Vec<Sample> {
+        let (mut samples, stale) = {
+            let mut cache = self.facts.lock().unwrap_or_else(|poison| poison.into_inner());
+            let facts = cache.entry(id).or_default();
+            // Un invité détruit ne doit pas garder sa place en mémoire.
+            facts.retain(|vmid, _| guests.contains_key(vmid));
+
+            let mut samples = Vec::new();
+            let mut stale = Vec::new();
+            for vmid in running {
+                let Some(guest) = guests.get(vmid) else { continue };
+                match facts.get(vmid) {
+                    Some(fact) if fact.fetched_at + GUEST_FACTS_TTL_SECONDS > now_s => {
+                        samples.extend(fact.samples.iter().cloned().map(|mut sample| {
+                            sample.ts_ms = ts_ms;
+                            sample
+                        }));
+                    }
+                    _ => stale.push((*vmid, guest.clone())),
+                }
+            }
+            (samples, stale)
+        };
+
+        if stale.is_empty() {
+            return samples;
+        }
+
+        let semaphore = tokio::sync::Semaphore::new(SNAPSHOT_PARALLELISM);
+        let fetched = futures::future::join_all(stale.iter().map(|(vmid, guest)| {
+            let semaphore = &semaphore;
+            async move { (*vmid, fetch_guest_facts(pve, semaphore, *vmid, guest, ts_ms).await) }
+        }))
+        .await;
+
+        let mut cache = self.facts.lock().unwrap_or_else(|poison| poison.into_inner());
+        let facts = cache.entry(id).or_default();
+        for (vmid, fresh) in fetched {
+            samples.extend(fresh.iter().cloned());
+            facts.insert(vmid, GuestFact { fetched_at: now_s, samples: fresh });
+        }
+        samples
     }
 
     /// Compare les versions de paquets de chaque nœud à celles de l'interrogation
@@ -181,20 +336,85 @@ impl Collector for ProxmoxCollector {
         samples.push(Sample::new("proxmox_up", 1.0, MetricKind::Gauge, ts_ms));
         let mut errors = 0u32;
 
+        // L'inventaire du cluster et la liste des nœuds conditionnent tout le
+        // reste : l'un dit quels invités existent, l'autre quels nœuds
+        // interroger. Ils partent ensemble, avant la suite.
+        let (inventory, node_list) = futures::join!(
+            when(
+                options.cluster_resources,
+                pve.get::<Vec<ResourceEntry>>("/cluster/resources", &[])
+            ),
+            pve.get::<Vec<NodeListEntry>>("/nodes", &[]),
+        );
+
+        let inventory = match inventory {
+            Some(Ok(entries)) => Some(resources::inventory(&entries, ts_ms)),
+            Some(Err(error)) => {
+                errors += 1;
+                warn!(target_id = target.id, %error, "inventaire du cluster indisponible");
+                None
+            }
+            None => None,
+        };
+
+        let node_list = match node_list {
+            Ok(list) => list,
+            Err(error) => {
+                errors += 1;
+                warn!(target_id = target.id, %error, "liste des nœuds Proxmox indisponible");
+                Vec::new()
+            }
+        };
+
+        // Les endpoints Ceph propres aux nœuds décrivent le cluster entier :
+        // les interroger sur chaque nœud multiplierait le coût sans rien
+        // apprendre. Un nœud en ligne suffit.
+        let ceph_node = node_list
+            .iter()
+            .find(|entry| entry.is_online() && options.wants_node(&entry.node))
+            .map(|entry| entry.node.clone());
+
         // Les appels à l'échelle du cluster et la tournée des nœuds sont
         // indépendants : tout part en même temps.
         let budget = SnapshotBudget::new(options.max_snapshot_guests);
-        let (cluster, ha, jobs, not_backed_up, ceph_status, nodes) = futures::join!(
+        let guests_by_node = inventory.as_ref().map(|inventory| &inventory.guests_by_node);
+        let (cluster, ha, ha_manager, backups, ceph_status, ceph_detail, rrd, nodes) = futures::join!(
             pve.get::<Vec<ClusterStatusEntry>>("/cluster/status", &[]),
             when(options.ha, pve.get::<Vec<HaStatusEntry>>("/cluster/ha/status/current", &[])),
-            when(options.backup_jobs, pve.get::<Vec<BackupJob>>("/cluster/backup", &[])),
             when(
-                options.backup_jobs,
-                pve.get::<Vec<NotBackedUp>>("/cluster/backup-info/not-backed-up", &[])
+                options.ha,
+                pve.get_unless::<HaManagerStatus>(
+                    "/cluster/ha/status/manager_status",
+                    &[],
+                    &OPTIONAL_STATUSES
+                )
             ),
+            collect_backup_jobs(&pve, &options),
             when(options.ceph, pve.get::<CephStatus>("/cluster/ceph/status", &[])),
-            collect_nodes(&pve, &options, &budget, now_s, ts_ms),
+            collect_ceph_detail(&pve, &options, ceph_node.as_deref(), ts_ms),
+            self.collect_rrd_export(&pve, &options, target.id, now_s),
+            collect_nodes(&pve, &options, &node_list, guests_by_node, &budget, now_s, ts_ms),
         );
+
+        if let Some(inventory) = inventory {
+            samples.extend(inventory.samples);
+        }
+        samples.extend(ceph_detail);
+        samples.extend(rrd);
+
+        match ha_manager {
+            Some(Ok(Some(status))) => samples.extend(ha::manager_samples(&status, now_s, ts_ms)),
+            Some(Ok(None)) => {
+                debug!(target_id = target.id, "état détaillé de la HA non lisible : droit manquant")
+            }
+            Some(Err(error)) => {
+                debug!(target_id = target.id, %error, "pas de gestionnaire de haute disponibilité")
+            }
+            None => {}
+        }
+
+        let (jobs, not_backed_up, volume_samples) = backups;
+        samples.extend(volume_samples);
 
         match cluster {
             Ok(entries) => samples.extend(metrics::cluster_samples(&entries, ts_ms)),
@@ -221,14 +441,7 @@ impl Collector for ProxmoxCollector {
             None => {}
         }
 
-        let aggregate = match nodes {
-            Ok(aggregate) => aggregate,
-            Err(error) => {
-                errors += 1;
-                warn!(target_id = target.id, %error, "liste des nœuds Proxmox indisponible");
-                Aggregate::default()
-            }
-        };
+        let aggregate = nodes;
         errors += aggregate.errors;
         samples.extend(aggregate.samples);
         if options.packages {
@@ -293,6 +506,23 @@ impl Collector for ProxmoxCollector {
             ));
         }
 
+        // Le système et les adresses viennent en dernier : ils ont besoin de
+        // l'inventaire complet, et l'essentiel est déjà rassemblé si l'agent
+        // d'une machine se fait attendre.
+        if options.guest_os {
+            samples.extend(
+                self.guest_fact_samples(
+                    &pve,
+                    target.id,
+                    &aggregate.guests,
+                    &aggregate.running_guests,
+                    now_s,
+                    ts_ms,
+                )
+                .await,
+            );
+        }
+
         samples.push(Sample::new(
             "proxmox_scrape_errors",
             f64::from(errors),
@@ -341,6 +571,254 @@ where
     if enabled { Some(call.await) } else { None }
 }
 
+/// Statuts qui signifient « pas ici » plutôt que « en panne ».
+///
+/// Un droit non accordé (403), un endpoint apparu dans une version plus récente
+/// (404) ou une fonctionnalité non compilée (501) sont des cas normaux : ils
+/// donnent `Ok(None)`, pas une erreur de collecte.
+const OPTIONAL_STATUSES: [StatusCode; 3] =
+    [StatusCode::FORBIDDEN, StatusCode::NOT_FOUND, StatusCode::NOT_IMPLEMENTED];
+
+/// Travaux de sauvegarde planifiés, invités non couverts, et — pour chaque
+/// travail — les volumes qu'il embarque réellement.
+///
+/// Les trois lectures tiennent ensemble parce que la troisième a besoin de la
+/// première : on ne connaît l'identifiant d'un travail qu'après l'avoir listé.
+#[allow(clippy::type_complexity)]
+async fn collect_backup_jobs(
+    pve: &PveClient,
+    options: &Options,
+) -> (
+    Option<Result<Vec<BackupJob>, ProbeError>>,
+    Option<Result<Vec<NotBackedUp>, ProbeError>>,
+    Vec<Sample>,
+) {
+    let (jobs, not_backed_up) = futures::join!(
+        when(options.backup_jobs, pve.get::<Vec<BackupJob>>("/cluster/backup", &[])),
+        when(
+            options.backup_jobs,
+            pve.get::<Vec<NotBackedUp>>("/cluster/backup-info/not-backed-up", &[])
+        ),
+    );
+
+    let mut samples = Vec::new();
+    if options.backup_volumes
+        && let Some(Ok(list)) = &jobs
+    {
+        let ts_ms = chrono::Utc::now().timestamp_millis();
+        let trees = futures::future::join_all(list.iter().map(|job| async move {
+            let path = format!("/cluster/backup/{}/included_volumes", job.id);
+            (
+                job.id.as_str(),
+                pve.get_unless::<IncludedVolumes>(&path, &[], &OPTIONAL_STATUSES).await,
+            )
+        }))
+        .await;
+
+        for (job, tree) in trees {
+            match tree {
+                Ok(Some(tree)) => {
+                    samples.extend(backup::included_volume_samples(job, &tree, ts_ms))
+                }
+                Ok(None) => debug!(job, "contenu du travail de sauvegarde non lisible"),
+                Err(error) => debug!(job, %error, "contenu du travail de sauvegarde indisponible"),
+            }
+        }
+    }
+
+    (jobs, not_backed_up, samples)
+}
+
+/// Le détail de Ceph : OSD, pools, CephFS, drapeaux et sourdines.
+///
+/// Rien ici ne compte comme erreur : sans Ceph installé, PVE répond 500
+/// « rados_connect failed », et `Datastore.Audit` n'est pas toujours accordé.
+/// Un cluster sans Ceph doit rester parfaitement silencieux.
+async fn collect_ceph_detail(
+    pve: &PveClient,
+    options: &Options,
+    node: Option<&str>,
+    ts_ms: i64,
+) -> Vec<Sample> {
+    if !options.ceph || !options.ceph_detail {
+        return Vec::new();
+    }
+    let Some(node) = node else { return Vec::new() };
+
+    let (osd_path, pool_path, fs_path) = (
+        format!("/nodes/{node}/ceph/osd"),
+        format!("/nodes/{node}/ceph/pool"),
+        format!("/nodes/{node}/ceph/fs"),
+    );
+    let (osd, pools, filesystems, flags, mutes) = futures::join!(
+        pve.get::<CephOsdTree>(&osd_path, &[]),
+        pve.get::<Vec<CephPool>>(&pool_path, &[]),
+        pve.get::<Vec<CephFs>>(&fs_path, &[]),
+        pve.get::<Vec<CephFlag>>("/cluster/ceph/flags", &[]),
+        pve.get::<Vec<CephHealthMute>>("/cluster/ceph/health-mute", &[]),
+    );
+
+    let mut samples = Vec::new();
+    match osd {
+        Ok(tree) => samples.extend(ceph::osd_samples(&tree, ts_ms)),
+        Err(error) => debug!(node, %error, "arbre des OSD Ceph indisponible"),
+    }
+    match pools {
+        Ok(list) => samples.extend(ceph::pool_samples(&list, ts_ms)),
+        Err(error) => debug!(node, %error, "pools Ceph indisponibles"),
+    }
+    match filesystems {
+        Ok(list) => samples.extend(ceph::fs_samples(&list, ts_ms)),
+        Err(error) => debug!(node, %error, "systèmes de fichiers Ceph indisponibles"),
+    }
+    match flags {
+        Ok(list) => samples.extend(ceph::flag_samples(&list, ts_ms)),
+        Err(error) => debug!(%error, "drapeaux Ceph indisponibles"),
+    }
+    match mutes {
+        Ok(list) => samples.extend(ceph::health_mute_samples(&list, ts_ms)),
+        Err(error) => debug!(%error, "sourdines de santé Ceph indisponibles"),
+    }
+    samples
+}
+
+/// Les inventaires d'un nœud ajoutés par-dessus `/status` : démons, version,
+/// réseau, LVM.
+///
+/// Chacun demande un droit que `PVEAuditor` n'accorde pas toujours et peut
+/// manquer d'une version à l'autre : aucun échec ne compte comme erreur de
+/// collecte, la tournée du nœud a déjà livré l'essentiel.
+async fn collect_node_extras(
+    pve: &PveClient,
+    options: &Options,
+    node: &str,
+    ts_ms: i64,
+) -> Vec<Sample> {
+    let paths = [
+        format!("/nodes/{node}/services"),
+        format!("/nodes/{node}/version"),
+        format!("/nodes/{node}/network"),
+        format!("/nodes/{node}/netstat"),
+        format!("/nodes/{node}/disks/lvm"),
+        format!("/nodes/{node}/disks/lvmthin"),
+        format!("/nodes/{node}/disks/directory"),
+    ];
+    let optional = &OPTIONAL_STATUSES;
+
+    let (services, version, network, netstat, lvm, thin, directories) = futures::join!(
+        when(options.services, pve.get_unless::<Vec<ServiceEntry>>(&paths[0], &[], optional)),
+        when(options.services, pve.get_unless::<model::Version>(&paths[1], &[], optional)),
+        when(options.network, pve.get_unless::<Vec<NetworkInterface>>(&paths[2], &[], optional)),
+        when(options.network, pve.get_unless::<Vec<NetstatEntry>>(&paths[3], &[], optional)),
+        when(options.lvm, pve.get_unless::<LvmTree>(&paths[4], &[], optional)),
+        when(options.lvm, pve.get_unless::<Vec<ThinPool>>(&paths[5], &[], optional)),
+        when(options.lvm, pve.get_unless::<Vec<DirectoryMount>>(&paths[6], &[], optional)),
+    );
+
+    let mut samples = Vec::new();
+    match services {
+        Some(Ok(Some(list))) => samples.extend(node::service_samples(node, &list, ts_ms)),
+        Some(Ok(None)) => debug!(node, "démons non listés : Sys.Audit manquant sur le nœud"),
+        Some(Err(error)) => debug!(node, %error, "liste des démons indisponible"),
+        None => {}
+    }
+    match version {
+        Some(Ok(Some(version))) => samples.extend(node::version_samples(node, &version, ts_ms)),
+        Some(Ok(None)) | None => {}
+        Some(Err(error)) => debug!(node, %error, "version du nœud indisponible"),
+    }
+    match network {
+        Some(Ok(Some(list))) => samples.extend(node::network_samples(node, &list, ts_ms)),
+        Some(Ok(None)) => debug!(node, "interfaces non listées : droit manquant"),
+        Some(Err(error)) => debug!(node, %error, "interfaces réseau indisponibles"),
+        None => {}
+    }
+    match netstat {
+        Some(Ok(Some(list))) => samples.extend(node::netstat_samples(node, &list, ts_ms)),
+        Some(Ok(None)) | None => {}
+        Some(Err(error)) => debug!(node, %error, "compteurs réseau par invité indisponibles"),
+    }
+    match lvm {
+        Some(Ok(Some(tree))) => samples.extend(node::lvm_samples(node, &tree, ts_ms)),
+        Some(Ok(None)) => {
+            debug!(node, "groupes de volumes non listés : Sys.Audit manquant sur « / »")
+        }
+        Some(Err(error)) => debug!(node, %error, "groupes de volumes indisponibles"),
+        None => {}
+    }
+    match thin {
+        Some(Ok(Some(list))) => samples.extend(node::thinpool_samples(node, &list, ts_ms)),
+        Some(Ok(None)) | None => {}
+        Some(Err(error)) => debug!(node, %error, "pools à provisionnement fin indisponibles"),
+    }
+    match directories {
+        Some(Ok(Some(list))) => samples.extend(node::directory_samples(node, &list, ts_ms)),
+        Some(Ok(None)) | None => {}
+        Some(Err(error)) => debug!(node, %error, "montages gérés indisponibles"),
+    }
+    samples
+}
+
+/// Interroge l'agent d'un invité pour savoir ce qui tourne dedans et à quelle
+/// adresse il répond.
+///
+/// Muet sur tous les fronts : une VM sans agent, un agent sans le droit
+/// `VM.GuestAgent.Audit`, un conteneur dont PVE ne lit pas l'espace de noms —
+/// aucun de ces cas n'est une anomalie.
+async fn fetch_guest_facts(
+    pve: &PveClient,
+    semaphore: &tokio::sync::Semaphore,
+    vmid: i64,
+    guest: &GuestRef,
+    ts_ms: i64,
+) -> Vec<Sample> {
+    let _permit = semaphore.acquire().await.ok();
+    let node = guest.node.as_str();
+    // Les séries portent les étiquettes d'identité de l'invité : un squelette
+    // suffit, l'inventaire a déjà publié ses mesures.
+    let entry = GuestEntry {
+        vmid: Num(vmid as f64),
+        name: Some(guest.name.clone()),
+        status: Some("running".to_string()),
+        ..Default::default()
+    };
+
+    match guest.kind {
+        GuestKind::Qemu => {
+            let (os_path, net_path) = (
+                format!("/nodes/{node}/qemu/{vmid}/agent/get-osinfo"),
+                format!("/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces"),
+            );
+            let (os, addresses) = futures::join!(
+                pve.get::<AgentOsInfo>(&os_path, &[]),
+                pve.get::<AgentInterfaces>(&net_path, &[]),
+            );
+            let mut samples = Vec::new();
+            match os {
+                Ok(info) => samples.extend(guest::os_samples(node, &entry, &info, ts_ms)),
+                Err(error) => debug!(node, vmid, %error, "système de la VM non rapporté"),
+            }
+            match addresses {
+                Ok(list) => {
+                    samples.extend(guest::agent_address_samples(node, &entry, &list, ts_ms))
+                }
+                Err(error) => debug!(node, vmid, %error, "adresses de la VM non rapportées"),
+            }
+            samples
+        }
+        GuestKind::Lxc => {
+            let path = format!("/nodes/{node}/lxc/{vmid}/interfaces");
+            match pve.get::<Vec<LxcInterface>>(&path, &[]).await {
+                Ok(list) => guest::lxc_address_samples(node, &entry, &list, ts_ms),
+                Err(error) => {
+                    debug!(node, vmid, %error, "adresses du conteneur non rapportées");
+                    Vec::new()
+                }
+            }
+        }
+    }
+}
+
 /// Plafond d'invités dont on liste les instantanés, partagé entre les nœuds.
 ///
 /// Les nœuds sont collectés en parallèle : un compteur atomique est la seule
@@ -358,23 +836,49 @@ impl SnapshotBudget {
     }
 }
 
-/// Liste les nœuds puis les collecte en parallèle.
+/// Collecte les nœuds en parallèle, puis complète l'inventaire par ce que seul
+/// le cluster sait.
+///
+/// La tournée ne voit que les nœuds qui répondent. Quand `/cluster/resources` a
+/// répondu, ses invités sont réinjectés ici : ceux d'un nœud injoignable
+/// existent toujours, et leurs sauvegardes comme leur couverture doivent
+/// continuer d'être suivies.
 async fn collect_nodes(
     pve: &PveClient,
     options: &Options,
+    nodes: &[NodeListEntry],
+    guests_by_node: Option<&BTreeMap<String, Vec<GuestSummary>>>,
     budget: &SnapshotBudget,
     now_s: i64,
     ts_ms: i64,
-) -> Result<Aggregate, ProbeError> {
-    let nodes = pve.get::<Vec<NodeListEntry>>("/nodes", &[]).await?;
+) -> Aggregate {
     let outcomes = futures::future::join_all(
-        nodes
-            .iter()
-            .filter(|node| options.wants_node(&node.node))
-            .map(|node| collect_node(pve, options, node, budget, now_s, ts_ms)),
+        nodes.iter().filter(|node| options.wants_node(&node.node)).map(|node| {
+            let known = guests_by_node
+                .map(|index| index.get(&node.node).map(Vec::as_slice).unwrap_or_default());
+            collect_node(pve, options, node, known, budget, now_s, ts_ms)
+        }),
     )
     .await;
-    Ok(merge(outcomes))
+
+    let mut aggregate = merge(outcomes);
+
+    if let Some(index) = guests_by_node {
+        for (node, guests) in index.iter().filter(|(node, _)| options.wants_node(node)) {
+            for guest in guests.iter().filter(|guest| !guest.template) {
+                aggregate.guests.entry(guest.vmid).or_insert_with(|| GuestRef {
+                    node: node.clone(),
+                    name: guest.name.clone(),
+                    kind: guest.kind,
+                });
+                if guest.running {
+                    aggregate.running_guests.insert(guest.vmid);
+                }
+            }
+        }
+    }
+
+    aggregate
 }
 
 /// Ce qu'un nœud a livré, avant fusion à l'échelle du cluster.
@@ -393,6 +897,9 @@ struct NodeOutcome {
     replication_supported: bool,
     /// Invités dont les instantanés n'ont pas été listés, plafond atteint.
     snapshot_skipped: u32,
+    /// VMID des invités en marche sur ce nœud, pour les appels qui n'ont de sens
+    /// que sur une machine démarrée (agent, adresses).
+    running_guests: BTreeSet<i64>,
     /// Versions des paquets importants du nœud, à comparer à l'interrogation
     /// précédente (`ProxmoxCollector::packages`).
     package_versions: Option<Vec<AptVersion>>,
@@ -409,6 +916,7 @@ struct Aggregate {
     replication_jobs: BTreeSet<String>,
     replication_supported: bool,
     snapshot_skipped: u32,
+    running_guests: BTreeSet<i64>,
     /// Versions des paquets par nœud, pour les nœuds qui ont répondu.
     package_versions: BTreeMap<String, Vec<AptVersion>>,
     errors: u32,
@@ -464,6 +972,7 @@ fn merge(outcomes: Vec<NodeOutcome>) -> Aggregate {
         }
         aggregate.replication_jobs.extend(seen_here);
         aggregate.snapshot_skipped += outcome.snapshot_skipped;
+        aggregate.running_guests.extend(outcome.running_guests);
         if let Some(versions) = outcome.package_versions {
             aggregate.package_versions.insert(outcome.node.clone(), versions);
         }
@@ -478,6 +987,7 @@ async fn collect_node(
     pve: &PveClient,
     options: &Options,
     node: &NodeListEntry,
+    known_guests: Option<&[GuestSummary]>,
     budget: &SnapshotBudget,
     now_s: i64,
     ts_ms: i64,
@@ -538,9 +1048,12 @@ async fn collect_node(
         versions,
         subscription,
         repositories,
+        extras,
     ) = futures::join!(
-        pve.get::<Vec<GuestEntry>>(&qemu_path, &[]),
-        pve.get::<Vec<GuestEntry>>(&lxc_path, &[]),
+        // L'inventaire du cluster a déjà tout dit des invités : ces deux appels
+        // ne partent que s'il a manqué.
+        when(known_guests.is_none(), pve.get::<Vec<GuestEntry>>(&qemu_path, &[])),
+        when(known_guests.is_none(), pve.get::<Vec<GuestEntry>>(&lxc_path, &[])),
         pve.get::<Vec<StorageEntry>>(&storage_path, &[]),
         pve.get::<Vec<TaskEntry>>(&tasks_path, &tasks_query),
         // Une machine isolée sans réplication configurée répond 404 ou 501.
@@ -591,26 +1104,63 @@ async fn collect_node(
             options.subscription,
             pve.get_unless::<Repositories>(&repositories_path, &[], &optional)
         ),
+        collect_node_extras(pve, options, name, ts_ms),
     );
 
+    outcome.samples.extend(extras);
+
     let mut running_vms: Vec<GuestEntry> = Vec::new();
-    for (kind, result) in [(GuestKind::Qemu, qemu), (GuestKind::Lxc, lxc)] {
-        match result {
-            Ok(mut guests) => {
-                for guest in guests.iter().filter(|guest| !guest.is_template()) {
-                    outcome.guests.insert(
-                        guest.vmid(),
-                        GuestRef { node: name.to_string(), name: guest.display_name(), kind },
-                    );
-                }
-                outcome.samples.extend(metrics::guest_samples(name, kind, &guests, ts_ms));
-                if kind == GuestKind::Qemu && options.guest_agent {
-                    running_vms = guests.drain(..).filter(|guest| guest.is_running()).collect();
+    match known_guests {
+        // Inventaire du cluster : les séries sont déjà publiées, il ne reste
+        // qu'à savoir qui interroger ensuite.
+        Some(guests) => {
+            for guest in guests.iter().filter(|guest| !guest.template) {
+                outcome.guests.insert(
+                    guest.vmid,
+                    GuestRef { node: name.to_string(), name: guest.name.clone(), kind: guest.kind },
+                );
+                if guest.running {
+                    outcome.running_guests.insert(guest.vmid);
+                    if guest.kind == GuestKind::Qemu && options.guest_agent {
+                        running_vms.push(GuestEntry {
+                            vmid: Num(guest.vmid as f64),
+                            name: Some(guest.name.clone()),
+                            status: Some("running".to_string()),
+                            ..Default::default()
+                        });
+                    }
                 }
             }
-            Err(error) => {
-                outcome.errors += 1;
-                warn!(node = name, kind = kind.as_str(), %error, "inventaire des invités échoué");
+        }
+        None => {
+            for (kind, result) in [(GuestKind::Qemu, qemu), (GuestKind::Lxc, lxc)] {
+                match result {
+                    Some(Ok(mut guests)) => {
+                        for guest in guests.iter().filter(|guest| !guest.is_template()) {
+                            outcome.guests.insert(
+                                guest.vmid(),
+                                GuestRef {
+                                    node: name.to_string(),
+                                    name: guest.display_name(),
+                                    kind,
+                                },
+                            );
+                            if guest.is_running() {
+                                outcome.running_guests.insert(guest.vmid());
+                            }
+                        }
+                        outcome.samples.extend(metrics::guest_samples(name, kind, &guests, ts_ms));
+                        if kind == GuestKind::Qemu && options.guest_agent {
+                            running_vms =
+                                guests.drain(..).filter(|guest| guest.is_running()).collect();
+                        }
+                    }
+                    Some(Err(error)) => {
+                        outcome.errors += 1;
+                        warn!(node = name, kind = kind.as_str(), %error, "inventaire des invités échoué");
+                    }
+                    None => {}
+                }
             }
         }
     }
@@ -1170,5 +1720,406 @@ mod tests {
         assert!(when(false, call).await.is_none());
         assert!(!appele.get(), "l'option coupée ne doit rien exécuter");
         assert_eq!(when(true, async { Ok::<u8, ProbeError>(1) }).await.unwrap().unwrap(), 1);
+    }
+}
+
+/// Interrogation complète contre un faux Proxmox monté dans le test.
+///
+/// Les tests unitaires des modules couvrent chacun sa conversion ; celui-ci
+/// couvre ce qu'aucun d'eux ne voit : l'orchestration. Qu'un nœud injoignable
+/// laisse quand même ses invités dans l'inventaire, qu'un endpoint absent ou
+/// interdit ne compte pas comme une erreur, et que rien ne part quand l'option
+/// est coupée.
+#[cfg(test)]
+mod e2e {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::Duration;
+
+    use axum::extract::{Path, State};
+    use axum::http::StatusCode;
+    use axum::response::{IntoResponse, Response};
+    use axum::routing::get;
+    use axum::{Json, Router};
+    use dumbmonit_proto::{Collector, Credential, Sample, Target};
+    use serde_json::{Value, json};
+
+    use super::ProxmoxCollector;
+
+    /// Compteur d'appels par chemin, pour prouver qu'une option coupée ne part pas
+    /// et qu'un fait mis en cache n'est pas redemandé.
+    #[derive(Default)]
+    struct Calls {
+        osinfo: AtomicU32,
+        qemu_list: AtomicU32,
+        export: AtomicU32,
+    }
+
+    fn data(value: Value) -> Response {
+        Json(json!({ "data": value })).into_response()
+    }
+
+    /// Ce que répond `pveproxy` pour un nœud qui ne répond plus.
+    fn node_down() -> Response {
+        (StatusCode::from_u16(595).unwrap(), Json(json!({"data": null, "message": "timed out"})))
+            .into_response()
+    }
+
+    fn forbidden() -> Response {
+        (StatusCode::FORBIDDEN, Json(json!({"data": null, "message": "Permission check failed"})))
+            .into_response()
+    }
+
+    async fn serve(calls: Arc<Calls>) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let router = Router::new()
+            .route("/api2/json/version", get(|| async { data(json!({"version": "8.2.4"})) }))
+            .route("/api2/json/cluster/resources", get(resources))
+            .route(
+                "/api2/json/nodes",
+                get(|| async {
+                    data(json!([
+                        {"node": "pve1", "status": "online"},
+                        {"node": "pve2", "status": "offline"}
+                    ]))
+                }),
+            )
+            .route("/api2/json/cluster/status", get(|| async { data(json!([])) }))
+            .route("/api2/json/cluster/ha/status/current", get(|| async { data(json!([])) }))
+            .route("/api2/json/cluster/ha/status/manager_status", get(manager_status))
+            .route("/api2/json/cluster/backup", get(|| async { data(json!([{"id": "job-1"}])) }))
+            .route("/api2/json/cluster/backup/{id}/included_volumes", get(included_volumes))
+            .route(
+                "/api2/json/cluster/backup-info/not-backed-up",
+                get(|| async { data(json!([])) }),
+            )
+            // Ceph absent : c'est ainsi que PVE le dit.
+            .route(
+                "/api2/json/cluster/ceph/status",
+                get(|| async {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"data": null, "message": "rados_connect failed"})),
+                    )
+                        .into_response()
+                }),
+            )
+            .route("/api2/json/cluster/metrics/export", get(export))
+            .route("/api2/json/nodes/{node}/status", get(node_status))
+            .route("/api2/json/nodes/{node}/qemu", get(qemu_list))
+            .route("/api2/json/nodes/{node}/lxc", get(|| async { data(json!([])) }))
+            .route("/api2/json/nodes/{node}/storage", get(|| async { data(json!([])) }))
+            .route("/api2/json/nodes/{node}/tasks", get(|| async { data(json!([])) }))
+            .route("/api2/json/nodes/{node}/services", get(services))
+            .route(
+                "/api2/json/nodes/{node}/version",
+                get(|| async { data(json!({"version": "8.2.4", "release": "8.2"})) }),
+            )
+            .route("/api2/json/nodes/{node}/network", get(network))
+            .route(
+                "/api2/json/nodes/{node}/netstat",
+                get(|| async {
+                    data(json!([{"dev": "tap100i0", "vmid": "100", "in": 42, "out": 7}]))
+                }),
+            )
+            // Droits non accordés à `PVEAuditor` : tous doivent rester muets.
+            .route("/api2/json/nodes/{node}/apt/update", get(|| async { forbidden() }))
+            .route("/api2/json/nodes/{node}/certificates/info", get(|| async { forbidden() }))
+            .route("/api2/json/nodes/{node}/disks/lvm", get(|| async { forbidden() }))
+            .route("/api2/json/nodes/{node}/disks/lvmthin", get(thinpools))
+            .route("/api2/json/nodes/{node}/disks/directory", get(|| async { data(json!([])) }))
+            .route(
+                "/api2/json/nodes/{node}/qemu/{vmid}/status/current",
+                get(|| async { data(json!({"agent": 1})) }),
+            )
+            .route(
+                "/api2/json/nodes/{node}/qemu/{vmid}/agent/get-fsinfo",
+                get(|| async { data(json!({"result": []})) }),
+            )
+            .route("/api2/json/nodes/{node}/qemu/{vmid}/agent/get-osinfo", get(osinfo))
+            .route(
+                "/api2/json/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces",
+                get(|| async {
+                    data(json!({"result": [
+                        {"name": "lo", "ip-addresses": [{"ip-address": "127.0.0.1"}]},
+                        {"name": "ens18", "ip-addresses": [{"ip-address": "192.168.10.50"}]}
+                    ]}))
+                }),
+            )
+            .route(
+                "/api2/json/nodes/{node}/qemu/{vmid}/snapshot",
+                get(|| async { data(json!([])) }),
+            )
+            .route("/api2/json/nodes/{node}/lxc/{vmid}/snapshot", get(|| async { data(json!([])) }))
+            .route(
+                "/api2/json/nodes/{node}/lxc/{vmid}/interfaces",
+                get(|| async { data(json!([{"name": "eth0", "inet": "192.168.10.60/24"}])) }),
+            )
+            // Tout le reste (réplication, apt, certificats, disques, ZFS…) est
+            // absent : un `PVEAuditor` sur une vieille version n'a rien de plus.
+            .fallback(|| async {
+                (StatusCode::NOT_IMPLEMENTED, Json(json!({"data": null}))).into_response()
+            })
+            .with_state(calls);
+        tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        format!("http://{address}")
+    }
+
+    async fn resources() -> Response {
+        data(json!([
+            {"type": "node", "id": "node/pve1", "node": "pve1", "status": "online", "cpu": 0.04, "maxcpu": 8},
+            {"type": "node", "id": "node/pve2", "node": "pve2", "status": "unknown"},
+            {"type": "qemu", "id": "qemu/100", "node": "pve1", "vmid": 100, "name": "router-vm",
+             "status": "running", "cpu": 0.05, "maxcpu": 2, "mem": 1000, "maxmem": 2000,
+             "uptime": 864000, "pool": "production"},
+            // L'invité du nœud injoignable : c'est lui que la tournée par nœud
+            // perdrait, et c'est tout l'intérêt de `/cluster/resources`.
+            {"type": "lxc", "id": "lxc/202", "node": "pve2", "vmid": 202, "name": "nextcloud",
+             "status": "unknown", "maxcpu": 4, "maxmem": 4000, "maxdisk": 100, "lock": "backup"}
+        ]))
+    }
+
+    async fn manager_status() -> Response {
+        data(json!({
+            "manager_status": {"master_node": "pve1", "node_status": {"pve1": "online", "pve2": "unknown"}},
+            "lrm_status": {"pve1": {"mode": "active", "state": "active", "timestamp": 0}}
+        }))
+    }
+
+    async fn included_volumes(Path(_id): Path<String>) -> Response {
+        data(json!({"children": [
+            {"id": 100, "name": "router-vm", "type": "qemu", "children": [
+                {"id": "scsi0", "name": "local-lvm:vm-100-disk-0", "included": true, "reason": "because"},
+                {"id": "scsi1", "name": "local-lvm:vm-100-disk-1", "included": false, "reason": "disk excluded from backup"},
+                {"id": "ide2", "name": "local:iso/debian.iso", "included": false, "reason": "CD-ROM"}
+            ]}
+        ]}))
+    }
+
+    async fn export(State(calls): State<Arc<Calls>>) -> Response {
+        calls.export.fetch_add(1, Ordering::Relaxed);
+        data(json!({"data": [
+            {"id": "node/pve1", "metric": "pressure.io.some.avg10", "timestamp": 1_789_510_600i64,
+             "type": "gauge", "value": 3.5}
+        ]}))
+    }
+
+    async fn node_status(Path(node): Path<String>) -> Response {
+        if node == "pve2" {
+            return node_down();
+        }
+        data(json!({"uptime": 1000, "cpu": 0.04, "memory": {"total": 100, "used": 50}}))
+    }
+
+    async fn qemu_list(State(calls): State<Arc<Calls>>) -> Response {
+        calls.qemu_list.fetch_add(1, Ordering::Relaxed);
+        data(json!([{"vmid": 100, "name": "router-vm", "status": "running", "maxmem": 2000}]))
+    }
+
+    async fn services() -> Response {
+        data(json!([
+            {"service": "pveproxy", "state": "running", "active-state": "active", "unit-state": "enabled"},
+            {"service": "pvestatd", "state": "dead", "active-state": "failed", "unit-state": "enabled"}
+        ]))
+    }
+
+    async fn network() -> Response {
+        data(json!([
+            {"iface": "lo", "type": "loopback", "active": 1, "exists": 1, "autostart": 1},
+            {"iface": "vmbr0", "type": "bridge", "active": 1, "exists": 1, "autostart": 1},
+            {"iface": "vmbr1", "type": "bridge", "active": 0, "exists": 1, "autostart": 1}
+        ]))
+    }
+
+    async fn thinpools() -> Response {
+        data(json!([{"lv": "data", "vg": "pve", "lv_size": 1000, "used": 960,
+                     "metadata_size": 100, "metadata_used": 88}]))
+    }
+
+    async fn osinfo(State(calls): State<Arc<Calls>>) -> Response {
+        calls.osinfo.fetch_add(1, Ordering::Relaxed);
+        data(json!({"result": {"id": "debian", "pretty-name": "Debian GNU/Linux 12 (bookworm)",
+                               "version-id": "12", "kernel-release": "6.1.0-18-amd64"}}))
+    }
+
+    fn cible(address: String, tags: &[(&str, &str)]) -> Target {
+        Target {
+            id: 42,
+            name: "pve".into(),
+            address,
+            kind: "proxmox".into(),
+            profile_id: None,
+            parent_id: None,
+            interval: Duration::from_secs(60),
+            enabled: true,
+            tags: tags
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect::<BTreeMap<_, _>>(),
+            credential: Credential::ApiToken {
+                token: "monitoring@pve!dumbmonit=8f3a1c9e-dead-beef".into(),
+            },
+        }
+    }
+
+    fn valeur(samples: &[Sample], cle: &str) -> Option<f64> {
+        samples.iter().find(|s| s.series_key() == cle).map(|s| s.value)
+    }
+
+    #[tokio::test]
+    async fn une_interrogation_complete_voit_tout_le_cluster() {
+        let calls = Arc::new(Calls::default());
+        let address = serve(calls.clone()).await;
+        let collector = ProxmoxCollector::new();
+        let samples = collector.probe(&cible(address, &[])).await.unwrap();
+
+        // L'invité du nœud injoignable est là, avec sa taille et sans mesure.
+        let ct = r#"{name="nextcloud",node="pve2",type="lxc",vmid="202"}"#;
+        assert_eq!(valeur(&samples, &format!("proxmox_guest_running{ct}")), Some(0.0));
+        assert_eq!(
+            valeur(&samples, &format!("proxmox_guest_memory_total_bytes{ct}")),
+            Some(4000.0)
+        );
+        assert_eq!(
+            valeur(
+                &samples,
+                r#"proxmox_guest_locked{lock="backup",name="nextcloud",node="pve2",type="lxc",vmid="202"}"#
+            ),
+            Some(1.0)
+        );
+        assert_eq!(valeur(&samples, "proxmox_cluster_guests_total"), Some(2.0));
+        assert_eq!(valeur(&samples, r#"proxmox_pool_guests{pool="production"}"#), Some(1.0));
+        assert_eq!(valeur(&samples, r#"proxmox_node_up{node="pve2"}"#), Some(0.0));
+
+        // L'inventaire du cluster a répondu : les listes par nœud ne partent pas.
+        assert_eq!(calls.qemu_list.load(Ordering::Relaxed), 0);
+
+        // Profondeur des nœuds.
+        assert_eq!(valeur(&samples, r#"proxmox_node_core_services_down{node="pve1"}"#), Some(1.0));
+        assert_eq!(valeur(&samples, r#"proxmox_node_interfaces_offline{node="pve1"}"#), Some(1.0));
+        assert_eq!(
+            valeur(
+                &samples,
+                r#"proxmox_node_thinpool_used_percent{node="pve1",pool="data",vg="pve"}"#
+            ),
+            Some(96.0)
+        );
+        assert_eq!(
+            valeur(
+                &samples,
+                r#"proxmox_node_pve_version_info{node="pve1",release="8.2",version="8.2.4"}"#
+            ),
+            Some(1.0)
+        );
+        assert_eq!(
+            valeur(
+                &samples,
+                r#"proxmox_guest_netdev_in_bytes{dev="tap100i0",node="pve1",vmid="100"}"#
+            ),
+            Some(42.0)
+        );
+
+        // Haute disponibilité, vue du gestionnaire.
+        assert_eq!(valeur(&samples, r#"proxmox_ha_node_online{node="pve2"}"#), Some(0.0));
+        assert_eq!(valeur(&samples, r#"proxmox_ha_master_info{node="pve1"}"#), Some(1.0));
+
+        // Couverture réelle du travail de sauvegarde : le disque de données
+        // exclu est signalé, le lecteur de CD non.
+        assert_eq!(
+            valeur(
+                &samples,
+                r#"proxmox_backup_job_guest_excluded_volumes{job="job-1",name="router-vm",reason="disk excluded from backup",type="qemu",vmid="100"}"#
+            ),
+            Some(1.0)
+        );
+        assert_eq!(
+            valeur(&samples, r#"proxmox_backup_job_volumes_excluded{job="job-1"}"#),
+            Some(2.0)
+        );
+
+        // Système et adresse, vus de l'intérieur.
+        let vm = r#"{name="router-vm",node="pve1",type="qemu",vmid="100"}"#;
+        assert_eq!(
+            valeur(
+                &samples,
+                r#"proxmox_guest_os_info{kernel="6.1.0-18-amd64",name="router-vm",node="pve1",os="Debian GNU/Linux 12 (bookworm)",os_id="debian",os_version="12",type="qemu",vmid="100"}"#
+            ),
+            Some(1.0)
+        );
+        assert!(
+            samples.iter().any(|s| s.series_key()
+                == r#"proxmox_guest_ip_info{iface="ens18",ip="192.168.10.50",name="router-vm",node="pve1",type="qemu",vmid="100"}"#),
+            "l'adresse routable doit être publiée, pas la boucle locale"
+        );
+        assert!(valeur(&samples, &format!("proxmox_guest_running{vm}")).is_some());
+
+        // Ceph absent, LVM interdit, la moitié des endpoints en 501 : rien de
+        // tout cela ne doit compter comme une erreur de collecte.
+        assert_eq!(valeur(&samples, "proxmox_scrape_errors"), Some(0.0));
+        assert!(!samples.iter().any(|s| s.metric.starts_with("proxmox_ceph_")));
+        assert!(!samples.iter().any(|s| s.metric.starts_with("proxmox_node_lvm_")));
+
+        // Le flux RRD ne part pas tant qu'on ne l'a pas demandé.
+        assert_eq!(calls.export.load(Ordering::Relaxed), 0);
+        assert!(!samples.iter().any(|s| s.metric.contains("_rrd_")));
+    }
+
+    #[tokio::test]
+    async fn les_faits_dun_invite_ne_sont_demandes_quune_fois() {
+        let calls = Arc::new(Calls::default());
+        let address = serve(calls.clone()).await;
+        let collector = ProxmoxCollector::new();
+        let target = cible(address, &[]);
+
+        let premiere = collector.probe(&target).await.unwrap();
+        let seconde = collector.probe(&target).await.unwrap();
+
+        assert_eq!(
+            calls.osinfo.load(Ordering::Relaxed),
+            1,
+            "le système est relu une fois par heure"
+        );
+        let cle = |samples: &[Sample]| {
+            samples.iter().filter(|s| s.metric == "proxmox_guest_os_info").count()
+        };
+        assert_eq!(cle(&premiere), 1);
+        assert_eq!(cle(&seconde), 1, "la série est republiée depuis la mémoire");
+    }
+
+    #[tokio::test]
+    async fn les_options_coupees_nenvoient_aucun_appel() {
+        let calls = Arc::new(Calls::default());
+        let address = serve(calls.clone()).await;
+        let collector = ProxmoxCollector::new();
+        let target = cible(
+            address,
+            &[
+                ("cluster_resources", "false"),
+                ("services", "false"),
+                ("network", "false"),
+                ("lvm", "false"),
+                ("guest_os", "false"),
+                ("metrics_export", "true"),
+            ],
+        );
+        let samples = collector.probe(&target).await.unwrap();
+
+        // Sans inventaire du cluster, on retombe sur les listes par nœud — et
+        // l'invité du nœud injoignable disparaît, ce qui est exactement le
+        // défaut que `/cluster/resources` corrige.
+        assert_eq!(calls.qemu_list.load(Ordering::Relaxed), 1);
+        assert!(!samples.iter().any(|s| s.labels.get("vmid").is_some_and(|id| id == "202")));
+        assert!(!samples.iter().any(|s| s.metric.starts_with("proxmox_node_service_")));
+        assert!(!samples.iter().any(|s| s.metric.starts_with("proxmox_node_interface_")));
+        assert!(!samples.iter().any(|s| s.metric == "proxmox_guest_os_info"));
+
+        // Le flux RRD, lui, a été demandé et publié sous son nom d'origine.
+        assert_eq!(calls.export.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            valeur(&samples, r#"proxmox_node_rrd_pressure_io_some_avg10{node="pve1"}"#),
+            Some(3.5)
+        );
     }
 }

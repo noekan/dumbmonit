@@ -75,6 +75,8 @@ nav:
       - SNMP: devices/snmp.md
       - Proxmox VE: devices/proxmox.md
       - Proxmox Backup Server: devices/pbs.md
+      - Proxmox Datacenter Manager: devices/pdm.md
+      - Proxmox Mail Gateway: devices/pmg.md
       - Synology DSM: devices/synology.md
       - Linux and Windows agent: devices/agent.md
       - Services (HTTP, TCP, DNS, ping, TLS): devices/services.md

@@ -70,6 +70,19 @@ pub fn job_samples(kind: JobKind, jobs: &[JobEntry], now_s: i64, ts_ms: i64) -> 
         if let Some(ok) = job.last_run_ok() {
             push(gauge("job_last_ok", if ok { 1.0 } else { 0.0 }, ts_ms));
         }
+        // Un travail planifié qui n'a jamais tourné n'a ni échec ni succès à
+        // montrer : il est donc invisible partout ailleurs, et c'est justement
+        // celui qu'il faut signaler. Désactivé ou sans planification, il n'a
+        // aucune raison d'avoir tourné : la série reste à zéro.
+        push(gauge(
+            "job_never_run",
+            if job.last_run_ok().is_none() && job.is_enabled() && job.schedule.is_some() {
+                1.0
+            } else {
+                0.0
+            },
+            ts_ms,
+        ));
         if let Some(end) = job.last_run_endtime {
             push(gauge("job_last_run_age_seconds", (now_s - end.0 as i64).max(0) as f64, ts_ms));
         }
@@ -139,7 +152,7 @@ mod tests {
 
     /// Copie de la réponse d'un PBS 3 (deux travaux de synchronisation, un d'élagage).
     const SYNC_JOBS: &str = r#"{"data":[
-      {"id":"s-offsite","store":"archive","schedule":"daily","comment":"lab sync job",
+      {"id":"s-offsite","store":"archive","schedule":"daily","comment":"offsite sync",
        "remote":"offsite","remote-store":"archive","owner":"root@pam","remove-vanished":false,
        "next-run":1789538400,
        "last-run-upid":"UPID:pbs:00004989:0043A956:00000001:6AA8DEE0:syncjob:archive:s-offsite:root@pam:",
@@ -151,7 +164,7 @@ mod tests {
     ]}"#;
 
     const PRUNE_JOBS: &str = r#"{"data":[
-      {"id":"p-daily","store":"main","schedule":"daily","comment":"lab prune job",
+      {"id":"p-daily","store":"main","schedule":"daily","comment":"daily prune",
        "keep-daily":7,"keep-weekly":4,"next-run":1789524000,
        "last-run-upid":"UPID:pbs:00001149:00437116:00000001:6AA8A6A0:prune:main:p-daily:root@pam:",
        "last-run-state":"OK","last-run-endtime":1789437660},
