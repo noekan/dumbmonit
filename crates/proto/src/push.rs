@@ -36,6 +36,21 @@ pub const MAX_BATCH_SAMPLES: usize = 10_000;
 /// donc valables tels quels.
 pub const TOKEN_PREFIX: &str = "dmon_";
 
+/// Préfixe du secret de liaison propre à une machine.
+///
+/// Distinct de [`TOKEN_PREFIX`] à dessein : les deux secrets voyagent dans la
+/// même requête, et une trace de journal doit dire du premier coup d'œil lequel
+/// a fuité.
+pub const AGENT_SECRET_PREFIX: &str = "dmab_";
+
+/// En-tête portant le secret de liaison de la machine.
+///
+/// Pas l'en-tête `Authorization` : celui-ci porte le jeton d'enregistrement,
+/// partagé par tout un parc. Le secret de liaison, lui, ne vaut que pour une
+/// machine — les confondre reviendrait à reperdre la distinction qu'ils
+/// existent pour établir.
+pub const AGENT_SECRET_HEADER: &str = "x-dumbmonit-agent-secret";
+
 /// Ce que la machine surveillée déclare d'elle-même.
 ///
 /// C'est cette identité qui permet l'enregistrement automatique : un agent qui
@@ -79,6 +94,14 @@ pub struct AgentIdentity {
     /// Étiquettes libres déclarées dans la configuration de l'agent.
     #[serde(default)]
     pub tags: BTreeMap<String, String>,
+    /// Vrai si ce binaire sait recevoir et représenter un secret de liaison.
+    ///
+    /// Absent chez un agent antérieur à la liaison : le serveur s'interdit alors
+    /// de lui en attribuer un, car il l'ignorerait et se verrait refuser son lot
+    /// suivant. C'est ce drapeau, et lui seul, qui rend la mise à niveau
+    /// progressive possible dans les deux sens.
+    #[serde(default)]
+    pub binding_supported: bool,
 }
 
 impl AgentIdentity {
@@ -131,6 +154,19 @@ pub struct PushAck {
     /// Vrai si ce lot vient de créer la cible.
     #[serde(default)]
     pub registered: bool,
+    /// Secret de liaison attribué à cette machine, la seule et unique fois.
+    ///
+    /// Présent uniquement au moment de la liaison ; le serveur n'en garde que
+    /// l'empreinte. L'agent l'écrit sur son disque en `0600` et le présente dans
+    /// [`AGENT_SECRET_HEADER`] à chaque requête suivante.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_secret: Option<String>,
+    /// Vrai quand le serveur considère cette machine comme liée.
+    ///
+    /// Faux pour un agent antérieur à la liaison : c'est ce que l'interface
+    /// affiche sous « not bound yet ».
+    #[serde(default)]
+    pub bound: bool,
 }
 
 #[cfg(test)]
@@ -152,6 +188,7 @@ mod tests {
             site: None,
             machine_id: Some("9f4c…".into()),
             tags: BTreeMap::from([("salle".to_string(), "cave".to_string())]),
+            binding_supported: true,
         }
     }
 
@@ -184,6 +221,44 @@ mod tests {
         assert!(batch.identity.tags.is_empty());
         // Un agent d'avant le canal de commandes ne dit rien de ses capacités.
         assert_eq!(batch.identity.commands_enabled, None);
+        // Ni d'avant la liaison : le serveur ne doit surtout pas lui attribuer un
+        // secret qu'il jetterait, ce qui le verrouillerait au lot suivant.
+        assert!(!batch.identity.binding_supported);
+    }
+
+    #[test]
+    fn an_older_agent_reads_an_ack_that_carries_a_binding() {
+        // Le champ est ajouté : un agent antérieur doit continuer à lire l'accusé
+        // de réception sans erreur, et un serveur antérieur à en produire un que
+        // l'agent récent accepte.
+        let ack: PushAck =
+            serde_json::from_str(r#"{"target_id":7,"accepted":3,"interval_secs":30}"#)
+                .expect("désérialisation");
+        assert!(ack.agent_secret.is_none());
+        assert!(!ack.bound);
+
+        let issued = PushAck {
+            target_id: 7,
+            accepted: 3,
+            interval_secs: 30,
+            registered: true,
+            agent_secret: Some(format!("{AGENT_SECRET_PREFIX}abcdef")),
+            bound: true,
+        };
+        let json = serde_json::to_string(&issued).expect("sérialisation");
+        assert!(json.contains(AGENT_SECRET_PREFIX));
+        // Le secret n'occupe la réponse qu'au moment où il est attribué.
+        let plain = PushAck { agent_secret: None, ..issued.clone() };
+        assert!(!serde_json::to_string(&plain).unwrap().contains("agent_secret"));
+        assert_eq!(serde_json::from_str::<PushAck>(&json).unwrap(), issued);
+    }
+
+    #[test]
+    fn the_two_secrets_of_the_agent_channel_never_look_alike() {
+        // Un secret de liaison égaré dans un journal doit se distinguer d'un
+        // jeton d'enregistrement au premier coup d'œil.
+        assert_ne!(TOKEN_PREFIX, AGENT_SECRET_PREFIX);
+        assert!(AGENT_SECRET_HEADER.chars().all(|c| c.is_ascii_lowercase() || c == '-'));
     }
 
     #[test]
@@ -207,7 +282,14 @@ mod tests {
 
     #[test]
     fn an_acknowledgement_survives_a_round_trip() {
-        let ack = PushAck { target_id: 7, accepted: 42, interval_secs: 30, registered: true };
+        let ack = PushAck {
+            target_id: 7,
+            accepted: 42,
+            interval_secs: 30,
+            registered: true,
+            agent_secret: None,
+            bound: true,
+        };
         let decoded: PushAck =
             serde_json::from_str(&serde_json::to_string(&ack).unwrap()).expect("désérialisation");
         assert_eq!(decoded, ack);

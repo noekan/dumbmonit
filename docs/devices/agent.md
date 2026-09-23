@@ -43,19 +43,28 @@ account to create on the machine: the enrollment token is the only secret.
    with the install command ready to copy for Linux and for Windows. (A token
    can also be created in **Settings → Agents**.)
 2. That token is the agent's key to push its measurements to DumbMonit. It is
-   not an account on the machine: nothing to create there, and one token may
-   enrol several machines.
+   not an account on the machine: nothing to create there. A token created from
+   the device form is single use: it enrols this one machine and nothing else.
+   For a fleet, create a reusable token in Settings → Agents.
 3. Run the install command on the machine to monitor, with elevated rights
    (sudo on Linux, an elevated PowerShell on Windows). It downloads the agent,
    writes the token into agent.yaml and starts the service.
 4. The machine shows up on its own within a few seconds, named after its host
-   name. Lost the token? Settings → Agents lets you revoke it and create
-   another.
+   name. On that first batch the server gives the agent a secret of its own and
+   stores it in `/etc/dumbmonit/agent-secret`, readable by nobody else: from
+   then on, that machine is the only one that can report under this device.
+   Lost the token? Settings → Agents lets you revoke it and create another.
 5. Docker: to see the containers and let DumbMonit restart or update them, the
    agent must reach the Docker socket. The service the installer registers
    already can; if you run the agent under a dedicated user instead, add that
    user to the "docker" group and restart it. Restart and auto-update policies
    are then set per container on the device page.
+
+Two things are worth reading before you roll this out to more than one
+machine: [Binding](#binding-one-machine-one-agent), which is what makes a
+device really belong to one agent installation, and
+[Single use or fleet](#single-use-or-fleet), which is the choice you make when
+you create a token.
 
     ```
     usermod -aG docker dumbmonit
@@ -157,6 +166,13 @@ max_buffered_samples: 20000
 log_level: info
 ```
 
+Next to it, `/etc/dumbmonit/agent-secret` (`C:\ProgramData\DumbMonit\agent-secret`
+on Windows) holds the binding secret the server handed this machine. The agent
+writes it with mode `0600` and rereads it at every start; it is not part of
+`agent.yaml` because it is not something you set — see
+[Binding](#binding-one-machine-one-agent). `DUMBMONIT_AGENT_SECRET_FILE` moves
+it, which is what you want for an agent in a container.
+
 Each key can be overridden by the environment, which makes the agent usable in
 a container without mounting a file:
 
@@ -165,6 +181,7 @@ a container without mounting a file:
 | `DUMBMONIT_AGENT_CONFIG` | Path of the configuration file |
 | `DUMBMONIT_AGENT_URL` | Server URL |
 | `DUMBMONIT_AGENT_TOKEN` | Enrollment token |
+| `DUMBMONIT_AGENT_SECRET_FILE` | Where to keep the binding secret (default: `agent-secret`, next to the configuration file) |
 | `DUMBMONIT_AGENT_INTERVAL_SECS` | Sampling period |
 | `DUMBMONIT_AGENT_HOSTNAME` | Name announced to the server |
 | `DUMBMONIT_AGENT_SERVICES` | Services to watch, comma-separated |
@@ -207,6 +224,7 @@ What the container sees, and what to mount:
 | Host network counters | `network_mode: host` | Interfaces are namespaced: without it the agent sees one `veth`. |
 | Ping monitors relayed through this agent | `cap_add: [NET_RAW]` | ICMP needs a raw socket. |
 | Private CA | `- ./ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro` | Server behind an internal reverse proxy, devices with self-signed certificates. |
+| Keeping the binding across recreations | `- agent-state:/var/lib/dumbmonit-agent` and `DUMBMONIT_AGENT_SECRET_FILE=/var/lib/dumbmonit-agent/agent-secret` | The binding secret lives in the container's filesystem, which a `docker compose up --force-recreate` throws away. Without the volume, the agent comes back unbound and someone has to allow re-enrolment from the device page each time. |
 
 `pid: host` and `privileged: true` are never needed: the agent collects no
 per-process metrics.
@@ -225,18 +243,99 @@ without a VPN and with nothing to open on the remote side.
 
 How to set it up, step by step, is in [Monitor a remote site](../install/remote-site.md).
 
-## Token lifecycle
+## Binding: one machine, one agent
+
+An enrollment token says *this machine is allowed to talk*. It does not say
+*which* machine is talking — that is what the identity key
+(`/etc/machine-id`, or the host name) is for, and that key is no secret: it can
+be read on any machine in seconds.
+
+So on the first batch the server hands each machine a **binding secret** of its
+own. It keeps only a fingerprint; the agent writes the secret to
+`/etc/dumbmonit/agent-secret` with mode `0600` and presents it in the
+`X-DumbMonit-Agent-Secret` header on every request afterwards — measurements,
+container commands and relayed probes alike. From then on:
+
+- no other machine can push measurements under this device, or rewrite its host
+  name and operating system;
+- no other machine can fetch — and therefore consume — the Restart and Update
+  commands queued for it.
+
+The device page shows where a machine stands, under **Agent → Binding**:
+
+| State | What it means | What to do |
+|---|---|---|
+| **Bound** | The agent holds a secret of its own. | Nothing. |
+| **Not bound yet** | The binary knows about binding; its next batch will bind it. | Nothing — it settles within one sampling period. |
+| **Not bound — agent too old** | An agent installed before binding existed. It keeps reporting, but any machine holding the same enrollment token could report in its name. | Re-run the install command on that machine. |
+
+### Upgrading a fleet that predates binding
+
+Nothing breaks on the day you upgrade the server. Agents installed before
+binding keep pushing exactly as they did, and keep running container commands;
+they simply show as *not bound*. As you re-run the install command on each of
+them, they bind themselves at their next batch, one by one, with no window
+during which the machine is missing from the interface.
+
+They are not, however, protected until you do. Treat **not bound — agent too
+old** as a to-do list: a homelab can take a weekend over it, a fleet should
+plan it, and the support window for unbound agents ends with DumbMonit 1.0 —
+after that the server refuses batches from an agent it cannot bind.
+
+### Re-enrolment after a reinstall
+
+If the machine is rebuilt, its disk replaced, or its agent container recreated
+without the volume holding the secret, the agent comes back without it and the
+server refuses its batches. That refusal is deliberate: a machine that is bound
+stays bound until a human says otherwise, otherwise the binding would protect
+nothing.
+
+The way back in is on the device page: **Agent → Allow re-enrolment**. It opens
+a one-hour window during which an agent presenting a valid enrollment token
+binds that machine again, with a fresh secret; the old secret stops working,
+and the window closes as soon as it is used. The agent retries on its own in
+the meantime, so there is nothing to restart on the machine — and nothing is
+lost, since its readings stay buffered until the link is accepted again.
+
+Until someone opens that window, the agent's log says what to do:
+
+```
+WARN this agent is not recognised for this machine
+     reason: This machine is already enrolled and bound to another agent
+     installation. If you reinstalled it, open its device page in DumbMonit and
+     click 'Allow re-enrolment', then restart the agent.
+```
+
+## Enrolment tokens
 
 - Tokens are created in **Settings → Agents** or when adding a device of type
   agent. The server keeps only a fingerprint: the clear token is shown once, in
   the creation response, with the two install commands.
 - The agent sends it as `Authorization: Bearer dmon_…` on `POST /api/ingest`.
   It never appears in the agent's logs, not even truncated.
-- **Settings → Agents** lists tokens with their prefix, creation date and last
-  use. **Revoke** stops every agent that uses that token at its next push; the
-  machines then become *unreachable* after three missed periods. Re-run the
+- **Settings → Agents** lists tokens with their prefix, scope, creation date and
+  last use. **Revoke** stops every agent that uses that token at its next push;
+  the machines then become *unreachable* after three missed periods. Re-run the
   installer with a new token to re-enrol them.
 - Machines are separate devices: revoking a token does not delete them.
+
+### Single use or fleet
+
+A token's scope is chosen when it is created, and it is a choice, not a
+default that happens to you:
+
+| Scope | What it enrols | When |
+|---|---|---|
+| **Single use** (the default) | Exactly one machine. | One install. An install command lives on in shell history, in a ticket, in a chat log; a single-use one is worth nothing once used. |
+| **Reusable for a fleet** | As many machines as you allow — a number, or no limit. | A playbook, a machine image, a batch of installs. |
+
+Both can carry a deadline in days. A deadline only stops *enrolments*: machines
+already enrolled keep reporting after it passes, which is what you want for an
+install window. Revoking is what cuts a fleet off.
+
+A token that can no longer enrol — used up, or past its deadline — is shown as
+**Enrols no more** in Settings → Agents. Its machines keep reporting; it just
+cannot let a new one in.
 
 ## Outages and diagnostics
 
@@ -262,6 +361,8 @@ tail -f /var/log/dumbmonit-agent.log   # service log (OpenRC)
 | Installer stops with "checksum mismatch" | The binary received is not the one the server serves: a proxy or a cache in the way, or a tampered download. Retry; if it persists, download the file and its `.sha256` by hand and compare. |
 | Machine never appears | The push goes to `/api/ingest` on the URL in the install command; behind a reverse proxy, make sure it is forwarded and that bodies up to 16 MB are allowed. |
 | *Unreachable* although the agent runs | The token was revoked, or the pushes are rejected. Check `journalctl -u dumbmonit-agent`: the error is logged there. |
+| Log says "this agent is not recognised for this machine" | The machine is bound to an agent installation whose secret this one does not have — a reinstall, or a container recreated without its state volume. Open the device page and click **Allow re-enrolment**; see [Re-enrolment after a reinstall](#re-enrolment-after-a-reinstall). |
+| Log says "this enrollment token has already enrolled all the machines it was allowed to" | A single-use token being reused. Create a new one, or a reusable token in Settings → Agents. |
 | Windows | The Windows service parts had not been exercised in the project's build image at the time of writing; report issues on GitHub. |
 
 ## Docker containers
@@ -370,8 +471,13 @@ Automatic actions show in "Recent actions" as requested by `policy`.
   uses.
 - An update that does not come back healthy is rolled back to the previous
   container, and the old image is only removed once the new container runs.
-- Containers named `dumbmonit*` or `dumbmonit*` are refused, by hand or by
-  policy: the monitor never acts on its own containers.
+- Containers named `dumbmonit*` or `ezymonit*` are refused, by hand or by
+  policy: the monitor never acts on its own containers. The check is made twice
+  — the server refuses to queue the command, and the agent refuses to run it —
+  and the agent makes it again on the name Docker reports after inspecting the
+  container, so naming one by its id changes nothing. The agent also refuses to
+  act on its own container, whatever it is called: it would not be there to
+  finish the job or report on it.
 - Compose-managed containers are updated, but the next `docker compose up`
   recreates them from the compose file: bump the tag there too.
 

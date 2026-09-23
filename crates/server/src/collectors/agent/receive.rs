@@ -13,6 +13,7 @@ use crate::crypto::Cipher;
 use crate::db;
 use crate::tsdb::SampleSink;
 
+use super::store::RegisterError;
 use super::{store, token};
 
 /// Antériorité maximale d'un échantillon accepté.
@@ -29,10 +30,32 @@ const MAX_SKEW_AHEAD_MS: i64 = 3_600 * 1_000;
 pub enum IngestError {
     /// Jeton absent, inconnu ou révoqué.
     Unauthorized,
+    /// Jeton valide, mais cette machine-là n'est pas celle qu'il prétend être —
+    /// ou son jeton ne peut plus enrôler. Distinct de [`Self::Unauthorized`] :
+    /// changer de jeton n'y changerait rien, il faut une décision humaine.
+    Forbidden(String),
     /// Lot compréhensible mais invalide. Le réémettre à l'identique échouerait
     /// pareillement : l'agent doit l'abandonner.
     BadRequest(String),
     Internal(anyhow::Error),
+}
+
+/// Ce que le serveur répond à un agent lié dont il ne reconnaît pas le secret.
+///
+/// Écrit pour la personne qui lira les journaux de la machine, pas pour la
+/// machine : il faut qu'elle sache quoi faire sans ouvrir la documentation.
+pub const BINDING_MISMATCH: &str = "This machine is already enrolled and bound to another agent installation. \
+     If you reinstalled it, open its device page in DumbMonit and click \
+     'Allow re-enrolment', then restart the agent.";
+
+impl From<RegisterError> for IngestError {
+    fn from(error: RegisterError) -> Self {
+        match error {
+            RegisterError::BindingMismatch => Self::Forbidden(BINDING_MISMATCH.to_string()),
+            RegisterError::EnrolmentDenied(denied) => Self::Forbidden(denied.message().to_string()),
+            RegisterError::Internal(error) => Self::Internal(error),
+        }
+    }
 }
 
 impl<E: Into<anyhow::Error>> From<E> for IngestError {
@@ -47,6 +70,7 @@ pub async fn ingest(
     cipher: &Cipher,
     sink: &SampleSink,
     bearer: Option<&str>,
+    agent_secret: Option<&str>,
     batch: PushBatch,
 ) -> Result<PushAck, IngestError> {
     validate(&batch).map_err(IngestError::BadRequest)?;
@@ -56,7 +80,14 @@ pub async fn ingest(
         .await?
         .ok_or(IngestError::Unauthorized)?;
 
-    let registration = store::register(pool, cipher, &batch.identity, token_id).await?;
+    let registration = store::register(
+        pool,
+        cipher,
+        &batch.identity,
+        token_id,
+        token::extract_secret(agent_secret),
+    )
+    .await?;
     if registration.created {
         tracing::info!(
             cible = registration.target_id,
@@ -86,6 +117,10 @@ pub async fn ingest(
         accepted,
         interval_secs: target.interval.as_secs(),
         registered: registration.created,
+        // Seule occasion de voir le secret : le serveur n'en garde que
+        // l'empreinte, et ne saura jamais le redonner.
+        agent_secret: registration.issued_secret,
+        bound: registration.bound,
     })
 }
 
@@ -188,6 +223,7 @@ mod tests {
                 site: None,
                 machine_id: None,
                 tags: BTreeMap::new(),
+                binding_supported: true,
             },
             samples,
             0,

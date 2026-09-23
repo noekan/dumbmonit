@@ -22,7 +22,9 @@ use crate::alerting::model::{
     AnomalyParams, Operator, RULE_HOST_DOWN, Rule, RuleKind, Severity, TargetSelector,
 };
 use crate::alerting::overrides::RuleOverride;
-use crate::alerting::silence::{MINUTES_PER_DAY, Schedule, Silence};
+use crate::alerting::silence::{
+    LAST_OF_MONTH, MAX_DURATION_MINUTES, MINUTES_PER_DAY, Schedule, Silence,
+};
 use crate::api::channels;
 use crate::api::{ApiError, ApiResult};
 use crate::auth::audit;
@@ -55,6 +57,10 @@ const DEFAULT_HISTORY_LIMIT: i64 = 500;
 /// que l'utilisateur croit avoir posée.
 const MIN_UTC_OFFSET: i32 = -12 * 60;
 const MAX_UTC_OFFSET: i32 = 14 * 60;
+
+/// Nombre maximal de jours ou de « n-ièmes jours » dans une fenêtre mensuelle.
+/// Au-delà, ce n'est plus une maintenance mensuelle, c'est un calendrier.
+const MAX_MONTHLY_ENTRIES: usize = 31;
 
 /// Durée d'un acquittement quand l'appelant ne précise rien : quatre heures,
 /// le temps de s'en occuper sans que le rappel du soir ne se perde.
@@ -275,11 +281,19 @@ pub struct SilenceView {
     /// l'interface n'ait pas à réimplémenter le calendrier hebdomadaire, dont les
     /// fenêtres à cheval sur minuit sont la partie délicate.
     pub active_now: bool,
+    /// Fin de l'occurrence en cours, quand il y en a une (RFC 3339).
+    pub active_until: Option<String>,
+    /// Début de la prochaine occurrence (RFC 3339), `null` s'il n'y en a plus.
+    /// Le calendrier mensuel — « cinquième dimanche » — ne se devine pas côté
+    /// interface : c'est le serveur qui le déroule.
+    pub next_start_at: Option<String>,
 }
 
 impl SilenceView {
     fn new(silence: Silence, now: DateTime<Utc>) -> Self {
-        let active_now = silence.enabled && silence.schedule.covers(now);
+        let window = silence.schedule.window_containing(now);
+        let active_now = silence.enabled && window.is_some();
+        let next_start_at = silence.schedule.next_start(now).map(|at| at.to_rfc3339());
         Self {
             id: silence.id,
             name: silence.name,
@@ -289,6 +303,8 @@ impl SilenceView {
             schedule: silence.schedule,
             enabled: silence.enabled,
             active_now,
+            active_until: window.filter(|_| active_now).map(|(_, end)| end.to_rfc3339()),
+            next_start_at,
         }
     }
 }
@@ -1262,9 +1278,11 @@ pub(crate) fn parse_schedule(raw: Value) -> ApiResult<Schedule> {
         ApiError::BadRequest(
             "Invalid schedule. Accepted forms: \
              {\"kind\":\"once\",\"starts_at\":\"2026-01-01T00:00:00Z\",\
-             \"ends_at\":\"2026-01-01T02:00:00Z\"} or \
+             \"ends_at\":\"2026-01-01T02:00:00Z\"}, \
              {\"kind\":\"weekly\",\"days\":[6],\"start_minute\":120,\"end_minute\":240,\
-             \"utc_offset_minutes\":60}"
+             \"timezone\":\"Europe/Paris\"} or \
+             {\"kind\":\"monthly\",\"nth_weekdays\":[{\"nth\":1,\"weekday\":6}],\
+             \"start_minute\":120,\"duration_minutes\":120,\"timezone\":\"Europe/Paris\"}"
                 .into(),
         )
     })?;
@@ -1277,7 +1295,7 @@ pub(crate) fn parse_schedule(raw: Value) -> ApiResult<Schedule> {
                 ));
             }
         }
-        Schedule::Weekly { days, start_minute, end_minute, utc_offset_minutes } => {
+        Schedule::Weekly { days, start_minute, end_minute, utc_offset_minutes, .. } => {
             if days.is_empty() {
                 return Err(ApiError::BadRequest(
                     "Select at least one day of the week (0 = Monday … 6 = Sunday).".into(),
@@ -1313,9 +1331,90 @@ pub(crate) fn parse_schedule(raw: Value) -> ApiResult<Schedule> {
                 )));
             }
         }
+        Schedule::Monthly {
+            days,
+            nth_weekdays,
+            start_minute,
+            duration_minutes,
+            utc_offset_minutes,
+            ..
+        } => {
+            if days.is_empty() && nth_weekdays.is_empty() {
+                return Err(ApiError::BadRequest(
+                    "A monthly window needs at least one day of the month (\"days\") or one \
+                     weekday of the month (\"nth_weekdays\", for example the first Sunday)."
+                        .into(),
+                ));
+            }
+            if days.len() + nth_weekdays.len() > MAX_MONTHLY_ENTRIES {
+                return Err(ApiError::BadRequest(format!(
+                    "A monthly window is limited to {MAX_MONTHLY_ENTRIES} days."
+                )));
+            }
+            if let Some(day) = days.iter().find(|day| !(1..=31).contains(*day)) {
+                return Err(ApiError::BadRequest(format!(
+                    "Invalid day of the month \"{day}\": days go from 1 to 31. A month \
+                     without that day is simply skipped."
+                )));
+            }
+            for nth in nth_weekdays {
+                if nth.weekday > 6 {
+                    return Err(ApiError::BadRequest(format!(
+                        "Invalid weekday \"{}\": weekdays go from 0 (Monday) to 6 (Sunday).",
+                        nth.weekday
+                    )));
+                }
+                if !(1..=5).contains(&nth.nth) && nth.nth != LAST_OF_MONTH {
+                    return Err(ApiError::BadRequest(format!(
+                        "Invalid rank \"{}\": use 1 to 5 for the first to the fifth weekday \
+                         of the month, or {LAST_OF_MONTH} for the last one.",
+                        nth.nth
+                    )));
+                }
+            }
+            if *start_minute >= MINUTES_PER_DAY {
+                return Err(ApiError::BadRequest(format!(
+                    "\"start_minute\" must be between 0 and {} (minutes since midnight).",
+                    MINUTES_PER_DAY - 1
+                )));
+            }
+            if *duration_minutes == 0 || *duration_minutes > MAX_DURATION_MINUTES {
+                return Err(ApiError::BadRequest(format!(
+                    "\"duration_minutes\" must be between 1 and {MAX_DURATION_MINUTES} \
+                     (thirty days). To silence an alert permanently, disable the rule instead."
+                )));
+            }
+            if !(MIN_UTC_OFFSET..=MAX_UTC_OFFSET).contains(utc_offset_minutes) {
+                return Err(ApiError::BadRequest(format!(
+                    "\"utc_offset_minutes\" must be between {MIN_UTC_OFFSET} and \
+                     {MAX_UTC_OFFSET}."
+                )));
+            }
+        }
     }
 
+    check_timezone(&schedule)?;
     Ok(schedule)
+}
+
+/// Refuse un nom de fuseau que le serveur ne saura pas résoudre.
+///
+/// Un fuseau inconnu ne casse rien — la fenêtre retombe sur son décalage fixe —
+/// mais elle s'ouvrirait alors à une autre heure que celle que l'utilisateur
+/// croit avoir posée, ce qui est pire qu'un refus immédiat.
+fn check_timezone(schedule: &Schedule) -> ApiResult<()> {
+    let Some(name) = schedule.timezone() else { return Ok(()) };
+    let name = name.trim();
+    if name.is_empty() {
+        return Ok(());
+    }
+    if name.parse::<chrono_tz::Tz>().is_err() {
+        return Err(ApiError::BadRequest(format!(
+            "Unknown time zone \"{name}\". Use an IANA name such as Europe/Paris, \
+             America/New_York or UTC."
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1398,6 +1497,83 @@ mod tests {
             "kind": "weekly", "days": [0], "start_minute": 120, "end_minute": 120
         });
         assert!(refus(parse_schedule(raw)).contains("must differ"));
+    }
+
+    #[test]
+    fn une_fenetre_mensuelle_sans_jour_est_refusee() {
+        let raw = serde_json::json!({
+            "kind": "monthly", "start_minute": 120, "duration_minutes": 120
+        });
+        assert!(refus(parse_schedule(raw)).contains("at least one day"));
+    }
+
+    #[test]
+    fn un_rang_ou_un_quantieme_hors_bornes_est_refuse() {
+        let raw = serde_json::json!({
+            "kind": "monthly", "days": [32], "start_minute": 0, "duration_minutes": 60
+        });
+        assert!(refus(parse_schedule(raw)).contains("1 to 31"));
+
+        let raw = serde_json::json!({
+            "kind": "monthly", "nth_weekdays": [{"nth": 6, "weekday": 6}],
+            "start_minute": 0, "duration_minutes": 60
+        });
+        assert!(refus(parse_schedule(raw)).contains("rank"));
+
+        let raw = serde_json::json!({
+            "kind": "monthly", "nth_weekdays": [{"nth": 1, "weekday": 9}],
+            "start_minute": 0, "duration_minutes": 60
+        });
+        assert!(refus(parse_schedule(raw)).contains("weekday"));
+    }
+
+    #[test]
+    fn une_duree_mensuelle_nulle_ou_demesuree_est_refusee() {
+        for duration in [0, MAX_DURATION_MINUTES + 1] {
+            let raw = serde_json::json!({
+                "kind": "monthly", "days": [1], "start_minute": 0,
+                "duration_minutes": duration
+            });
+            assert!(refus(parse_schedule(raw)).contains("duration_minutes"));
+        }
+    }
+
+    #[test]
+    fn une_fenetre_mensuelle_valide_est_acceptee() {
+        let raw = serde_json::json!({
+            "kind": "monthly",
+            "nth_weekdays": [{"nth": 1, "weekday": 6}, {"nth": -1, "weekday": 4}],
+            "start_minute": 120, "duration_minutes": 120, "timezone": "Europe/Paris"
+        });
+        let schedule = accepte(parse_schedule(raw));
+        let Schedule::Monthly { nth_weekdays, timezone, .. } = &schedule else {
+            panic!("a monthly window was expected");
+        };
+        assert_eq!(nth_weekdays[0], crate::alerting::silence::NthWeekday { nth: 1, weekday: 6 });
+        assert_eq!(nth_weekdays[1].nth, LAST_OF_MONTH);
+        assert_eq!(timezone.as_deref(), Some("Europe/Paris"));
+    }
+
+    #[test]
+    fn un_fuseau_inconnu_est_refuse_avec_un_exemple() {
+        let raw = serde_json::json!({
+            "kind": "weekly", "days": [6], "start_minute": 120, "end_minute": 240,
+            "timezone": "Mars/Olympus"
+        });
+        let message = refus(parse_schedule(raw));
+        assert!(message.contains("Mars/Olympus"), "{message}");
+        assert!(message.contains("Europe/Paris"), "{message}");
+    }
+
+    #[test]
+    fn une_fenetre_hebdomadaire_sans_fuseau_reste_acceptee() {
+        // Exactement ce qu'envoyaient les versions précédentes de l'interface.
+        let raw = serde_json::json!({
+            "kind": "weekly", "days": [6], "start_minute": 120, "end_minute": 240,
+            "utc_offset_minutes": 60
+        });
+        let schedule = accepte(parse_schedule(raw));
+        assert!(matches!(schedule, Schedule::Weekly { .. }));
     }
 
     #[test]

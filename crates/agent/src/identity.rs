@@ -27,6 +27,10 @@ pub fn detect(config: &Config) -> AgentIdentity {
         site: config.site.clone(),
         machine_id: machine_id(),
         tags: config.tags.clone(),
+        // Ce binaire sait recevoir et représenter un secret de liaison. C'est ce
+        // drapeau qui autorise le serveur à lui en attribuer un : un agent plus
+        // ancien le jetterait, et se verrait refuser son lot suivant.
+        binding_supported: true,
     }
 }
 
@@ -77,6 +81,7 @@ mod tests {
             system_health: crate::collect::system_health::SystemHealthConfig::default(),
             plakar: crate::collect::plakar::PlakarConfig::default(),
             max_buffered_samples: 100,
+            secret_path: std::path::PathBuf::from("/inexistant/agent-secret"),
             log_level: tracing::Level::INFO,
             deprecated_env: Vec::new(),
         }
@@ -97,6 +102,13 @@ mod tests {
         assert!(!identity.os.is_empty());
         assert_eq!(identity.agent_version, env!("CARGO_PKG_VERSION"));
         assert_eq!(identity.tags.get("role").map(String::as_str), Some("nas"));
+    }
+
+    #[test]
+    fn the_identity_says_this_binary_can_be_bound_to_its_machine() {
+        // Le serveur s'en sert pour distinguer « va se lier au prochain lot »
+        // d'un agent trop ancien, qu'il faut aller mettre à jour.
+        assert!(detect(&config_with_hostname(None)).binding_supported);
     }
 
     #[test]

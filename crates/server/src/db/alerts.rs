@@ -255,7 +255,8 @@ pub async fn set_rule_enabled(pool: &SqlitePool, id: i64, enabled: bool) -> Resu
 /// active, et les retirer casserait la chaîne de suppression.
 pub async fn list_target_nodes(pool: &SqlitePool) -> Result<Vec<TargetNode>> {
     let rows = sqlx::query(
-        "SELECT id, name, address, parent_id, via_agent, tags, enabled, last_error FROM targets",
+        "SELECT id, name, address, kind, parent_id, via_agent, tags, enabled, last_error
+         FROM targets",
     )
     .fetch_all(pool)
     .await
@@ -270,6 +271,7 @@ pub async fn list_target_nodes(pool: &SqlitePool) -> Result<Vec<TargetNode>> {
                 id: row.try_get("id")?,
                 name: row.try_get("name")?,
                 address: row.try_get("address")?,
+                kind: row.try_get("kind")?,
                 parent_id: row.try_get("parent_id")?,
                 via_agent: row.try_get("via_agent")?,
                 tags: json_or_default(&tags),

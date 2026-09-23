@@ -7,6 +7,7 @@
 pub mod alerting;
 pub mod api;
 pub mod auth;
+pub mod backup;
 pub mod collectors;
 pub mod config;
 pub mod crypto;
@@ -14,4 +15,5 @@ pub mod db;
 pub mod notify;
 pub mod scheduler;
 pub mod state;
+pub mod stats;
 pub mod tsdb;

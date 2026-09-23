@@ -82,6 +82,27 @@ pub struct Config {
     /// quiconque écoute le réseau ; ce n'est acceptable que pour un fournisseur
     /// de test sur la boucle locale.
     pub oidc_allow_http: bool,
+    /// Ouvre `GET /metrics` et `GET /federate` sans jeton
+    /// (`DUMBMONIT_METRICS_PUBLIC`).
+    ///
+    /// Faux par défaut : ces routes disent l'état de l'instance et rendent
+    /// toutes les mesures des équipements, ce qui n'a pas à être lisible par
+    /// quiconque joint le port. Ne l'ouvrir que sur un réseau où l'accès au
+    /// port est déjà filtré.
+    pub metrics_public: bool,
+    /// Sauvegardes locales planifiées de la base (`DUMBMONIT_BACKUP_ENABLED`).
+    ///
+    /// Actives par défaut : une copie quotidienne de quelques mégaoctets est le
+    /// prix le plus bas qu'on puisse payer pour oser une mise à jour, et
+    /// personne n'active une option qu'il ne connaît pas encore.
+    pub backup_enabled: bool,
+    /// Répertoire des sauvegardes locales (`DUMBMONIT_BACKUP_DIR`). Vide :
+    /// `<data_dir>/backups`, pour qu'un seul volume porte toute la persistance.
+    pub backup_dir: Option<PathBuf>,
+    /// Période entre deux sauvegardes locales (`DUMBMONIT_BACKUP_INTERVAL_HOURS`).
+    pub backup_interval: Duration,
+    /// Nombre de sauvegardes locales conservées (`DUMBMONIT_BACKUP_KEEP`).
+    pub backup_keep: usize,
     /// Connexion OpenID Connect décrite par l'environnement (`DUMBMONIT_OIDC_*`,
     /// `DUMBMONIT_PUBLIC_URL`). Un réglage enregistré depuis l'interface l'emporte.
     pub oidc: OidcEnv,
@@ -116,6 +137,18 @@ impl Config {
                 "",
             )),
             oidc_allow_http: env_flag("DUMBMONIT_OIDC_ALLOW_HTTP"),
+            metrics_public: env_flag("DUMBMONIT_METRICS_PUBLIC"),
+            backup_enabled: env_flag_or("DUMBMONIT_BACKUP_ENABLED", true),
+            backup_dir: env_var("DUMBMONIT_BACKUP_DIR")
+                .map(|dir| dir.trim().to_string())
+                .filter(|dir| !dir.is_empty())
+                .map(PathBuf::from),
+            // Bornée à une heure : au-delà, la sauvegarde coûterait plus que ce
+            // qu'elle protège. Bornée à un an en haut pour rester un nombre.
+            backup_interval: Duration::from_secs(
+                env_parsed::<u64>("DUMBMONIT_BACKUP_INTERVAL_HOURS", "24")?.clamp(1, 8760) * 3600,
+            ),
+            backup_keep: env_parsed::<usize>("DUMBMONIT_BACKUP_KEEP", "7")?.clamp(1, 365),
             oidc: OidcEnv::from_env(),
         })
     }
@@ -132,6 +165,11 @@ impl Config {
     /// qu'un seul volume porte toute la persistance.
     pub fn vm_data_path(&self) -> PathBuf {
         self.data_dir.join("vm")
+    }
+
+    /// Répertoire des sauvegardes locales.
+    pub fn backup_path(&self) -> PathBuf {
+        self.backup_dir.clone().unwrap_or_else(|| self.data_dir.join("backups"))
     }
 
     /// VictoriaMetrics est-il lancé par ce serveur plutôt que fourni de l'extérieur ?
@@ -174,6 +212,30 @@ pub fn env_var(key: &str) -> Option<String> {
 
 fn env_or(key: &str, default: &str) -> String {
     env_var(key).unwrap_or_else(|| default.to_string())
+}
+
+/// Drapeau booléen dont le défaut n'est pas « faux ».
+///
+/// Une valeur incomprise retombe sur le défaut plutôt que sur `false` : couper
+/// les sauvegardes parce que quelqu'un a écrit `DUMBMONIT_BACKUP_ENABLED=oui`
+/// serait la pire façon de traiter une faute de frappe.
+pub fn env_flag_or(key: &str, default: bool) -> bool {
+    match env_var(key).map(|v| v.trim().to_ascii_lowercase()) {
+        None => default,
+        Some(value) => match value.as_str() {
+            "1" | "true" | "yes" | "on" => true,
+            "0" | "false" | "no" | "off" => false,
+            other => {
+                tracing::warn!(
+                    key,
+                    value = other,
+                    default,
+                    "unrecognised boolean value, keeping the default"
+                );
+                default
+            }
+        },
+    }
 }
 
 /// Drapeau booléen : `1`, `true`, `yes` ou `on`, sans distinction de casse.

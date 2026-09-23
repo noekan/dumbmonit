@@ -6,6 +6,7 @@
 //! domestique se surveille aussi bien qu'une autre.
 
 mod backoff;
+mod binding;
 mod buffer;
 mod client;
 mod collect;

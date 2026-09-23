@@ -7,6 +7,18 @@
 		<meta name="theme-color" content="#f3efe6" media="(prefers-color-scheme: light)" />
 		<meta name="theme-color" content="#0a1020" media="(prefers-color-scheme: dark)" />
 		<link rel="icon" href="%sveltekit.assets%/favicon.svg" />
+		<!--
+			Installable on a phone home screen: a manifest and the icons it names,
+			derived from the favicon. Deliberately no service worker — a monitoring
+			screen that serves yesterday's build after an upgrade is worse than no
+			icon at all.
+		-->
+		<link rel="manifest" href="%sveltekit.assets%/manifest.webmanifest" />
+		<link rel="apple-touch-icon" href="%sveltekit.assets%/apple-touch-icon.png" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-title" content="DumbMonit" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 		<title>DumbMonit</title>
 		<script>
 			// Applied before first paint so the theme never flashes.

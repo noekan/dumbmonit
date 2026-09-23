@@ -17,7 +17,9 @@ Mobile usage: consultation and simple actions (see state, alerts, acknowledge, s
 
 ## Product Purpose
 
-DumbMonit monitors ten-ish machines and a few switches for people who do not want to operate Zabbix/Checkmk or assemble Prometheus + Grafana + Alertmanager + exporters. Two containers, one IP to type, useful graphs and alerts in under a minute. Success: a device is added and producing graphs in under a minute; alerts are useful and not noisy; the operator trusts the "all green" state.
+DumbMonit monitors ten-ish machines and a few switches for people who do not want to operate Zabbix/Checkmk or assemble Prometheus + Grafana + Alertmanager + exporters. One container, one IP to type, useful graphs and alerts in under a minute. Success: a device is added and producing graphs in under a minute; alerts are useful and not noisy; the operator trusts the "all green" state.
+
+The product is an alpha: it runs daily on the author's homelab, the HTTP API is not frozen and the schema still moves. Nothing here may be described as settled.
 
 ## Positioning
 
@@ -25,12 +27,12 @@ DumbMonit monitors ten-ish machines and a few switches for people who do not wan
 
 ## Operating Context
 
-- Backend: single Rust binary (`crates/server`) + VictoriaMetrics; SQLite for config/state. The SvelteKit static build (`web/build`) is embedded in the binary and served by it.
+- Backend: one container, one Rust binary (`crates/server`), which starts the VictoriaMetrics binary shipped in the same image as a child process (`DUMBMONIT_VM_URL` points at an external instance instead); SQLite for config/state. The SvelteKit static build (`web/build`) is embedded in the binary and served by it. The interface is installable on a phone home screen (web manifest, no service worker).
 - The UI talks only to `/api/*` (contract in `web/src/lib/api/types.ts` and `web/src/lib/api/index.ts`); the server never exposes secrets back.
-- Sources: SNMP v1/v2c/v3 (5 profiles), Proxmox VE, Proxmox Backup Server, Synology DSM, Linux/Windows agent (token created in Settings → Agents, one-line install command), service availability monitors (HTTP(S), TCP, DNS, ping, TLS expiry) à la Uptime Kuma, network discovery by CIDR.
-- Alerting: default rules (unreachable, CPU saturated, disk nearly/soon full, UPS on battery/low battery, backup too old, service down/flapping/slow, certificate expiring/expired), dependency suppression via parent target, grouping, dedup, periodic reminder, escalation, maintenance windows (one-off or weekly), seasonal baseline anomaly detection.
+- Sources: SNMP v1/v2c/v3 (5 profiles), Proxmox VE, Proxmox Backup Server, Proxmox Datacenter Manager, Proxmox Mail Gateway, Synology DSM (Active Backup for Business included), Linux/Windows agent (token created in Settings → Agents, one-line install command) with Docker containers and Plakar backups, service availability monitors (HTTP(S), TCP, DNS, ping, TLS expiry) à la Uptime Kuma, heartbeats (a secret URL a cron job calls), network discovery by CIDR, and a demo device kind. An agent in relay mode runs the server's probes from a remote site, outbound only.
+- Alerting: default rules (unreachable, CPU saturated, disk nearly/soon full, UPS on battery/low battery, backup too old, service down/flapping/slow, certificate expiring/expired, plus per-kind rules for Proxmox VE, PBS, PDM, PMG, Synology and containers), acknowledgement, dependency suppression via parent target, grouping, dedup, periodic reminder, escalation, maintenance windows (one-off or weekly), seasonal baseline anomaly detection.
 - Notifications: 22 channels (Discord, Slack, Teams, Telegram, Matrix, Mattermost, Rocket.Chat, Google Chat, ntfy, Gotify, Pushover, Pushbullet, Bark, Signal, Twilio, PagerDuty, Opsgenie, Home Assistant, Zulip, Apprise, SMTP, webhook), each described by the server (`GET /api/notify/kinds`) with a "Test" action. Docs on Read the Docs (the UI links to them).
-- Auth: single password for the instance, set on first run (`/setup`), session cookie; the server may also run unprotected.
+- Auth: named accounts with two roles (admin, viewer); the first admin is created on first run (`/setup`), then an HttpOnly session cookie. Optional TOTP second factor with recovery codes, optional OpenID Connect sign-in with group-to-role mapping, an audit log, and scoped API tokens (`read`/`write`) for the REST API and the MCP endpoint. Until an account exists the API is open — that is the first-start state, nothing else.
 - Graphs: uPlot, fed by MetricsQL range queries proxied by the server.
 
 ## Capabilities and Constraints
@@ -44,16 +46,16 @@ DumbMonit monitors ten-ish machines and a few switches for people who do not wan
 
 ## Brand Commitments
 
-- Name: DumbMonit. Existing mark: rounded teal square with a rising line chart stroke (see previous `+layout.svelte`); may be redrawn but the "teal + line" idea is the incumbent identity.
+- Name: DumbMonit. The mark is a slate-blue pigeon with googly eyes and an orange beak (`static/favicon.svg`, `Logo.svelte`, `Mascot.svelte`), on a rounded slate-blue plate; the home-screen icons are derived from it. The earlier teal square with a line-chart stroke is retired.
 - Voice: plain, direct, explains what to do next; never hides an error behind a spinner.
 - User-stated taste: "modern and expressive" direction; loves the React Bits **Dot Field** effect (interactive dot grid with cursor bulge/glow/wave) — to be used as a signature background.
 
 ## Evidence on Hand
 
-- README.md (French) with the full feature list and roadmap (all items shipped).
+- README.md (English) with the full feature list and the known gaps.
 - docs/notifications.md: per-channel setup documentation.
 - A live dev stack: `docker compose up -d`, with the `demo` device kind to produce data without hardware.
-- No customer logos, testimonials, screenshots or metrics exist; none may be invented.
+- Product screenshots of the shipped UI live in `.github/assets/screenshots/`. No customer logos, testimonials or usage metrics exist; none may be invented.
 
 ## Product Principles
 

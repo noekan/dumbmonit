@@ -23,8 +23,13 @@ configuration file to mount.
 | `DUMBMONIT_COOKIE_SECURE` | *(off)* | `1` to set the `Secure` attribute on the session cookie. Only behind HTTPS: over plain HTTP the browser would never send the cookie back. |
 | `DUMBMONIT_TRUSTED_PROXIES` | *(empty)* | Reverse proxies whose `X-Forwarded-For` is believed, as addresses or CIDR ranges separated by commas (`10.0.0.5, 172.16.0.0/12`). The login rate limiter and the security log then see the real client address instead of the proxy's; without it, every visitor behind the proxy shares one bucket. The header is ignored from any other address, so a client cannot pick its own bucket. |
 | `DUMBMONIT_OIDC_ALLOW_HTTP` | *(off)* | `1` to accept an OpenID Connect issuer in plain `http://`. Off, the settings screen refuses anything but `https://`: a clear-text issuer hands the authorization code and client secret to whoever listens on the network. Only for a test provider on the loopback. |
+| `DUMBMONIT_METRICS_PUBLIC` | *(off)* | `1` to serve `/metrics`, `/federate` and `/prometheus/api/v1/…` without an API token. Anyone who can reach the port then reads every measurement of every device and the state of the instance; only set it where something else already restricts access to the port. See [Metrics](metrics.md#scraping-dumbmonit). |
 | `DUMBMONIT_ALERT_INTERVAL_SECS` | `30` | Alert evaluation period. Values below 10 are raised to 10. |
 | `DUMBMONIT_ALERT_HISTORY_DAYS` | `90` | Retention of alert history, in days. |
+| `DUMBMONIT_BACKUP_ENABLED` | `1` | Scheduled local backups of the database. `0`, `false`, `no` or `off` to stop writing them. See [Backup and restore](../install/backup.md#scheduled-local-backups). |
+| `DUMBMONIT_BACKUP_DIR` | `<data dir>/backups` | Where the scheduled backups are written. Point it at a second volume to survive losing the first. |
+| `DUMBMONIT_BACKUP_INTERVAL_HOURS` | `24` | Hours between two backups, 1 to 8760. The first one happens one interval after startup, not at startup. |
+| `DUMBMONIT_BACKUP_KEEP` | `7` | How many backups are kept, 1 to 365. The oldest are removed with their `.key`. |
 
 Baseline retention (60 days) and the 14-day learning period are not
 configurable.
@@ -96,6 +101,7 @@ Compose file, whatever the project is called.
 |---|---|---|
 | `/data/dumbmonit.db` | `dumbmonit-data` | Devices, credentials (encrypted), rules, alert state and history, baselines, silences, channels, agent tokens, password hash, sessions. |
 | `/data/secret.key` | `dumbmonit-data` | The instance secret. **Back it up.** Without it, encrypted credentials are unrecoverable and the server refuses to start. |
+| `/data/backups/` | `dumbmonit-data` | Scheduled local backups: `dumbmonit-<timestamp>.db` (an online SQLite copy) and the matching `.key`. Daily by default, seven kept. |
 | `/data/vm/` | `dumbmonit-data` | Embedded VictoriaMetrics time series, 12 months by default. Empty when `DUMBMONIT_VM_URL` is set. |
 | `/agents/` | image | Agent binaries. Mount another directory and set `DUMBMONIT_AGENT_DIR` to ship your own. |
 | `/etc/ssl/certs/ca-certificates.crt` | image | TLS roots for outbound HTTPS. Mount your own bundle here to trust a private authority. |

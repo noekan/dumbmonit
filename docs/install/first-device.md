@@ -4,6 +4,20 @@ Adding anything always works the same way: pick a type from the list, a notice
 on the right explains what to prepare on the device, and the form only shows the
 fields that matter for that type.
 
+## The three first steps
+
+On a brand-new instance the overview does not show an empty bulletin: it shows a
+short guide — **add your first device**, **connect a way to be told**, **check a
+message arrives**. Each step is one click, and each turns green on its own. The
+third one only counts a message that really left a channel, so creating a
+channel and never testing it does not tick it.
+
+The guide is kept on the instance, not in the browser: skipping a step, or the
+whole guide, skips it in every browser and for every user. It disappears for
+good once the three steps are settled, and it never appears on an instance that
+already had devices and a channel — upgrading does not hand an established
+homelab a tutorial.
+
 ## Add an SNMP device
 
 SNMP is the most universal type: almost every piece of network hardware speaks
@@ -42,8 +56,10 @@ Rather than typing devices one by one, scan a range:
    default).
 3. Every address that answers is listed with its `sysName`, description and the
    profile that would be applied. Devices already in DumbMonit are marked
-   *Already added*.
-4. Click **Add** on the ones you want.
+   *Already added*, and everything new is ticked for you.
+4. Untick what you do not want, then click **Add *n* devices**. They are created
+   one by one, each row showing its own outcome, so one failure never stops the
+   rest.
 
 ## Add a Proxmox VE server
 

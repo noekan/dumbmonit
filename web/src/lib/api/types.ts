@@ -304,7 +304,14 @@ export interface AlertRulePayload {
 	enabled?: boolean | null;
 }
 
-/** Maintenance-window schedule: a one-off window or a weekly recurrence. */
+/** "First Sunday", "last Friday": `nth` is 1…5, or -1 for the last one. */
+export interface NthWeekday {
+	nth: number;
+	/** 0 = Monday … 6 = Sunday. */
+	weekday: number;
+}
+
+/** Maintenance-window schedule: one-off, weekly or monthly. */
 export type SilenceSchedule =
 	| { kind: 'once'; starts_at: string; ends_at: string }
 	| {
@@ -316,6 +323,22 @@ export type SilenceSchedule =
 			end_minute: number;
 			/** Offset of the local timezone from UTC, in minutes. */
 			utc_offset_minutes: number;
+			/** IANA time zone ("Europe/Paris"). Wins over the fixed offset: only a
+			 *  named zone knows where the daylight-saving changes fall. */
+			timezone?: string | null;
+	  }
+	| {
+			kind: 'monthly';
+			/** Days of the month, 1…31. A month without that day is skipped. */
+			days: number[];
+			/** "First Sunday", "last Friday"… Added to `days` (OR). */
+			nth_weekdays: NthWeekday[];
+			/** Minutes since local midnight, 0…1439. */
+			start_minute: number;
+			/** How long the window lasts, in real minutes. */
+			duration_minutes: number;
+			utc_offset_minutes: number;
+			timezone?: string | null;
 	  };
 
 /** A maintenance window, mirroring the server's `SilenceView`. */
@@ -329,6 +352,10 @@ export interface Silence {
 	enabled: boolean;
 	/** True if the window covers the present instant (computed by the server). */
 	active_now: boolean;
+	/** End of the occurrence in progress, when there is one. */
+	active_until: string | null;
+	/** Start of the next occurrence; the server unrolls the calendar. */
+	next_start_at: string | null;
 }
 
 /** Body of `POST /api/alerts/silences`. */
@@ -799,6 +826,27 @@ export interface AgentToken {
 	created_at: string;
 	last_used_at: string | null;
 	revoked_at: string | null;
+	/** How many machines this token may enrol in total. `null` means a fleet token, with no limit. */
+	max_uses: number | null;
+	/** How many machines it has already enrolled. */
+	uses: number;
+	/**
+	 * When it stops enrolling. Machines already enrolled keep reporting after
+	 * this date — only revoking cuts them off.
+	 */
+	expires_at: string | null;
+}
+
+/** Body of `POST /api/agent/tokens`. Omitting everything gives a single-use token. */
+export interface AgentTokenPayload {
+	name: string;
+	base_url: string;
+	/** Reusable for a fleet. Left out, the token enrols exactly one machine. */
+	reusable?: boolean;
+	/** Enrolments allowed for a reusable token. Left out, there is no limit. */
+	max_uses?: number | null;
+	/** Days before the token stops enrolling. Left out, there is no deadline. */
+	expires_in_days?: number | null;
 }
 
 /** Response of `POST /api/agent/tokens`: the only chance to see the token in clear. */
@@ -831,6 +879,26 @@ export interface AgentHost {
 	/** Devices reached through this agent (`via_agent`). */
 	relayed: number;
 	last_seen_at: string | null;
+	/**
+	 * Where this machine stands on binding:
+	 *
+	 * - `bound` — the agent holds a secret of its own, so no other machine can
+	 *   push in its name or take its container commands;
+	 * - `pending` — the binary knows how to be bound; its next batch will do it;
+	 * - `unsupported` — an agent older than binding: reinstall it.
+	 */
+	binding: 'bound' | 'pending' | 'unsupported';
+	/** True for `bound`. */
+	bound: boolean;
+	bound_at: string | null;
+	/** End of a re-enrolment window someone opened, while it still runs. */
+	rebind_until: string | null;
+}
+
+/** Response of `POST /api/targets/{id}/agent/rebind`. */
+export interface RebindWindow {
+	rebind_until: string;
+	minutes: number;
 }
 
 // --- API tokens (assistants, MCP) -------------------------------------------
@@ -859,6 +927,43 @@ export interface CreatedApiToken extends ApiToken {
 /** Weekly quiet-hours window, same shape as a weekly maintenance schedule. */
 export type QuietHours = Extract<SilenceSchedule, { kind: 'weekly' }>;
 
+/**
+ * One condition of a channel's routing filter.
+ *
+ * Conditions on the same field (the same tag key, or `kind`, or `rule`) read as
+ * OR; different fields read as AND. Exclusions always win.
+ */
+export type MatchCondition =
+	| { field: 'tag'; key: string; value: string }
+	| { field: 'kind'; value: string }
+	| { field: 'rule'; value: string };
+
+/** What a channel accepts. Both lists empty: it receives everything. */
+export interface ChannelMatcher {
+	include: MatchCondition[];
+	exclude: MatchCondition[];
+}
+
+/** One device as `POST /api/notify/match-preview` returns it. */
+export interface MatchPreviewDevice {
+	id: TargetId;
+	name: string;
+	kind: string;
+	tags: Record<string, string>;
+	matched: boolean;
+}
+
+/** Response of `POST /api/notify/match-preview`. */
+export interface MatchPreview {
+	devices: MatchPreviewDevice[];
+	matched: number;
+	total: number;
+	/** Rule uids the filter requires; a device list carries no rule, so the UI
+	 *  says them out loud instead of pretending they are ignored. */
+	rules: string[];
+	excluded_rules: string[];
+}
+
 /** Per-channel policy, mirroring the server's `ChannelPolicy`. */
 export interface ChannelPolicy {
 	/** Alerts below this severity never reach the channel. */
@@ -869,6 +974,8 @@ export interface ChannelPolicy {
 	min_interval_secs: number;
 	/** During quiet hours only `critical` goes through; the rest waits for a digest. */
 	quiet_hours: QuietHours | null;
+	/** What the channel accepts. Empty lists: everything, as before. */
+	matcher: ChannelMatcher;
 }
 
 /** Body of the `policy` field on a channel: every field optional. */
@@ -878,6 +985,8 @@ export interface ChannelPolicyPayload {
 	min_interval_secs?: number | null;
 	/** `null` clears the quiet hours; omitted keeps them. */
 	quiet_hours?: QuietHours | null;
+	/** `null` clears the routing filter; omitted keeps it. */
+	matcher?: ChannelMatcher | null;
 }
 
 /** Global policy, `GET/PUT /api/notify/policy`. */
@@ -892,6 +1001,11 @@ export interface NotificationPolicy {
 	flap_hold_secs: number;
 	/** Public URL used for device links in messages; empty falls back to DUMBMONIT_PUBLIC_URL. */
 	public_url: string;
+	/** Seconds without an acknowledgement after which the alert is also sent to
+	 *  `escalate_channel`; 0 = no escalation. */
+	escalate_after_secs: number;
+	/** Channel told second. `null` = no escalation, whatever the delay. */
+	escalate_channel: number | null;
 }
 
 export type NotificationPolicyPayload = Partial<NotificationPolicy>;
@@ -2048,4 +2162,122 @@ export interface PmgHealth {
 	/** Empty on a standalone gateway: no cluster, not a degraded one. */
 	cluster: PmgClusterNode[];
 	stopped_services: PmgStoppedService[];
+}
+
+// --- First-run guide --------------------------------------------------------
+
+/**
+ * Where the instance stands on the three first-run steps, as the server sees
+ * it. `complete` is latched — set when the three steps are settled, or on the
+ * very first read of an instance that already had a device and a channel — and
+ * never goes back to false, so the guide never returns.
+ */
+export interface OnboardingState {
+	/** The guide was skipped, for every browser and every user. */
+	skipped: boolean;
+	complete: boolean;
+	/** UTC without suffix; `null` until the guide completes. */
+	completed_at: string | null;
+	/** Ids of the steps dismissed one by one: `device`, `channel`, `test`. */
+	dismissed: OnboardingStep[];
+	has_target: boolean;
+	has_channel: boolean;
+	/** A message really left on some channel — a test counts. */
+	notification_confirmed: boolean;
+}
+
+export type OnboardingStep = 'device' | 'channel' | 'test';
+
+export interface OnboardingPatch {
+	skipped?: boolean;
+	dismissed?: OnboardingStep[];
+}
+
+// --- Backup and restore -----------------------------------------------------
+
+/** One section of the backup bundle. Mirrors `Section` in `crates/server/src/api/backup.rs`. */
+export interface BackupSection {
+	section: string;
+	description: string;
+	count: number;
+}
+
+/** A backup file sitting in the local backup directory. */
+export interface BackupFile {
+	name: string;
+	bytes: number;
+	/** UTC without suffix, read from the file name. */
+	at: string;
+	/** The matching `secret.key` copy is next to it. */
+	with_secret: boolean;
+}
+
+/** What one scheduled run did. `null` fields mean it never ran. */
+export interface BackupRun {
+	at: string;
+	ok: boolean;
+	file: string;
+	bytes: number;
+	duration_ms: number;
+	with_secret: boolean;
+	error: string | null;
+}
+
+/** State of the scheduled local backups. Mirrors `local::Status`. */
+export interface BackupSchedule {
+	enabled: boolean;
+	directory: string;
+	interval_hours: number;
+	keep: number;
+	/** False when the instance secret comes from `DUMBMONIT_SECRET`: nothing to copy. */
+	includes_secret_key: boolean;
+	last_run: BackupRun | null;
+	files: BackupFile[];
+	total_bytes: number;
+	directory_error: string | null;
+}
+
+/** Response of `GET /api/backup`. */
+export interface BackupStatus {
+	bundle_version: number;
+	min_passphrase_length: number;
+	contents: BackupSection[];
+	/** `file` when the secret lives in `secret.key`, `environment` otherwise. */
+	secret_source: 'file' | 'environment';
+	secret_path: string;
+	schedule: BackupSchedule;
+}
+
+/** The cleartext header of a bundle: readable without the passphrase. */
+export interface BackupEnvelope {
+	format: string;
+	version: number;
+	created_at: string;
+	source_version: string;
+	summary: Record<string, number>;
+	cipher: string;
+	payload: string;
+	[key: string]: unknown;
+}
+
+/** What one section of a restore produced. Mirrors `SectionReport`. */
+export interface RestoreSection {
+	section: string;
+	created: number;
+	updated: number;
+	skipped: number;
+	notes: string[];
+}
+
+/** Response of `POST /api/backup/restore`. Mirrors `RestoreReport`. */
+export interface RestoreReport {
+	/** False for a dry run: nothing was written. */
+	applied: boolean;
+	created_at: string;
+	source_version: string;
+	sections: RestoreSection[];
+	created: number;
+	updated: number;
+	skipped: number;
+	warnings: string[];
 }

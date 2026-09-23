@@ -282,6 +282,10 @@ pub struct TargetNode {
     pub id: TargetId,
     pub name: String,
     pub address: String,
+    /// Collecteur qui interroge cette cible (`snmp`, `proxmox`, `agent`…).
+    /// Le routage par étiquettes s'en sert pour dire « tous les hyperviseurs ».
+    #[serde(default)]
+    pub kind: String,
     pub parent_id: Option<TargetId>,
     /// Agent relais qui interroge cette cible. Il compte comme un parent pour
     /// la suppression : sans lui, l'équipement n'est plus observé du tout.
@@ -384,6 +388,7 @@ mod tests {
             id,
             name: format!("device-{id}"),
             address: format!("10.0.0.{id}"),
+            kind: "snmp".to_string(),
             parent_id: None,
             via_agent: None,
             tags: tags.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect(),

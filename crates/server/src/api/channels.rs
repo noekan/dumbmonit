@@ -15,6 +15,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Row, SqlitePool};
 
+use crate::alerting::matcher::{ChannelMatcher, Condition};
 use crate::alerting::notify_policy::ChannelPolicy;
 use crate::alerting::silence::Schedule;
 use crate::api::{ApiError, ApiResult};
@@ -26,6 +27,13 @@ use crate::state::AppState;
 /// Délai minimal maximal entre deux messages d'une même empreinte : une semaine.
 /// Au-delà, c'est une désactivation déguisée.
 const MAX_MIN_INTERVAL_SECS: i64 = 7 * 24 * 3600;
+
+/// Nombre maximal de conditions dans le filtre de routage d'un canal.
+///
+/// Un filtre qu'on ne peut plus relire d'un coup d'œil fait taire des alertes
+/// sans que personne ne s'en aperçoive : au-delà d'une dizaine de conditions,
+/// c'est un second canal qu'il faut, pas une condition de plus.
+const MAX_MATCHER_CONDITIONS: usize = 12;
 
 /// Clés qui désignent un secret quel que soit le type de canal.
 ///
@@ -80,6 +88,10 @@ struct ChannelPolicyPayload {
     /// confond par défaut pour un `Option`.
     #[serde(deserialize_with = "present")]
     quiet_hours: Option<Value>,
+    /// Filtre de routage. `Some(Value::Null)` ou un objet vide l'efface — le
+    /// canal reçoit alors de nouveau tout ; absent le conserve.
+    #[serde(deserialize_with = "present")]
+    matcher: Option<Value>,
 }
 
 fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {
@@ -392,12 +404,60 @@ fn parse_policy(raw: Option<Value>, current: &ChannelPolicy) -> ApiResult<Channe
         }
     };
 
+    let matcher = match payload.matcher {
+        None => current.matcher.clone(),
+        Some(Value::Null) => ChannelMatcher::default(),
+        Some(raw) => parse_matcher(raw)?,
+    };
+
     Ok(ChannelPolicy {
         min_severity,
         notify_resolved: payload.notify_resolved.unwrap_or(current.notify_resolved),
         min_interval_secs,
         quiet_hours,
+        matcher,
     })
+}
+
+/// Traduit le filtre de routage soumis, et refuse ce qui ne se relirait pas.
+pub(crate) fn parse_matcher(raw: Value) -> ApiResult<ChannelMatcher> {
+    let matcher: ChannelMatcher = serde_json::from_value(raw).map_err(|_| {
+        ApiError::BadRequest(
+            "Invalid routing filter. Expected {\"include\": [...], \"exclude\": [...]}, \
+             where each entry is {\"field\":\"tag\",\"key\":\"site\",\"value\":\"cellar\"}, \
+             {\"field\":\"kind\",\"value\":\"proxmox\"} or \
+             {\"field\":\"rule\",\"value\":\"disk_full\"}."
+                .into(),
+        )
+    })?;
+
+    if matcher.len() > MAX_MATCHER_CONDITIONS {
+        return Err(ApiError::BadRequest(format!(
+            "A routing filter is limited to {MAX_MATCHER_CONDITIONS} conditions. Beyond that, \
+             add a second channel rather than another condition."
+        )));
+    }
+    for condition in matcher.include.iter().chain(matcher.exclude.iter()) {
+        let (label, value) = match condition {
+            Condition::Tag { key, value } => {
+                if key.trim().is_empty() {
+                    return Err(ApiError::BadRequest(
+                        "A tag condition needs the tag name, for example \"site\".".into(),
+                    ));
+                }
+                ("tag", value)
+            }
+            Condition::Kind { value } => ("device kind", value),
+            Condition::Rule { value } => ("rule", value),
+        };
+        if value.trim().is_empty() {
+            return Err(ApiError::BadRequest(format!(
+                "A {label} condition needs a value. An empty one would silently drop every \
+                 alert."
+            )));
+        }
+    }
+    Ok(matcher)
 }
 
 fn reject_secrets_in_settings(kind: &str, settings: &Value) -> ApiResult<()> {
@@ -518,6 +578,7 @@ mod tests {
                     start_minute: 0,
                     end_minute: 60,
                     utc_offset_minutes: 0,
+                    timezone: None,
                 }),
                 ..ChannelPolicy::default()
             },

@@ -22,6 +22,7 @@ use crate::db;
 use crate::notify;
 use crate::notify::policy_store;
 use crate::state::AppState;
+use crate::stats::stats;
 
 /// Réglages de la boucle, lus dans l'environnement.
 ///
@@ -123,7 +124,17 @@ async fn run(state: AppState, config: AlertingConfig) {
         ticker.tick().await;
         let now = Utc::now();
 
-        match evaluate_once(&state.pool, &state.cipher, &state.victoria, &http, now).await {
+        let started = std::time::Instant::now();
+        let outcome = evaluate_once(&state.pool, &state.cipher, &state.victoria, &http, now).await;
+        // Le cycle est publié sur `/metrics` même quand il échoue : sa durée et
+        // le nombre de règles en échec sont précisément ce qu'on veut voir alors.
+        let (evaluated, failed) = match &outcome {
+            Ok(report) => (report.rules_evaluated, report.rules_failed),
+            Err(_) => (0, 0),
+        };
+        stats().alerting_cycle(started.elapsed(), evaluated, failed);
+
+        match outcome {
             Ok(report) => {
                 if report.groups > 0 || report.rules_failed > 0 {
                     info!(
@@ -227,8 +238,20 @@ pub async fn evaluate_once(
         observations.push(RuleObservations { rule, series });
     }
 
+    // La politique globale est chargée avant le cycle : son délai d'escalade
+    // participe à la décision de notifier, au même titre que le rappel d'une
+    // règle.
+    let global = policy_store::load_global(pool).await?;
     let outcome = cycle::plan_cycle(
-        CycleInput { now, observations, targets, previous, silences, overrides },
+        CycleInput {
+            now,
+            observations,
+            targets,
+            previous,
+            silences,
+            overrides,
+            unacked_after: global.escalation().map(|(after, _)| after.to_std().unwrap_or_default()),
+        },
         &mut baselines,
     );
 
@@ -257,7 +280,6 @@ pub async fn evaluate_once(
     // les filtres de canal, les heures calmes, la fenêtre de regroupement et le
     // plafond horaire avant de partir (voir `notify_policy`).
     let channels = db::alerts::list_channels(pool, cipher).await?;
-    let global = policy_store::load_global(pool).await?;
     let channel_policies = policy_store::load_channel_policies(pool).await?;
     let lookback = policy_store::lookback(&global, &channel_policies);
     let ledger = policy_store::load_ledger(pool, now, lookback).await?;
@@ -338,6 +360,7 @@ async fn send_outgoing(
         let message = notify::render_digest(&out.digest, public_url);
         let delivery = notify::deliver(http, config, &message).await;
 
+        stats().notification(&config.kind, !delivery.is_success());
         if delivery.is_success() {
             report.notifications_sent += 1;
             if let Err(error) =

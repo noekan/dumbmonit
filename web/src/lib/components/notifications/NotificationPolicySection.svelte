@@ -16,6 +16,7 @@
 	} from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { Button, ClickSpark, ErrorNotice, Field, Panel, Plate, Skeleton, Toggle } from '$lib/ui';
+	import { matcherIsEmpty, matcherSentence } from '$lib/components/alerts/helpers';
 
 	let policy = $state<NotificationPolicy | null>(null);
 	let channels = $state<Channel[]>([]);
@@ -36,6 +37,8 @@
 			flapWindow = current.flap_window_secs;
 			flapHold = current.flap_hold_secs;
 			publicUrl = current.public_url;
+			escalateAfter = current.escalate_channel === null ? 0 : current.escalate_after_secs;
+			escalateChannel = current.escalate_channel === null ? '' : String(current.escalate_channel);
 		} catch (cause) {
 			if (cause instanceof DOMException && cause.name === 'AbortError') return;
 			error = cause;
@@ -73,7 +76,28 @@
 	let flapWindow = $state(1800);
 	let flapHold = $state(1800);
 	let publicUrl = $state('');
+	let escalateAfter = $state(0);
+	let escalateChannel = $state('');
 	let showMore = $state(false);
+
+	/** Delays offered for the escalation hop. 0 switches it off. */
+	const ESCALATIONS = [
+		{ value: 0, label: 'Never escalate' },
+		{ value: 300, label: 'After 5 min' },
+		{ value: 900, label: 'After 15 min' },
+		{ value: 1800, label: 'After 30 min' },
+		{ value: 3600, label: 'After 1 h' }
+	];
+
+	/** The escalation, said in one sentence — or why it is doing nothing. */
+	const escalationSentence = $derived.by(() => {
+		if (escalateAfter === 0 || escalateChannel === '') {
+			return 'Nobody is told twice: an alert nobody acknowledges keeps to its own channels.';
+		}
+		const name = channels.find((c) => String(c.id) === escalateChannel)?.name ?? 'that channel';
+		const minutes = Math.round(escalateAfter / 60);
+		return `If nobody acknowledges within ${minutes} min of the first message going out, the alert is also sent to ${name} — once. Acknowledging it, or its clearing, stops the hop.`;
+	});
 
 	let saving = $state(false);
 	let saveError = $state<unknown>(null);
@@ -92,7 +116,9 @@
 			(flapOn ? Number(flapEvents) : 0) !== policy.flap_events ||
 			flapWindow !== policy.flap_window_secs ||
 			flapHold !== policy.flap_hold_secs ||
-			publicUrl.trim() !== policy.public_url
+			publicUrl.trim() !== policy.public_url ||
+			escalateAfter !== (policy.escalate_channel === null ? 0 : policy.escalate_after_secs) ||
+			escalateChannel !== (policy.escalate_channel === null ? '' : String(policy.escalate_channel))
 		);
 	});
 
@@ -118,6 +144,11 @@
 			formError = 'The public URL must start with http:// or https://.';
 			return;
 		}
+		const escalating = escalateAfter > 0 && escalateChannel !== '';
+		if (escalateAfter > 0 && escalateChannel === '') {
+			formError = 'Pick the channel to tell when nobody acknowledges, or set the delay to “Never escalate”.';
+			return;
+		}
 		saving = true;
 		try {
 			policy = await updateNotificationPolicy({
@@ -126,9 +157,13 @@
 				flap_events: events,
 				flap_window_secs: flapWindow,
 				flap_hold_secs: flapHold,
-				public_url: url
+				public_url: url,
+				escalate_after_secs: escalating ? escalateAfter : 0,
+				escalate_channel: escalating ? Number(escalateChannel) : null
 			});
 			publicUrl = policy.public_url;
+			escalateAfter = policy.escalate_channel === null ? 0 : policy.escalate_after_secs;
+			escalateChannel = policy.escalate_channel === null ? '' : String(policy.escalate_channel);
 			saved = true;
 			setTimeout(() => (saved = false), 2500);
 		} catch (cause) {
@@ -193,6 +228,27 @@
 			<Field label="Public URL" for="policy-url" help="Used for the “Open in DumbMonit” link in every message. Leave empty to use DUMBMONIT_PUBLIC_URL.">
 				<input id="policy-url" type="url" class="input" bind:value={publicUrl} placeholder="https://monit.example.lan" autocomplete="off" disabled={saving || !auth.isAdmin} />
 			</Field>
+
+			<div class="grid gap-2">
+				<div class="grid gap-4 sm:grid-cols-2">
+					<Field label="If nobody acknowledges" for="policy-escalate-after" help="Counted from the moment the first message actually goes out, not from the alert firing.">
+						<select id="policy-escalate-after" class="input" bind:value={escalateAfter} disabled={saving || !auth.isAdmin}>
+							{#each withCurrent(ESCALATIONS, escalateAfter) as option (option.value)}
+								<option value={option.value}>{option.label}</option>
+							{/each}
+						</select>
+					</Field>
+					<Field label="Also tell" for="policy-escalate-channel" help="One extra hop, sent once. Its own severity floor and quiet hours do not hold it back.">
+						<select id="policy-escalate-channel" class="input" bind:value={escalateChannel} disabled={saving || !auth.isAdmin || escalateAfter === 0}>
+							<option value="">No channel</option>
+							{#each channels as channel (channel.id)}
+								<option value={String(channel.id)}>{channel.name}</option>
+							{/each}
+						</select>
+					</Field>
+				</div>
+				<p class="text-[0.8125rem] text-ink-2">{escalationSentence}</p>
+			</div>
 
 			<div class="grid gap-3">
 				<button
@@ -265,11 +321,18 @@
 			{:else}
 				<ul class="mt-2 grid gap-1.5" role="list">
 					{#each channels as channel (channel.id)}
-						<li class="flex flex-wrap items-baseline gap-x-2 text-sm">
-							<span class="font-medium text-ink">{channel.name}</span>
-							<span class="text-ink-2">{channelSummary(channel)}</span>
-							{#if !channel.enabled}
-								<Plate tone="ghost" label="Disabled" bare />
+						<li class="text-sm">
+							<div class="flex flex-wrap items-baseline gap-x-2">
+								<span class="font-medium text-ink">{channel.name}</span>
+								<span class="text-ink-2">{channelSummary(channel)}</span>
+								{#if !channel.enabled}
+									<Plate tone="ghost" label="Disabled" bare />
+								{/if}
+							</div>
+							{#if !matcherIsEmpty(channel.policy?.matcher)}
+								<p class="text-[0.8125rem] text-ink-2">
+									{matcherSentence(channel.policy.matcher, channel.policy.min_severity)}
+								</p>
 							{/if}
 						</li>
 					{/each}

@@ -27,7 +27,11 @@ async fn local_web_server() -> String {
 }
 
 async fn enrollment_token(app: &TestApp, admin: &str) -> String {
-    let reply = app.post("/api/agent/tokens", json!({ "name": "site" }), Some(admin)).await;
+    // Réutilisable : ces tests enregistrent plusieurs agents avec le même jeton,
+    // ce qu'un jeton à usage unique — le défaut — refuse à juste titre.
+    let reply = app
+        .post("/api/agent/tokens", json!({ "name": "site", "reusable": true }), Some(admin))
+        .await;
     assert_eq!(reply.status, StatusCode::CREATED, "jeton : {}", reply.body);
     reply.body["secret"].as_str().expect("secret").to_string()
 }

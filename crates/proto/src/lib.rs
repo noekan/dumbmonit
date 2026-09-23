@@ -15,15 +15,15 @@ mod target;
 pub use collector::{Collector, ProbeError};
 pub use command::{
     AgentCommand, CMD_CONTAINER_RESTART, CMD_CONTAINER_UPDATE, CMD_PROBE, COMMAND_MAX_AGE_SECS,
-    COMMANDS_PATH, CommandReport, CommandStatus, ProbeJob, ProbeOutcome, RELAY_PATH,
-    RELAY_POLL_HOLD_SECS,
+    COMMAND_RESULT_MAX_BYTES, COMMAND_RESULT_TRUNCATED, COMMANDS_PATH, CommandReport,
+    CommandStatus, ProbeJob, ProbeOutcome, RELAY_PATH, RELAY_POLL_HOLD_SECS, truncate_result,
 };
 pub use credential::{
     Credential, SnmpV3Auth, SnmpV3AuthProtocol, SnmpV3Privacy, SnmpV3PrivacyProtocol,
 };
 pub use push::{
-    AgentIdentity, INGEST_PATH, MAX_BATCH_SAMPLES, PUSH_PROTOCOL_VERSION, PushAck, PushBatch,
-    TOKEN_PREFIX,
+    AGENT_SECRET_HEADER, AGENT_SECRET_PREFIX, AgentIdentity, INGEST_PATH, MAX_BATCH_SAMPLES,
+    PUSH_PROTOCOL_VERSION, PushAck, PushBatch, TOKEN_PREFIX,
 };
 pub use sample::{MetricKind, Sample};
 pub use target::{Target, TargetId};

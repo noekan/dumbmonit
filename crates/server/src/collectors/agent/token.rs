@@ -10,7 +10,7 @@
 //! et l'empreinte est calculée à chaque lot reçu — soit, pour un parc de cent
 //! machines, plusieurs fois par seconde.
 
-use dumbmonit_proto::TOKEN_PREFIX;
+use dumbmonit_proto::{AGENT_SECRET_PREFIX, TOKEN_PREFIX};
 use sha2::{Digest, Sha256};
 
 /// Longueur de la partie aléatoire, en octets. 192 bits : hors de portée d'une
@@ -24,6 +24,23 @@ const DISPLAY_LEN: usize = TOKEN_PREFIX.len() + 8;
 pub fn generate() -> String {
     let bytes: [u8; TOKEN_BYTES] = rand::random();
     format!("{TOKEN_PREFIX}{}", hex::encode(bytes))
+}
+
+/// Fabrique le secret de liaison d'une machine.
+///
+/// Même aléa, même stockage par empreinte, mais un préfixe différent : les deux
+/// secrets voyagent dans la même requête et se retrouveraient un jour dans le
+/// même journal. Pouvoir dire lequel a fuité, sans avoir à le chercher, vaut
+/// bien cinq caractères.
+pub fn generate_secret() -> String {
+    let bytes: [u8; TOKEN_BYTES] = rand::random();
+    format!("{AGENT_SECRET_PREFIX}{}", hex::encode(bytes))
+}
+
+/// Extrait le secret de liaison d'un en-tête, s'il en porte un d'utilisable.
+pub fn extract_secret(header: Option<&str>) -> Option<&str> {
+    let secret = header?.trim();
+    if secret.is_empty() { None } else { Some(secret) }
 }
 
 /// Empreinte stockée en base.
@@ -63,6 +80,22 @@ mod tests {
         assert!(first.starts_with(TOKEN_PREFIX));
         assert_eq!(first.len(), TOKEN_PREFIX.len() + TOKEN_BYTES * 2);
         assert_ne!(first, second, "deux jetons ne doivent jamais coïncider");
+    }
+
+    #[test]
+    fn a_binding_secret_is_as_strong_as_a_token_but_never_mistaken_for_one() {
+        let secret = generate_secret();
+        assert!(secret.starts_with(AGENT_SECRET_PREFIX));
+        assert!(!secret.starts_with(TOKEN_PREFIX));
+        assert_eq!(secret.len(), AGENT_SECRET_PREFIX.len() + TOKEN_BYTES * 2);
+        assert_ne!(secret, generate_secret());
+    }
+
+    #[test]
+    fn an_empty_binding_header_is_the_same_as_no_header_at_all() {
+        assert_eq!(extract_secret(Some("  dmab_abc  ")), Some("dmab_abc"));
+        assert_eq!(extract_secret(Some("   ")), None);
+        assert_eq!(extract_secret(None), None);
     }
 
     #[test]

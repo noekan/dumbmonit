@@ -243,11 +243,19 @@ async fn responses_carry_the_protection_headers_except_on_status_pages() {
             "{uri}"
         );
         assert_eq!(header(&response, "x-frame-options").as_deref(), Some("DENY"), "{uri}");
-        assert_eq!(
-            header(&response, "content-security-policy").as_deref(),
-            Some("frame-ancestors 'none'"),
-            "{uri}"
-        );
+        // La politique porte un nonce tiré par réponse : on vérifie les
+        // directives, pas la chaîne entière.
+        let csp = header(&response, "content-security-policy").expect("csp");
+        for directive in [
+            "default-src 'none'",
+            "frame-ancestors 'none'",
+            "base-uri 'none'",
+            "form-action 'self'",
+            "connect-src 'self'",
+        ] {
+            assert!(csp.contains(directive), "{uri} : {directive} absent de {csp}");
+        }
+        assert!(csp.contains("script-src 'self' 'nonce-"), "{uri} : {csp}");
         assert_eq!(header(&response, "referrer-policy").as_deref(), Some("same-origin"), "{uri}");
     }
 
@@ -260,7 +268,10 @@ async fn responses_carry_the_protection_headers_except_on_status_pages() {
         .expect("réponse");
     assert_eq!(header(&response, "x-content-type-options").as_deref(), Some("nosniff"));
     assert!(header(&response, "x-frame-options").is_none());
-    assert!(header(&response, "content-security-policy").is_none());
+    // Elle garde une politique — seule la clause qui interdit l'encadrement saute.
+    let csp = header(&response, "content-security-policy").expect("csp");
+    assert!(csp.contains("default-src 'none'"), "{csp}");
+    assert!(!csp.contains("frame-ancestors"), "{csp}");
 }
 
 #[tokio::test]

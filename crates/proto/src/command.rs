@@ -171,18 +171,78 @@ impl CommandStatus {
     }
 }
 
+/// Taille maximale conservée d'un compte rendu, en octets.
+///
+/// Partagée par les deux bouts : l'agent borne ce qu'il envoie, le serveur borne
+/// ce qu'il range. Les deux sont nécessaires — un agent est un programme installé
+/// sur une machine que le serveur ne contrôle pas, et rien n'empêche un binaire
+/// modifié d'envoyer un journal de `docker pull` de plusieurs mégaoctets que
+/// personne ne lira jamais dans l'interface.
+pub const COMMAND_RESULT_MAX_BYTES: usize = 4096;
+
+/// Ce que le serveur ajoute devant un compte rendu qu'il a dû raccourcir.
+///
+/// Écrit en toutes lettres, et non un simple « … » : la personne qui lit le
+/// compte rendu d'une mise à jour ratée doit savoir que le début manque, sans
+/// avoir à s'en douter.
+pub const COMMAND_RESULT_TRUNCATED: &str = "[truncated by the server, beginning dropped]\n";
+
 /// Compte rendu de l'agent sur une commande.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandReport {
     pub status: CommandStatus,
     /// Extrait du journal d'exécution, lisible tel quel dans l'interface.
+    ///
+    /// Borné à [`COMMAND_RESULT_MAX_BYTES`] par l'agent, et de nouveau par le
+    /// serveur : ce qui arrive n'est pas forcément ce que l'agent a envoyé.
     #[serde(default)]
     pub result: String,
+}
+
+/// Raccourcit un compte rendu par la fin, en annonçant ce qui a été retiré.
+///
+/// Par la fin et non par le début : quand une commande échoue, c'est la dernière
+/// ligne qui dit pourquoi.
+pub fn truncate_result(text: &str) -> String {
+    if text.len() <= COMMAND_RESULT_MAX_BYTES {
+        return text.to_string();
+    }
+    let mut start = text.len() - COMMAND_RESULT_MAX_BYTES;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    format!("{COMMAND_RESULT_TRUNCATED}{}", &text[start..])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_report_longer_than_the_cap_keeps_its_end_and_says_so() {
+        let short = "everything went fine";
+        assert_eq!(truncate_result(short), short);
+
+        let long = format!("{}the last line explains", "x".repeat(COMMAND_RESULT_MAX_BYTES));
+        let cut = truncate_result(&long);
+        assert!(cut.starts_with(COMMAND_RESULT_TRUNCATED), "la coupe n'est pas annoncée : {cut}");
+        assert!(cut.ends_with("the last line explains"), "la fin est ce qui explique un échec");
+        assert!(cut.len() <= COMMAND_RESULT_MAX_BYTES + COMMAND_RESULT_TRUNCATED.len());
+
+        // La borne exacte n'est pas touchée.
+        let exact = "y".repeat(COMMAND_RESULT_MAX_BYTES);
+        assert_eq!(truncate_result(&exact), exact);
+    }
+
+    #[test]
+    fn truncating_never_splits_a_character() {
+        // Un journal de conteneur contient des accents ; couper au milieu d'un
+        // caractère ferait paniquer la découpe par tranche.
+        let long = "é".repeat(COMMAND_RESULT_MAX_BYTES);
+        let cut = truncate_result(&long);
+        assert!(cut.starts_with(COMMAND_RESULT_TRUNCATED));
+        assert!(cut.len() <= COMMAND_RESULT_MAX_BYTES + COMMAND_RESULT_TRUNCATED.len());
+    }
 
     #[test]
     fn a_command_expires_after_ten_minutes() {

@@ -7,6 +7,111 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Maintenance windows that survive the clock change.** A window can now
+  recur **monthly** — on days of the month ("the 1st and the 15th") or on a
+  weekday of the month ("the first Sunday", "the last Friday") — with a start
+  time and a duration, so a monthly window may run longer than a day. A month
+  without the occurrence is skipped rather than approximated: no 31st in
+  February, no fifth Sunday in April 2026. Recurring windows now carry a
+  **time zone** (an IANA name such as `Europe/Paris`) instead of only a fixed
+  offset: "every Sunday from 02:00 to 04:00" stays at 02:00 local all year, and
+  still lasts exactly two hours on the night the clock moves — it no longer
+  drifts by an hour twice a year. Windows saved before this keep their fixed
+  offset and behave exactly as they did. The list shows the next occurrence,
+  computed by the server, and a device covered by a window now reads
+  **Maintenance** on public status pages instead of red.
+- **Routing by tag.** A notification channel can say which alerts it wants —
+  by device tag (`site=cellar`), by device kind (`proxmox`), by rule, or a
+  combination — under *Delivery options → Only some alerts*. Conditions on the
+  same field read as *or*, different fields as *and*, and an *Except* row
+  always wins. A preview under the editor lists which of your devices the
+  filter selects right now, using the very filter the alerting engine runs, and
+  one sentence says the whole rule back to you ("this channel receives
+  advisories and above from devices tagged site=cellar, except devices tagged
+  role=lab"). A channel with no filter keeps receiving everything, so nothing
+  changes for existing instances. New route
+  `POST /api/notify/match-preview`.
+- **Escalation to a second channel.** *Alerts → Notifications → Notification
+  policy* gained one row: if nobody acknowledges within a delay, the alert is
+  also sent — once — to another channel. The delay counts from the moment the
+  first message actually went out, not from the alert firing, so quiet hours or
+  a failed delivery postpone the hop instead of firing it into the void;
+  acknowledging the alert, or its clearing, stops it. The escalation message
+  goes to that channel only, and crosses its severity floor, routing filter and
+  quiet hours — it was named to wake someone up. One hop, no on-call rotation:
+  point it at PagerDuty or Opsgenie if you need that. New policy fields
+  `escalate_after_secs` and `escalate_channel`.
+
+- **Backup and restore**, so that upgrading is no longer a bet. *Settings →
+  Backup* exports the whole configuration — every device with its credentials,
+  alert rules and per-device overrides, notification channels with their
+  secrets, the notification policy, status pages and incidents, maintenance
+  windows, accounts, agent and API tokens (as hashes, so the agents and scripts
+  already out there keep working) and heartbeat tokens (as themselves, so the
+  URLs your cron jobs call stay the same) — into one file. Its secrets are
+  re-encrypted with a passphrase you choose, by Argon2id and AES-256-GCM, never
+  with the instance key: the point is to restore onto a fresh instance that has
+  its own. The header stays readable so you can tell what a file is before
+  typing anything; a bundle written by a newer DumbMonit is refused with a
+  sentence saying so, and a modified one or a wrong passphrase is refused the
+  same way. Restoring is a **dry run by default** that reports, section by
+  section, what it would create, update and leave alone — and it is not a
+  simulation but the restore itself, run in a transaction that is rolled back,
+  so the report cannot be wrong. Restoring never deletes anything, never
+  duplicates a device (it matches on kind and address), and never overwrites an
+  account that already exists. Account password hashes and 2FA secrets are left
+  out unless you ask for them. New routes `GET`/`POST /api/backup` and
+  `POST /api/backup/restore`, admin sessions only — a bundle holds every
+  credential of the instance, and an API token does not get one.
+- **Scheduled local backups of the database.** Once a day by default, keeping
+  seven, into `/data/backups/`: an online, consistent copy written with SQLite's
+  `VACUUM INTO` while the server keeps running — not a file copy — plus a copy
+  of `secret.key` beside it, because that file is what decrypts device
+  credentials and a database restored without it gives an instance that cannot
+  talk to anything. Tunable with `DUMBMONIT_BACKUP_ENABLED`, `_DIR`,
+  `_INTERVAL_HOURS` and `_KEEP`; nothing else in the directory is ever touched
+  by the rotation. Three new series —
+  `dumbmonit_instance_backup_last_success_seconds`, `…_last_status` and
+  `…_size_bytes` — and a built-in rule, **DumbMonit backup did not run**, that
+  fires when the last success is more than two days old. The Settings section
+  shows the last run, the files kept and their size, and a **Back up now**
+  button. New page: [Backup and restore](docs/install/backup.md).
+- **The first five minutes are now a path, not an empty screen.** A new
+  instance opens on a three-step guide under the bulletin — add your first
+  device, connect a way to be told, check a message arrives — each step one
+  click, each dismissible on its own, with **Skip the guide** for all three.
+  The steps are ticked by the server's own facts, not by the interface: the
+  last one turns green only once a message has really left a channel, so a
+  channel created and never tested does not count as done. The state lives on
+  the instance (`GET`/`PUT /api/onboarding`), so skipping it in one browser
+  skips it in every browser and for every user. It disappears for good once the
+  three steps are settled, and never appears at all on an instance that already
+  had devices and a channel — upgrading does not hand an established homelab a
+  tutorial. "Scan my network" is offered as the fast path and is now a
+  shareable link (`/targets/new?scan=1`).
+- **The interface installs on a phone home screen**: a web manifest, icons
+  derived from the existing pigeon mark, an Apple touch icon and the day/night
+  theme colours already in use. Deliberately **no service worker and no offline
+  cache** — a monitoring screen that serves yesterday's state, or yesterday's
+  build after an upgrade, is worse than no icon.
+
+- **An existing Prometheus or Grafana can now read DumbMonit**, so nobody has
+  to run a second monitoring stack. Three routes outside `/api`, all behind an
+  API token with the `read` scope and none of them needing the anti-CSRF header
+  a scraper cannot send: `GET /metrics` exposes the instance's own health in the
+  Prometheus text exposition format (scheduler cycle and backlog, probes and
+  failures per device kind, samples written and write failures, alerting cycle,
+  alerts per phase, notifications sent and failed per channel kind, agents and
+  stale agents, database size, VictoriaMetrics reachability, version and
+  uptime — a few dozen series, never one per device); `GET /federate` federates
+  the measurements themselves by `match[]` selector, the way Prometheus reads
+  another Prometheus; and `/prometheus/api/v1/…` relays the read half of the
+  Prometheus API so Grafana can use `http://…/prometheus` as a plain data
+  source, with the routes that delete series answering `404`.
+  `DUMBMONIT_METRICS_PUBLIC=true` serves the three without a token, for
+  instances whose port is already firewalled. Documented in the new
+  [Scraping DumbMonit](docs/reference/metrics.md) section, with a copy-pastable
+  `scrape_config`.
 - **Proxmox Backup Server** now watches the server itself and its tape tier.
   Two new panels on the device page: **Server** (the systemd units with the
   ones PBS cannot do without called out, the Proxmox package versions —
@@ -83,6 +188,47 @@ All notable changes to this project are documented here. The format follows
   (`/cluster/metrics/export`), everything Proxmox's own metric servers receive,
   including per-node pressure stall information and every point since the last
   probe rather than just the current value.
+- **Agents are bound to their machine.** An enrolment token said that a machine
+  was allowed to talk; it never said *which* one, and the identity key that did
+  (`/etc/machine-id`, or the host name) is no secret. One compromised host in a
+  fleet could therefore push fake healthy measurements under a neighbour's
+  device, rewrite its host name and OS, and — worse — fetch and consume the
+  Docker restart/update commands queued for it. Now the server hands each
+  machine a binding secret at its first batch, keeps only a fingerprint, and
+  requires it on every request afterwards (`X-DumbMonit-Agent-Secret`); the
+  agent stores it next to its configuration with mode `0600`. Nothing breaks on
+  upgrade: agents installed before this keep reporting and keep running
+  commands, shown as **not bound** on their device page until the install
+  command is re-run on them — the support window for unbound agents ends with
+  1.0. After a reinstall, *Agent → Allow re-enrolment* on the device page opens
+  a one-hour window for the machine to bind itself again.
+- **Enrolment tokens have a scope.** A token is now **single use** by default —
+  it enrols one machine and no more, which is what an install command copied
+  into a ticket or a shell history should be worth. *Settings → Agents* can
+  make one reusable for a fleet, with an optional count of machines and an
+  optional deadline; a deadline stops *enrolments* only, so machines already
+  enrolled keep reporting. Tokens created before this stay unlimited.
+  `POST /api/agent/tokens` gained `reusable`, `max_uses` and `expires_in_days`;
+  the listing gained `max_uses`, `uses` and `expires_at`.
+- **A real Content-Security-Policy.** Responses carried only
+  `frame-ancestors 'none'`; they now carry a policy that starts from
+  `default-src 'none'` and names only what the interface uses — all of it
+  served by DumbMonit itself, with no third-party origin anywhere. The page's
+  inline scripts are allowed by a nonce regenerated for every response, so
+  `'unsafe-inline'` never applies to scripts.
+
+### Fixed
+
+- The server accepted a command report of any size from an agent. It is now cut
+  to the last 4 KB like the agent's own cap, with
+  `[truncated by the server, beginning dropped]` at the front so the report says
+  it was shortened.
+- "You cannot restart or update DumbMonit's own container" was true only of its
+  name: naming the container by its id got past the check, and the server's
+  reserved list held `dumbmonit` twice where the second entry should have been
+  `ezymonit`. The agent now re-checks the name Docker reports after inspecting
+  the container, whichever way it was designated, and refuses to act on its own
+  container whatever that one is called.
 
 ## 0.1.0-alpha.4 — 2026-09-22
 
@@ -106,6 +252,28 @@ All notable changes to this project are documented here. The format follows
   section becomes "API & assistants"; the API reference documents every
   route.
 - Device page: a relayed device says *via <agent>* next to *Behind <parent>*.
+
+### Changed
+
+- **Documentation caught up with the product.** The built-in rules table is
+  regenerated from the code and now lists all 101 rules grouped by device kind
+  (Docker containers, Plakar backups and the Synology Active Backup task rules
+  were missing; the hysteresis of *High CPU* and *Disk almost full* was not
+  stated). The Settings page description matches the panels that ship. The FAQ
+  and the HTTP API reference no longer describe "one instance password": they
+  describe accounts, roles, the TOTP login exchange as it really works, and
+  `DUMBMONIT_RESET_PASSWORD` as what it does — remove every account and
+  session, leaving devices, rules and channels alone. The API reference gains
+  the MCP endpoint, which was undocumented, and several corrected payloads.
+  `PRODUCT.md` no longer says "two containers" or "a single password"; the
+  README feature list gains alert acknowledgement, the second factor, the audit
+  log and the scoped REST API tokens, and its "known gaps" list no longer names
+  three things that have since shipped.
+
+### Removed
+
+- The `/dev/sky` preview board, a development-only page for the weather window,
+  no longer ships in the production build.
 
 ### Fixed
 

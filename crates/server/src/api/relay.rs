@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::api::ApiResult;
 use crate::api::agent_commands::Rejection;
-use crate::collectors::agent::{self as agent, commands};
+use crate::collectors::agent::{self as agent};
 use crate::collectors::relay::{self, JobResult};
 use crate::db;
 use crate::state::AppState;
@@ -44,27 +44,17 @@ pub fn agent_routes() -> Router<AppState> {
     Router::new().route("/agent/relay", get(pending)).route("/agent/relay/{id}", post(report))
 }
 
-/// Vérifie le jeton et la clé, renvoie la cible de l'agent.
+/// Vérifie le jeton, le secret de liaison et la clé ; renvoie la cible de l'agent.
+///
+/// Exactement le même contrôle que le canal de commandes, et pour la même
+/// raison : les sondes déléguées portent les identifiants des équipements d'un
+/// site, et une machine ne doit pas pouvoir prendre celles d'une autre.
 async fn authenticate(
     state: &AppState,
     headers: &HeaderMap,
     key: &str,
 ) -> Result<(i64, TargetId), Rejection> {
-    let bearer =
-        headers.get(axum::http::header::AUTHORIZATION).and_then(|value| value.to_str().ok());
-    let token_id = agent::authenticate_token(&state.pool, bearer)
-        .await?
-        .ok_or_else(|| Rejection::from(agent::IngestError::Unauthorized))?;
-    let key = key.trim();
-    if key.is_empty() {
-        return Err(Rejection::from(agent::IngestError::BadRequest(
-            "the 'key' query parameter is required".to_string(),
-        )));
-    }
-    let Some(target_id) = commands::target_for_key(&state.pool, key).await? else {
-        return Err(Rejection::not_found("Unknown machine: push a batch first."));
-    };
-    Ok((token_id, target_id))
+    crate::api::agent_commands::authenticate(state, headers, key).await
 }
 
 /// `GET /api/agent/relay?key=…&wait=…` : les sondes qui attendent cet agent.

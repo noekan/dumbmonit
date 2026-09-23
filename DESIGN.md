@@ -34,7 +34,7 @@ Radii: 14px panels and faceplates (`--radius-card`), 8px controls, 6px plates. S
 - `EmptyState` — ghost-cell field, one sentence, one action, optional mascot.
 - `ErrorNotice` — message + recovery hint from `ApiError`, optional retry.
 - `Skeleton` — shimmer shaped like the content.
-- `SkyScene` — the bulletin's weather window: SVG sky whose weather follows the network (clear / cloudy / overcast / storm / waiting / empty) with the pigeon flying across on a loop; CSS-only motion, parked under reduced motion. Mapping in `overview/sky.ts` (`skyCondition`). Preview board at `/dev/sky`.
+- `SkyScene` — the bulletin's weather window: SVG sky whose weather follows the network (clear / cloudy / overcast / storm / waiting / empty) with the pigeon flying across on a loop; CSS-only motion, parked under reduced motion. Mapping in `overview/sky.ts` (`skyCondition`).
 - `CommandPalette` (⌘K / Ctrl K) — pages, actions, devices; `/wall` — the bulletin alone, full screen, for a room monitor (Esc leaves, wake lock held).
 - Effects (React Bits ported to Svelte 5): `DotField` (full-bleed on login/setup, faint behind the bulletin band; **still by default**, it only bulges and glows under the cursor — no wave, no sparkle), `DecryptText` (the sky sentence resolves once), `CountUp` (readouts), `ClickSpark` (the primary button), `Spotlight` (faceplate hover).
 

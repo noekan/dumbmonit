@@ -27,7 +27,9 @@
 		creating = true;
 		error = null;
 		try {
-			token = await createAgentToken(name.trim(), window.location.origin);
+			// Single use: this form enrols one machine. A token for a whole fleet
+			// is created from Settings → Agents, deliberately.
+			token = await createAgentToken({ name: name.trim(), base_url: window.location.origin });
 		} catch (cause) {
 			error = cause;
 		} finally {
@@ -45,6 +47,7 @@
 	<div class="grid gap-5" aria-live="polite">
 		<div class="flex flex-wrap items-center gap-2">
 			<Plate tone="advisory" label="Shown once" />
+			<Plate tone="ghost" label="Single use" />
 			<p class="text-sm text-ink">Copy the command now: this token will not be displayed again.</p>
 		</div>
 
@@ -63,7 +66,8 @@
 		<AgentChecksums />
 
 		<p class="text-sm leading-relaxed text-ink-2">
-			The agent registers itself as a device within a minute. You can close this page.
+			The agent registers itself as a device within a minute. You can close this page. This token enrols
+			this one machine and nothing else; for a fleet, create a reusable token in Settings → Agents.
 		</p>
 
 		<div class="flex flex-wrap items-center gap-2">

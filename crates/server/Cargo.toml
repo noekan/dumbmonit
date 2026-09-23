@@ -24,6 +24,7 @@ dumbmonit-collectors = { path = "../collectors" }
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
+chrono-tz.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

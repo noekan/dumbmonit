@@ -1901,6 +1901,33 @@ pub fn builtin_rules() -> Vec<Rule> {
             )
         },
         // --- fin du bloc Synology DSM ---
+        // La sauvegarde locale de DumbMonit lui-même.
+        //
+        // Elle est la seule chose qui rende une mise à jour rattrapable, et
+        // c'est aussi la seule que personne ne va vérifier : on ne regarde un
+        // répertoire de sauvegardes que le jour où l'on en a besoin. La série
+        // n'existe qu'une fois la première sauvegarde écrite — instance dont la
+        // planification est coupée, pas d'alerte, pas de faux reproche — et
+        // porte l'heure de la dernière **réussite**, jamais celle d'une
+        // tentative ratée. Deux jours au seuil : le rythme livré est quotidien,
+        // une nuit manquée peut être un redémarrage.
+        Rule {
+            description: "The scheduled local backup of the DumbMonit database has not run for \
+                          more than two days."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 2.0 * 24.0 * 3600.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Warning,
+            unit: "s".to_string(),
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "instance_backup_missing",
+                "DumbMonit backup did not run",
+                RuleKind::Threshold,
+                "time() - dumbmonit_instance_backup_last_success_seconds",
+            )
+        },
     ]
 }
 
@@ -2017,6 +2044,8 @@ mod tests {
             "pmg_cluster_degraded",
             "pmg_certificate_expiring",
             "pmg_updates_pending",
+            // Sauvegarde locale de l'instance (`backup/local.rs`).
+            "instance_backup_missing",
         ] {
             assert!(uids.contains(&attendu), "missing built-in rule: {attendu}");
         }
@@ -2077,6 +2106,8 @@ mod tests {
             "dumbmonit_synology_memory_usage_percent",
             "dumbmonit_abb_device_overdue",
             "dumbmonit_abb_device_consecutive_failures",
+            // Sauvegarde locale de l'instance (`backup/local.rs`).
+            "dumbmonit_instance_backup_last_success_seconds",
             // Proxmox VE, parité avec Pulse (`collectors/proxmox/{metrics,ha,
             // snapshots,replication,ceph}.rs`).
             "dumbmonit_proxmox_guest_running",

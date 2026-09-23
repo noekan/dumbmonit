@@ -1278,9 +1278,9 @@ fn describe(kind: &'static str) -> CollectorView {
                 title: "Install the agent on the machine",
                 steps: &[
                     "Save the device in DumbMonit: an enrollment token (dmon_…) is shown once, with the install command ready to copy for Linux and for Windows.",
-                    "That token is the agent's key to push its measurements to DumbMonit. It is not an account on the machine: nothing to create there, and one token may enrol several machines.",
+                    "That token is the agent's key to push its measurements to DumbMonit. It is not an account on the machine: nothing to create there. A token created from the device form is single use: it enrols this one machine and nothing else. For a fleet, create a reusable token in Settings → Agents.",
                     "Run the install command on the machine to monitor, with elevated rights (sudo on Linux, an elevated PowerShell on Windows). It downloads the agent, writes the token into agent.yaml and starts the service.",
-                    "The machine shows up on its own within a few seconds, named after its host name. Lost the token? Settings → Agents lets you revoke it and create another.",
+                    "The machine shows up on its own within a few seconds, named after its host name. On that first batch the server gives the agent a secret of its own and stores it in /etc/dumbmonit/agent-secret, readable by nobody else: from then on, that machine is the only one that can report under this device. Lost the token? Settings → Agents lets you revoke it and create another.",
                     "Docker: to see the containers and let DumbMonit restart or update them, the agent must reach the Docker socket. The service the installer registers already can; if you run the agent under a dedicated user instead, add that user to the \"docker\" group and restart it. Restart and auto-update policies are then set per container on the device page.\nusermod -aG docker dumbmonit",
                     "Plakar backups: detected automatically — the Backups panel appears when the plakar binary or a kloset (~/.config/plakar/stores.yml of every user, ~/.plakar, /var/lib/plakar) is found, and nothing is shown otherwise. Set \"plakar_klosets\" in agent.yaml to watch a fixed list, or \"plakar: false\" to opt out.",
                 ],

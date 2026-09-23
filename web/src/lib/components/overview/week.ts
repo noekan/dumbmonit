@@ -270,7 +270,7 @@ export function buildWeek(input: WeekInput): Week {
       } else if (index <= LATER_DAYS) {
         laterWindows += 1;
       }
-    } else {
+    } else if (schedule.kind === "weekly") {
       const span = `${minutesToClock(schedule.start_minute)}–${minutesToClock(schedule.end_minute)}`;
       days.forEach((day, index) => {
         // Schedule days count from Monday; JS weekdays from Sunday.
@@ -284,6 +284,42 @@ export function buildWeek(input: WeekInput): Week {
           target,
         });
       });
+    } else {
+      // Monthly: fifth Sundays and last Fridays do not fall out of a weekday
+      // test, so the week reads the occurrence the server already unrolled
+      // rather than reimplementing the calendar here.
+      if (silence.active_now && silence.active_until) {
+        const end = parseServerDate(silence.active_until);
+        if (!end) continue;
+        const endLabel =
+          dayIndex(end, now) === 0
+            ? clock.format(end)
+            : `${dayMonth.format(end)} ${clock.format(end)}`;
+        place(0, {
+          key: `silence:${silence.id}`,
+          tone: "muted",
+          plate: "Scheduled",
+          text: `${scope} until ${endLabel}`,
+          target,
+        });
+        continue;
+      }
+      const start = silence.next_start_at
+        ? parseServerDate(silence.next_start_at)
+        : null;
+      if (!start) continue;
+      const index = dayIndex(start, now);
+      if (index < WEEK_DAYS) {
+        place(index, {
+          key: `silence:${silence.id}`,
+          tone: "muted",
+          plate: "Scheduled",
+          text: `${scope}, from ${clock.format(start)}`,
+          target,
+        });
+      } else if (index <= LATER_DAYS) {
+        laterWindows += 1;
+      }
     }
   }
   if (laterWindows > 0)

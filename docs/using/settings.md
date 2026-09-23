@@ -3,8 +3,8 @@
 ![Settings: account, users, single sign-on, agents, assistant, appearance, about](../assets/screenshots/settings-light.png){ loading=lazy }
 
 Settings holds what is administrative: your account, who can sign in and
-how, the tokens that let agents and assistants in, the theme, and the
-server's health. One page, one section per topic, with a rail of anchors on a
+how, the tokens that let agents and assistants in, backing the instance up,
+the theme, and the server's health. One page, one section per topic, with a rail of anchors on a
 wide screen and a strip of chips on a phone. Each section is linkable
 (`/settings#agents`).
 
@@ -20,9 +20,10 @@ The old links still work: they forward to the new place.
 
 ## Account & security
 
-The instance is protected by one password, set on first start. Here you can
-change it: current password, new password (at least 12 characters; a whole
-phrase is safer than a complicated word), confirmation. Changing it signs out
+This is your own account. The first one is created on first start, and more
+can be added below. Here you change your password: current password, new
+password (at least 12 characters; a whole phrase is safer than a complicated
+word), confirmation. Changing it signs out
 every other session. Accounts that sign in through the identity provider have
 no password here. **Sign out** ends this session.
 
@@ -64,23 +65,46 @@ address. It keeps the last 5 000 entries.
 
 Admins only. The accounts that can sign in, and their role: **admin**
 (everything) or **viewer** (read only — every page opens, every control that
-would change something is hidden). Create an account with a username, an
-optional display name, a role and a password; disable or delete one; reset
-its password. The server keeps at least one active admin, and the controls
-reflect that rule rather than reporting it as an error.
+would change something is hidden). **Add user** asks for a username, an
+optional display name, a role and a password; the button beside the password
+field makes up a random one. The password is shown once, to hand over.
+
+Each row carries the role, whether the account signs in with a password or
+through the identity provider, whether two-factor is on, and the last sign-in.
+**Edit** changes the display name, the role and the password (a reset signs
+that user out everywhere and shows the new password once). The **Enabled**
+switch suspends an account without deleting it; **Reset 2FA** appears when the
+account has a second factor; **Delete** removes it for good. The server keeps
+at least one active admin, and the controls reflect that rule rather than
+reporting it as an error: the last admin cannot be demoted, disabled or
+deleted, and you cannot disable or delete your own account.
 
 ## Single sign-on
 
 Admins only. Sign-in through an OpenID Connect provider (Authelia, Authentik,
-Keycloak, Pocket ID, Google Workspace…). Enter the issuer URL, the client id
-and secret, and register the callback URL shown in the form with your
-provider. **Test discovery** reads the provider's configuration without
-signing anyone in. Settings saved here take precedence over the
-`DUMBMONIT_OIDC_*` environment variables.
+Keycloak, Pocket ID, Google Workspace…). Fill in the *provider name* (it
+labels the "Continue with …" button on the sign-in screen), the *issuer URL*
+— discovery is read from `{issuer}/.well-known/openid-configuration` — the
+*client id*, the *client secret* (stored encrypted, never shown again) and the
+*public URL* browsers reach DumbMonit at. The form builds the redirect URI
+from that public URL: copy it and register it with your provider.
+
+**Test discovery** reads the provider's configuration without signing anyone
+in, lists the endpoints it found, and warns when the provider signs with
+neither RS256 nor ES256 — the only two signatures DumbMonit accepts. Settings
+saved here take precedence over the `DUMBMONIT_OIDC_*` environment variables,
+which only apply while nothing is saved; **Forget saved settings** clears them
+and falls back to the variables when they exist.
+
+**Advanced.** The rest of the form sits under *Advanced*: *Scopes* names what
+to ask the provider for, *Groups claim* the token claim that lists the user's
+groups, and *Create accounts on first sign-in* decides whether an unknown
+person gets an account.
 
 **Roles.** *Admin groups* lists the groups whose members become admins;
-everyone else is a viewer. Roles are re-evaluated at each sign-in, except
-that the last active admin is never demoted.
+everyone else is a viewer. Leave it empty to keep managing roles under
+**Users**. Roles are re-evaluated at each sign-in, except that the last active
+admin is never demoted.
 
 **Which account a sign-in lands on.** The identity is remembered by its
 provider subject after the first sign-in. On a first sign-in:
@@ -102,29 +126,79 @@ provider subject after the first sign-in. On a first sign-in:
 
 Enrollment tokens for the [Linux and Windows agent](../devices/agent.md).
 Create one with a name ("File server", "Home fleet"): the token is shown once,
-with the Linux and Windows install commands ready to copy. The list shows each
-token's prefix, creation date, last use and whether it was revoked. **Revoke**
-stops every agent using that token at its next push.
+with the Linux and Windows install commands ready to copy, and the SHA-256
+checksums of the agent binaries this server ships — the installer checks the
+download against them by itself, they are there for anyone who wants to
+compare by hand. The list shows each token's prefix, creation date, last use
+and whether it was revoked. **Revoke** stops every agent using that token at
+its next push.
 
 One token can enrol several machines. Revoking it does not delete the devices.
+Viewers see the list and the section reads *Viewer — read only*; creating and
+revoking are for admins.
 
 ## API & assistants
 
-API tokens for MCP clients and for the [REST API](../reference/api.md), with
-the connection snippets and a `curl` example ready to paste. A **read** token
-can only look; a **read and write** token can also change things — silence a
-device, run a probe, add or edit devices, rules and channels — but never
-accounts, sign-in settings or other tokens. See
-[Connect an assistant](assistant.md).
+One kind of token for both: MCP clients and the
+[REST API](../reference/api.md). Name a token, pick its scope and create it —
+it is shown once. A **read** token can only look; a **read and write** token
+can also change things — silence a device, run a probe, add or edit devices,
+rules and channels — but never accounts, sign-in settings or other tokens.
+
+Under **Connect**, three tabs hold the snippets, filled with the token while
+it is still on screen: *Claude* (the `claude mcp add` command and the
+`claude_desktop_config.json` block), *ChatGPT* (the MCP server URL and the
+authorization header, with a warning when this page is not served over HTTPS —
+ChatGPT connects from OpenAI's servers, so the address must be reachable from
+the internet) and *Cursor / other*, the same shape for any client that speaks
+Streamable HTTP with a bearer header. **API access** shows the same token on
+the REST API as a `curl` example, and points at the routes a Prometheus or a
+Grafana scrapes with it. See [Connect an assistant](assistant.md) and
+[Scraping DumbMonit](../reference/metrics.md#scraping-dumbmonit).
+
+## Backup
+
+Three things, in the order you meet them.
+
+A **warning you cannot miss**: `/data/secret.key` is what decrypts device
+credentials, and a copy of the database without it restores an instance that
+cannot talk to anything. The wording changes when the secret comes from
+`DUMBMONIT_SECRET` instead — there is then no file to copy, and it is your
+password manager that has to hold it.
+
+**Export the configuration** lists what the bundle would contain, with a count
+per section, then asks for a passphrase twice. The file that comes down holds
+every credential of this instance, encrypted with that passphrase alone: keep
+it where you keep passwords. Account passwords and 2FA secrets are left out
+unless you turn the switch on.
+
+**Restore a bundle** takes the file and its passphrase and shows a **dry run**
+first: a table of what would be created, updated and left alone, section by
+section, with a note for anything it cannot place. Nothing is written until you
+press *Restore for real*.
+
+**Scheduled local backups** shows whether they are on, where they go, the last
+run and whether it succeeded, and the files kept with their size. **Back up
+now** writes one immediately — the thing to do before an upgrade.
+
+Everything here is admin-only. See [Backup and restore](../install/backup.md).
 
 ## Appearance
 
-Three choices: **System** (follows your device and switches with it),
-**Day** (the "chart paper" theme) and **Night** (the "radar" theme). The
-choice is stored in the browser. The header's toggle and the command
-palette's *Toggle theme* switch between day and night.
+Three tiles, each previewing its own theme: **System** (follows your device and
+switches with it), **Day** (the "chart paper" theme) and **Night** (the
+"radar" theme). The choice is stored in the browser. The header's toggle and
+the command palette's *Toggle theme* switch between day and night.
+
+**Open wall mode** sits at the bottom of the section: the bulletin alone, full
+screen, for a monitor in the room. ++esc++ leaves it, and the command palette
+opens it from anywhere — see [Wall mode](overview.md#wall-mode).
 
 ## About
 
-Version of the server and the health of its two dependencies, the SQLite
-database and VictoriaMetrics, as reported by `GET /api/health`.
+Version of the server and the health of its two stores, the database (device
+setup and alert history) and VictoriaMetrics (every measurement in the
+charts), as reported by `GET /api/health` and refreshed every 15 seconds. A
+store that stops answering shows a warning with the error and what to check.
+The section also links to this documentation and names the licence, Apache
+2.0.

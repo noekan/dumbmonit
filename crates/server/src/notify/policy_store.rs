@@ -360,11 +360,22 @@ pub async fn purge(pool: &SqlitePool, now: DateTime<Utc>, lookback: TimeDelta) -
 
 /// Fenêtre de registre à charger pour un cycle : la plus longue des fenêtres
 /// dont dépend une décision.
+///
+/// Le délai d'escalade en fait partie : le relais vers le second canal se
+/// compte depuis la première annonce réellement partie, et cette annonce doit
+/// donc encore être dans le registre au moment de décider.
 pub fn lookback(global: &GlobalPolicy, channels: &HashMap<i64, ChannelPolicy>) -> TimeDelta {
     let longest_interval = channels.values().map(|p| p.min_interval_secs).max().unwrap_or(0);
-    let secs = [LEDGER_HOUR_SECS, i64::from(global.flap_window_secs), i64::from(longest_interval)]
-        .into_iter()
-        .max()
-        .unwrap_or(LEDGER_HOUR_SECS);
+    let secs = [
+        LEDGER_HOUR_SECS,
+        i64::from(global.flap_window_secs),
+        i64::from(longest_interval),
+        // Une marge d'une heure : le relais est décidé après le délai, pas à la
+        // seconde près, et une entrée disparue le ferait taire pour toujours.
+        i64::from(global.escalate_after_secs).saturating_add(LEDGER_HOUR_SECS),
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or(LEDGER_HOUR_SECS);
     TimeDelta::seconds(secs)
 }

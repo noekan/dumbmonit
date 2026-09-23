@@ -170,6 +170,7 @@ impl TestApp {
             channels: Vec::new(),
             repeat_interval: Some(Duration::from_secs(3600)),
             escalate_after: None,
+            unacked_after: None,
             just_transitioned: false,
         }
     }

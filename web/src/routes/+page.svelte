@@ -21,23 +21,26 @@
 		listChannels,
 		listCollectors,
 		createSilence,
+		getOnboarding,
 		queryInstant,
 		type Target,
 		type TargetId,
 		type AlertRule,
 		type AlertHistoryEntry,
+		type OnboardingState,
 		type Silence
 	} from '$lib/api';
 	import type { Alert } from '$lib/api';
 	import { displayState, formatRelative, type ProbeStatus } from '$lib/format';
 	import { loadProbeStatuses } from '$lib/metrics';
 	import { alertsStore } from '$lib/stores/alerts.svelte';
-	import { Button, Plate, Skeleton, ErrorNotice, DecryptText, ClickSpark } from '$lib/ui';
+	import { auth } from '$lib/stores/auth.svelte';
+	import { Button, EmptyState, Plate, Skeleton, ErrorNotice, DecryptText, ClickSpark } from '$lib/ui';
 	import SkyScene from '$lib/components/overview/SkyScene.svelte';
 	import Briefing from '$lib/components/overview/Briefing.svelte';
 	import WeekAhead from '$lib/components/overview/WeekAhead.svelte';
 	import Streaks from '$lib/components/overview/Streaks.svelte';
-	import Onboarding from '$lib/components/overview/Onboarding.svelte';
+	import FirstRun from '$lib/components/overview/FirstRun.svelte';
 	import { readSky, skyCondition } from '$lib/components/overview/sky';
 	import { buildBriefing } from '$lib/components/overview/briefing';
 	import { buildWeek } from '$lib/components/overview/week';
@@ -62,6 +65,15 @@
 	/** Enabled channel names; `undefined` until read (or when the read failed). */
 	let channels = $state<string[] | undefined>(undefined);
 	let hasDemoKind = $state(false);
+	/** The first-run guide, as the server keeps it; `null` while unread or unavailable. */
+	let onboarding = $state<OnboardingState | null>(null);
+	/**
+	 * Whether the guide is on screen. Decided once per page load and then held:
+	 * the last step turns green at the same moment the server latches the guide
+	 * as finished, and a panel that vanished on its own payoff would be unkind.
+	 */
+	let showGuide = $state(false);
+	let guideDecided = false;
 	let loading = $state(true);
 	let error = $state<unknown>(null);
 	let lastChecked = $state<Date | null>(null);
@@ -117,6 +129,30 @@
 		return [...byTarget].map(([targetId, days]) => ({ targetId, days }));
 	}
 
+	/**
+	 * Reads the first-run guide. Silent on failure: a server without the route,
+	 * or a read that did not come back, simply means no guide — never an error
+	 * banner over a bulletin that is otherwise fine.
+	 */
+	async function readOnboarding(signal?: AbortSignal) {
+		// A viewer can neither add a device nor create a channel: offering the
+		// guide would be offering three buttons the server would refuse.
+		if (!auth.isAdmin) return;
+		if (guideDecided && !showGuide) return;
+		try {
+			const next = await getOnboarding(signal);
+			onboarding = next;
+			if (!guideDecided) {
+				guideDecided = true;
+				showGuide = !next.skipped && !next.complete;
+			} else if (next.skipped) {
+				showGuide = false;
+			}
+		} catch {
+			guideDecided = true;
+		}
+	}
+
 	async function load(signal?: AbortSignal) {
 		error = null;
 		const at = new Date();
@@ -159,6 +195,7 @@
 		}
 		now = at;
 		lastChecked = new Date();
+		void readOnboarding(signal);
 		void alertsStore.refresh(signal);
 	}
 
@@ -254,8 +291,11 @@
 	>
 		<SkyScene {condition} frame={false} class="absolute inset-0 h-full w-full" />
 
-		{#if !noDevices}
-			<!-- One primary per view; on phones it sits under the band instead. -->
+		{#if !noDevices && !showGuide}
+			<!--
+				One primary per view; on phones it sits under the band instead. While
+				the first-run guide is up, its current step is the one thing to do.
+			-->
 			<div class="absolute top-4 right-4 hidden sm:block">
 				<ClickSpark>
 					<Button variant="primary" href="/targets/new">Add a device</Button>
@@ -286,16 +326,44 @@
 		</div>
 	</section>
 
-	{#if noDevices}
+	{#if showGuide && onboarding}
 		<div class="mt-6">
-			<Onboarding hasDemo={hasDemoKind} />
+			<FirstRun
+				guide={onboarding}
+				hasDemo={hasDemoKind}
+				onchange={(next) => {
+					onboarding = next;
+					if (next.skipped) showGuide = false;
+				}}
+			/>
 		</div>
+	{/if}
+
+	{#if noDevices}
+		{#if !showGuide}
+			<!-- The sky above already says there is nothing to watch: one way in is enough. -->
+			<div class="mt-6">
+				<EmptyState
+					title="No device yet"
+					description="Add a switch, a NAS, a hypervisor or a website, and it starts reporting within a minute."
+					mascot="watch"
+				>
+					{#snippet action()}
+						<ClickSpark>
+							<Button variant="primary" href="/targets/new">Add a device</Button>
+						</ClickSpark>
+					{/snippet}
+				</EmptyState>
+			</div>
+		{/if}
 	{:else}
-		<div class="mt-3 sm:hidden">
-			<ClickSpark>
-				<Button variant="primary" href="/targets/new" class="w-full">Add a device</Button>
-			</ClickSpark>
-		</div>
+		{#if !showGuide}
+			<div class="mt-3 sm:hidden">
+				<ClickSpark>
+					<Button variant="primary" href="/targets/new" class="w-full">Add a device</Button>
+				</ClickSpark>
+			</div>
+		{/if}
 
 		<!-- Since you last looked -->
 		<section class="rise-in mt-8 min-w-0" style={`--rise-delay: ${STAGGER_MS}ms`}>

@@ -281,6 +281,7 @@ pub async fn settle(state: &AppState, mut job: Job, result: JobResult) {
                 } else {
                     debug!(target = target.id, agent = job.agent_id, error, "relayed probe failed");
                 }
+                crate::stats::stats().probe(&target.kind, error.is_some());
                 if let Err(error) = db::targets::record_probe(&state.pool, target.id, error).await {
                     warn!(target = target.id, ?error, "cannot record the relayed result");
                 }
@@ -290,6 +291,7 @@ pub async fn settle(state: &AppState, mut job: Job, result: JobResult) {
             if !job.discover {
                 let message = expired_message(&job);
                 debug!(target = target.id, agent = job.agent_id, %message, "relayed probe expired");
+                crate::stats::stats().probe(&target.kind, true);
                 if let Err(error) =
                     db::targets::record_probe(&state.pool, target.id, Some(&message)).await
                 {

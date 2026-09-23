@@ -7,13 +7,11 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use dumbmonit_proto::{AgentCommand, COMMAND_MAX_AGE_SECS, CommandReport, CommandStatus, TargetId};
+use dumbmonit_proto::{
+    AgentCommand, COMMAND_MAX_AGE_SECS, CommandReport, CommandStatus, TargetId, truncate_result,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
-
-/// Taille maximale conservée d'un compte rendu. Un journal de `docker pull`
-/// complet n'intéresse personne dans l'interface ; les dernières lignes, si.
-const MAX_RESULT_BYTES: usize = 4096;
 
 /// Une commande, telle qu'elle est en base.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -202,16 +200,6 @@ pub async fn last_command_at(
     Ok(row.and_then(|row| row.try_get::<String, _>("created_at").ok()).and_then(|t| parse_ts(&t)))
 }
 
-/// Cible rattachée à une clé d'agent.
-pub async fn target_for_key(pool: &SqlitePool, key: &str) -> Result<Option<TargetId>> {
-    let row = sqlx::query("SELECT target_id FROM agent_hosts WHERE agent_key = ?")
-        .bind(key)
-        .fetch_optional(pool)
-        .await
-        .context("looking up the agent key")?;
-    row.map(|row| row.try_get("target_id")).transpose().context("target id")
-}
-
 /// Compte rendu posé sur une commande que personne n'est venu chercher.
 pub const EXPIRED_RESULT: &str = "Expired: the agent did not pick it up within 10 minutes.";
 
@@ -290,17 +278,19 @@ pub async fn cancel(
     Ok(())
 }
 
-/// Commandes en attente pour l'agent qui se présente avec `key`.
+/// Commandes en attente pour une machine déjà authentifiée.
+///
+/// La cible, et non la clé d'identité : celle-ci voyage en clair dans l'URL et
+/// n'autorise rien par elle-même. C'est l'appelant qui a vérifié, avant
+/// d'arriver ici, que la machine qui parle est bien celle-là
+/// (`api::agent_commands::authenticate`).
 ///
 /// Les commandes trop anciennes expirent au passage : l'agent les refuserait de
 /// toute façon, autant que l'interface le dise tout de suite.
-pub async fn pending_for_key(
+pub async fn pending_for_target(
     pool: &SqlitePool,
-    key: &str,
-) -> Result<Option<(TargetId, Vec<AgentCommand>)>> {
-    let Some(target_id) = target_for_key(pool, key).await? else {
-        return Ok(None);
-    };
+    target_id: TargetId,
+) -> Result<Vec<AgentCommand>> {
     expire_stale(pool, Some(target_id)).await?;
 
     let rows = sqlx::query(
@@ -325,15 +315,22 @@ pub async fn pending_for_key(
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(Some((target_id, commands)))
+    Ok(commands)
 }
 
 /// Applique le compte rendu de l'agent. `false` si la commande n'appartient pas
 /// à la machine qui parle — un agent ne clôt jamais les commandes d'un autre.
-pub async fn report(pool: &SqlitePool, key: &str, id: i64, report: &CommandReport) -> Result<bool> {
-    let Some(target_id) = target_for_key(pool, key).await? else {
-        return Ok(false);
-    };
+///
+/// Le compte rendu est raccourci ici, et pas seulement chez l'agent : rien
+/// n'oblige un binaire installé sur une machine distante à respecter la borne
+/// qu'il s'impose, et un journal de plusieurs mégaoctets n'a rien à faire dans
+/// la base ni dans l'interface.
+pub async fn report(
+    pool: &SqlitePool,
+    target_id: TargetId,
+    id: i64,
+    report: &CommandReport,
+) -> Result<bool> {
     let row = sqlx::query("SELECT status FROM agent_commands WHERE id = ? AND target_id = ?")
         .bind(id)
         .bind(target_id)
@@ -501,18 +498,6 @@ pub fn parse_ts(text: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(text).ok().map(|t| t.with_timezone(&Utc))
 }
 
-/// Garde la fin du compte rendu, là où se trouve la conclusion.
-fn truncate_result(text: &str) -> String {
-    if text.len() <= MAX_RESULT_BYTES {
-        return text.to_string();
-    }
-    let mut start = text.len() - MAX_RESULT_BYTES;
-    while !text.is_char_boundary(start) {
-        start += 1;
-    }
-    format!("…{}", &text[start..])
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -534,7 +519,8 @@ mod tests {
         let cipher = crate::db::init_cipher(&pool, "secret-de-test-suffisamment-long")
             .await
             .expect("chiffrement");
-        let (token, _) = store::create_token(&pool, "parc").await.expect("jeton");
+        let (token, _) =
+            store::create_token(&pool, "parc", store::TokenPolicy::default()).await.expect("jeton");
         let identity = AgentIdentity {
             hostname: "nas".into(),
             os: "linux".into(),
@@ -547,9 +533,10 @@ mod tests {
             site: None,
             machine_id: Some(key.into()),
             tags: BTreeMap::new(),
+            binding_supported: true,
         };
         let registration =
-            store::register(&pool, &cipher, &identity, token.id).await.expect("machine");
+            store::register(&pool, &cipher, &identity, token.id, None).await.expect("machine");
         Bench { pool, target_id: registration.target_id, _dir: dir }
     }
 
@@ -567,25 +554,27 @@ mod tests {
         assert_eq!(record.status, CommandStatus::Queued);
         assert_eq!(record.requested_by.as_deref(), Some("ui"));
 
-        let (target, pending) =
-            pending_for_key(&bench.pool, "id-nas").await.expect("lecture").expect("clé connue");
-        assert_eq!(target, bench.target_id);
+        let pending = pending_for_target(&bench.pool, bench.target_id).await.expect("lecture");
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].id, record.id);
         assert_eq!(pending[0].arg_str("name"), Some("web"));
         assert!(pending[0].created_at_ms > 0, "l'horodatage de création doit être lisible");
 
         let running = CommandReport { status: CommandStatus::Running, result: String::new() };
-        assert!(report(&bench.pool, "id-nas", record.id, &running).await.expect("compte rendu"));
+        assert!(
+            report(&bench.pool, bench.target_id, record.id, &running).await.expect("compte rendu")
+        );
         let listed = list_for_target(&bench.pool, bench.target_id, 20).await.expect("liste");
         assert_eq!(listed[0].status, CommandStatus::Running);
         assert!(listed[0].started_at.is_some());
         // Une commande en cours n'est plus proposée à l'agent.
-        let (_, pending) = pending_for_key(&bench.pool, "id-nas").await.unwrap().unwrap();
+        let pending = pending_for_target(&bench.pool, bench.target_id).await.unwrap();
         assert!(pending.is_empty());
 
         let done = CommandReport { status: CommandStatus::Done, result: "restarted".into() };
-        assert!(report(&bench.pool, "id-nas", record.id, &done).await.expect("compte rendu"));
+        assert!(
+            report(&bench.pool, bench.target_id, record.id, &done).await.expect("compte rendu")
+        );
         let listed = list_for_target(&bench.pool, bench.target_id, 20).await.expect("liste");
         assert_eq!(listed[0].status, CommandStatus::Done);
         assert_eq!(listed[0].result.as_deref(), Some("restarted"));
@@ -593,7 +582,9 @@ mod tests {
 
         // Un compte rendu tardif ne rouvre pas la commande.
         let late = CommandReport { status: CommandStatus::Running, result: String::new() };
-        assert!(report(&bench.pool, "id-nas", record.id, &late).await.expect("compte rendu"));
+        assert!(
+            report(&bench.pool, bench.target_id, record.id, &late).await.expect("compte rendu")
+        );
         let listed = list_for_target(&bench.pool, bench.target_id, 20).await.expect("liste");
         assert_eq!(listed[0].status, CommandStatus::Done);
     }
@@ -637,7 +628,7 @@ mod tests {
                 .expect("file");
         age(&bench.pool, record.id, 11).await;
 
-        let (_, pending) = pending_for_key(&bench.pool, "id-nas").await.unwrap().unwrap();
+        let pending = pending_for_target(&bench.pool, bench.target_id).await.unwrap();
         assert!(pending.is_empty());
         let listed = list_for_target(&bench.pool, bench.target_id, 20).await.expect("liste");
         assert_eq!(listed[0].status, CommandStatus::Expired);
@@ -706,7 +697,7 @@ mod tests {
             !has_pending(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, "web").await.unwrap()
         );
         // Annulée, elle n'est plus proposée à l'agent, et ne s'annule pas deux fois.
-        let (_, pending) = pending_for_key(&bench.pool, "id-nas").await.unwrap().unwrap();
+        let pending = pending_for_target(&bench.pool, bench.target_id).await.unwrap();
         assert!(pending.is_empty());
         assert!(matches!(
             cancel(&bench.pool, bench.target_id, record.id, "admin").await,
@@ -720,7 +711,7 @@ mod tests {
                 .unwrap();
         let report_running =
             CommandReport { status: CommandStatus::Running, result: String::new() };
-        assert!(report(&bench.pool, "id-nas", running.id, &report_running).await.unwrap());
+        assert!(report(&bench.pool, bench.target_id, running.id, &report_running).await.unwrap());
         assert!(matches!(
             cancel(&bench.pool, bench.target_id, running.id, "admin").await,
             Err(CommandError::Conflict(_))
@@ -738,8 +729,10 @@ mod tests {
                 .await
                 .expect("file");
         let done = CommandReport { status: CommandStatus::Done, result: "x".into() };
-        assert!(!report(&bench.pool, "id-autre", record.id, &done).await.expect("compte rendu"));
-        assert!(pending_for_key(&bench.pool, "id-autre").await.unwrap().is_none());
+        // La cible d'une autre machine : la commande ne lui appartient pas.
+        let other = bench.target_id + 1;
+        assert!(!report(&bench.pool, other, record.id, &done).await.expect("compte rendu"));
+        assert!(pending_for_target(&bench.pool, other).await.unwrap().is_empty());
         let listed = list_for_target(&bench.pool, bench.target_id, 20).await.expect("liste");
         assert_eq!(listed[0].status, CommandStatus::Queued);
     }
@@ -788,12 +781,30 @@ mod tests {
         assert_eq!(latest.get("web").map(|c| c.requested_by.as_deref()), Some(Some("policy")));
     }
 
-    #[test]
-    fn a_long_result_keeps_its_tail() {
-        let text = format!("{}FIN", "x".repeat(MAX_RESULT_BYTES));
-        let kept = truncate_result(&text);
-        assert!(kept.ends_with("FIN"));
-        assert!(kept.starts_with('…'));
-        assert!(kept.len() <= MAX_RESULT_BYTES + '…'.len_utf8());
+    #[tokio::test]
+    async fn an_oversized_report_is_cut_down_by_the_server_and_says_so() {
+        // L'agent borne ce qu'il envoie, mais rien ne garantit que le binaire
+        // installé sur la machine distante soit celui qu'on croit.
+        let bench = bench("id-nas").await;
+        let record =
+            enqueue(&bench.pool, bench.target_id, CMD_CONTAINER_RESTART, &restart("web"), "ui")
+                .await
+                .expect("file");
+        let huge = format!("{}the last line explains", "x".repeat(200_000));
+        let done = CommandReport { status: CommandStatus::Done, result: huge };
+        assert!(report(&bench.pool, bench.target_id, record.id, &done).await.unwrap());
+
+        let listed = list_for_target(&bench.pool, bench.target_id, 20).await.expect("liste");
+        let stored = listed[0].result.as_deref().expect("compte rendu");
+        assert!(
+            stored.len()
+                <= dumbmonit_proto::COMMAND_RESULT_MAX_BYTES
+                    + dumbmonit_proto::COMMAND_RESULT_TRUNCATED.len()
+        );
+        assert!(
+            stored.starts_with(dumbmonit_proto::COMMAND_RESULT_TRUNCATED),
+            "la coupe doit être annoncée dans le compte rendu : {stored}"
+        );
+        assert!(stored.ends_with("the last line explains"));
     }
 }

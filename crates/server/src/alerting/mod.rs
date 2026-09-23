@@ -19,7 +19,8 @@
 //!    escaladé ([`group`]) ;
 //! 6. la politique de notification ([`notify_policy`]) décide, canal par canal,
 //!    de ce qui part tout de suite, attend (regroupement, heures calmes, plafond
-//!    horaire) ou se tait (battement, filtre de sévérité, délai minimal), puis
+//!    horaire) ou se tait (battement, filtre de sévérité, filtre par étiquettes
+//!    ([`matcher`]), délai minimal), puis
 //!    le tout est mis en forme et envoyé ([`crate::notify`]).
 //!
 //! L'hystérésis et les surcharges par équipement ([`overrides`]) interviennent à
@@ -34,6 +35,7 @@ pub mod cycle;
 pub mod engine;
 pub mod group;
 pub mod machine;
+pub mod matcher;
 pub mod model;
 pub mod notify_policy;
 pub mod overrides;
@@ -45,5 +47,6 @@ pub mod suppress;
 pub use engine::{AlertingConfig, EvalReport, evaluate_once, spawn};
 pub use group::{AlertGroup, AlertOutcome, NotifyReason};
 pub use machine::{AlertState, EffectivePhase, Phase};
+pub use matcher::{ChannelMatcher, Condition, MatchContext};
 pub use model::{Operator, Rule, RuleKind, Severity, TargetSelector};
 pub use silence::{Schedule, Silence};

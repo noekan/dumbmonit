@@ -11,8 +11,10 @@ out of the box.
 ```
 evaluate (hysteresis, per-device overrides)
   → deduplicate → suppress by dependency → silence → group by device
-    → flap hold → channel severity filter → resolved on/off → cooldown
-      → quiet hours → batch window → hourly cap → send (+ deep link)
+    → flap hold → channel severity filter → channel routing filter
+      → resolved on/off → cooldown → quiet hours → batch window
+        → hourly cap → send (+ deep link)
+                                   ↘ nobody acknowledged → escalation channel
 ```
 
 | Stage | Where it is set | Default |
@@ -24,6 +26,8 @@ evaluate (hysteresis, per-device overrides)
 | Tell me when it clears | Channel → Delivery options | on |
 | Minimum interval per alert | Channel → Delivery options | none |
 | Quiet hours | Channel → Delivery options | off |
+| Routing filter (tags, kind, rule) | Channel → Delivery options → *Only some alerts* | off (the channel hears everything) |
+| Escalation if nobody acknowledges | Alerts → Notifications → Notification policy | off |
 | Batch window | Alerts → Notifications → Notification policy | 60 s |
 | Messages per channel per hour | Alerts → Notifications → Notification policy | 20 |
 | Public URL (deep links) | Alerts → Notifications → Notification policy, or `DUMBMONIT_PUBLIC_URL` | empty |
@@ -77,6 +81,8 @@ Each channel decides what it hears (`policy` in the channel payload):
   the rest waits and arrives as one digest when they end, titled "Quiet hours
   over — …". An alert that fires and clears during quiet hours is only
   mentioned in that digest as "resolved during quiet hours".
+- `matcher` — which alerts the channel wants, by tag, device kind or rule.
+  Empty (the default, and what every existing channel keeps) means everything.
 
 ```
 PUT /api/notify/channels/{id}
@@ -84,11 +90,94 @@ PUT /api/notify/channels/{id}
   "policy": { "min_severity": "critical", "min_interval_secs": 900,
               "quiet_hours": { "kind": "weekly", "days": [0,1,2,3,4],
                                "start_minute": 1320, "end_minute": 420,
-                               "utc_offset_minutes": 120 } } }
+                               "timezone": "Europe/Paris" } } }
 ```
 
 Omitting `policy` on an update keeps the stored one; `"quiet_hours": null`
-clears them.
+clears them, and `"matcher": null` clears the routing filter.
+
+## Routing by tag
+
+Devices carry tags (`site=cellar`, `role=storage`) and a kind (`snmp`,
+`proxmox`, `synology`, `agent`…). A channel's **routing filter** says which
+alerts it wants:
+
+```json
+{ "policy": { "min_severity": "warning",
+              "matcher": {
+                "include": [ { "field": "tag", "key": "site", "value": "cellar" } ],
+                "exclude": [ { "field": "tag", "key": "role", "value": "lab" } ] } } }
+```
+
+Three fields, and exact equality only — no regular expressions, no brackets:
+
+| `field` | Matches on | Example |
+|---|---|---|
+| `tag` | A tag of the device's own page | `{"field":"tag","key":"site","value":"cellar"}` |
+| `kind` | The collector that polls the device | `{"field":"kind","value":"proxmox"}` |
+| `rule` | The rule's `uid` | `{"field":"rule","value":"disk_full"}` |
+
+How the lists read:
+
+- conditions on the **same** field (the same tag key, or `kind`, or `rule`)
+  are a **OR** — `site=cellar` plus `site=attic` means either;
+- conditions on **different** fields are an **AND** — `site=cellar` plus
+  `role=storage` means both;
+- **`exclude` always wins**, even over an `include` that matched.
+
+So the example above reads, and the UI says it back in exactly these words:
+*this channel receives advisories and above from devices tagged site=cellar,
+except devices tagged role=lab*.
+
+Under the editor, a **preview** lists which of your current devices the filter
+selects. It is not an approximation: the server runs the very filter the
+alerting engine runs, reduced to the part that depends on the device alone.
+Rule conditions apply to alerts rather than devices, so the preview names them
+separately instead of pretending to count them.
+
+```
+POST /api/notify/match-preview
+{ "matcher": { "include": [ { "field": "tag", "key": "site", "value": "cellar" } ] } }
+
+→ { "devices": [ { "id": 3, "name": "nas", "kind": "synology",
+                   "tags": { "site": "cellar" }, "matched": true } ],
+    "matched": 1, "total": 12, "rules": [], "excluded_rules": [] }
+```
+
+A filter is limited to twelve conditions. Past that, a second channel is
+clearer than one more condition.
+
+## Escalation: if nobody acknowledges
+
+One extra hop, and only one. When the policy sets `escalate_after_secs` and
+`escalate_channel`, an alert that nobody has [acknowledged](../using/alerts.md)
+within that delay is also sent — once — to that channel:
+
+```
+PUT /api/notify/policy
+{ "escalate_after_secs": 900, "escalate_channel": 4 }
+```
+
+- The delay is counted **from the moment the first message actually went out**,
+  not from the alert firing. If quiet hours or a failed delivery swallowed the
+  first notification, there is nothing to escalate yet and the hop waits.
+- **Acknowledging the alert stops it**, exactly as it stops reminders; so does
+  the alert clearing.
+- The escalation message goes to the escalation channel **only** — the channels
+  that already heard the firing are not told twice.
+- It crosses that channel's own severity floor, routing filter and quiet hours:
+  you named this channel to be woken up, so it is not held back at the one
+  moment it matters.
+- The line says so: `🔴 Critical · Disk full — /data — 95 % … — still
+  unacknowledged`.
+
+`"escalate_channel": null` switches escalation off; a delay of `0` does the
+same. Both are needed for the hop to exist, and the server refuses a channel
+that does not exist rather than escalating into the void.
+
+DumbMonit deliberately stops here: one hop, no rotation, no schedule of who is
+on duty this week. If you need that, point the escalation channel at PagerDuty
+or Opsgenie, which do it properly.
 
 ## Batching and the hourly cap
 
@@ -97,7 +186,8 @@ clears them.
 ```json
 { "batch_window_secs": 60, "max_per_hour": 20,
   "flap_events": 4, "flap_window_secs": 1800, "flap_hold_secs": 1800,
-  "public_url": "https://monit.example.lan" }
+  "public_url": "https://monit.example.lan",
+  "escalate_after_secs": 0, "escalate_channel": null }
 ```
 
 - **Batch window** — alerts that fire within the window leave as *one*
@@ -153,5 +243,7 @@ notification cooldown, a grouping window, an hourly rate limit, quiet hours,
 flap detection with a cooldown, "notify on resolve", and on-call tools kept
 out of digests. Not adopted: Pulse's 24-hour observation period before
 notifying (DumbMonit's baseline rule already learns silently; threshold rules
-should speak from day one), tag-based routing per destination (rules already
-pick their channels), and snooze/acknowledge from the message (see above).
+should speak from day one) and snooze/acknowledge from the message (see above).
+Tag-based routing per destination *was* adopted, as the routing filter above —
+picking channels on the rule turned out to be the wrong place for "everything
+in the cellar goes to this room".

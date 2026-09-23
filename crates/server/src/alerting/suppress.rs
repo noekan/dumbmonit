@@ -142,6 +142,7 @@ mod tests {
             id,
             name: format!("device-{id}"),
             address: format!("10.0.0.{id}"),
+            kind: "snmp".to_string(),
             parent_id: parent,
             via_agent: None,
             tags: BTreeMap::new(),

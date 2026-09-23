@@ -70,6 +70,7 @@ nav:
       - Docker: install/docker.md
       - Add your first device: install/first-device.md
       - Monitor a remote site: install/remote-site.md
+      - Backup and restore: install/backup.md
   - Devices:
       - Overview: devices/index.md
       - SNMP: devices/snmp.md

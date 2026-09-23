@@ -215,6 +215,7 @@ impl TestApp {
             channels: Vec::new(),
             repeat_interval: None,
             escalate_after: None,
+            unacked_after: None,
             just_transitioned: false,
         }
     }
@@ -442,6 +443,7 @@ async fn the_active_alerts_route_exposes_the_effective_phase() {
         channels: Vec::new(),
         repeat_interval: None,
         escalate_after: None,
+        unacked_after: None,
         just_transitioned: true,
     };
     db::alerts::save_states(&app.pool, &[outcome]).await.expect("state saved");

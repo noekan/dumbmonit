@@ -26,6 +26,11 @@ pub enum NotifyReason {
     Reminder,
     /// La sévérité est relevée d'un cran, l'alerte s'éternisant.
     Escalation,
+    /// Personne n'a acquitté au bout du délai d'escalade : l'alerte part aussi
+    /// sur le canal d'escalade de la politique, et seulement sur lui. Un seul
+    /// relais, jamais deux : au-delà, ce n'est plus une notification, c'est une
+    /// astreinte, et ce n'est pas ce que fait ce produit.
+    Unacked,
     /// L'empreinte bat (déclenche et se résout en boucle) : un seul avis part,
     /// puis plus rien pendant la durée de retenue. Produit par la politique de
     /// notification, jamais par [`decide`].
@@ -39,6 +44,7 @@ impl NotifyReason {
             Self::Resolved => "resolved",
             Self::Reminder => "reminder",
             Self::Escalation => "escalation",
+            Self::Unacked => "unacked",
             Self::Flapping => "flapping",
         }
     }
@@ -49,6 +55,7 @@ impl NotifyReason {
             "resolved" => Some(Self::Resolved),
             "reminder" => Some(Self::Reminder),
             "escalation" => Some(Self::Escalation),
+            "unacked" => Some(Self::Unacked),
             "flapping" => Some(Self::Flapping),
             _ => None,
         }
@@ -83,6 +90,11 @@ pub struct AlertOutcome {
     pub channels: Vec<i64>,
     pub repeat_interval: Option<Duration>,
     pub escalate_after: Option<Duration>,
+    /// Délai après lequel une alerte que personne n'a acquittée part aussi sur
+    /// le canal d'escalade. Vient de la politique globale, pas de la règle :
+    /// c'est un réglage d'instance (« si personne ne répond en un quart
+    /// d'heure, réveille-moi »), pas une propriété de la condition mesurée.
+    pub unacked_after: Option<Duration>,
     /// Vrai quand la transition vient d'être franchie à ce cycle.
     pub just_transitioned: bool,
 }
@@ -104,6 +116,18 @@ impl AlertOutcome {
     /// Instant auquel l'escalade prend effet, si la règle en prévoit une.
     fn escalated_at(&self) -> Option<DateTime<Utc>> {
         let after = TimeDelta::from_std(self.escalate_after?).ok()?;
+        Some(self.state.firing_since? + after)
+    }
+
+    /// Instant auquel le relais vers le canal d'escalade devient dû.
+    ///
+    /// Compté depuis le déclenchement, comme l'escalade de sévérité : c'est la
+    /// même horloge, et la seule que l'utilisateur voit dans l'interface
+    /// (« déclenchée il y a 20 min »). Le délai réel avant que le canal
+    /// d'escalade reçoive quoi que ce soit est repoussé par la politique tant
+    /// que la première annonce n'est pas effectivement partie.
+    fn unacked_at(&self) -> Option<DateTime<Utc>> {
+        let after = TimeDelta::from_std(self.unacked_after?).ok()?;
         Some(self.state.firing_since? + after)
     }
 }
@@ -143,6 +167,15 @@ pub fn decide(outcome: &AlertOutcome, now: DateTime<Utc>) -> Option<NotifyReason
                 return Some(NotifyReason::Escalation);
             }
 
+            // Relais vers le canal d'escalade : même lecture des horodatages,
+            // donc même garantie qu'il ne part qu'une fois.
+            if let Some(unacked_at) = outcome.unacked_at()
+                && last < unacked_at
+                && now >= unacked_at
+            {
+                return Some(NotifyReason::Unacked);
+            }
+
             let repeat = TimeDelta::from_std(outcome.repeat_interval?).ok()?;
             (now.signed_duration_since(last) >= repeat).then_some(NotifyReason::Reminder)
         }
@@ -165,6 +198,10 @@ pub fn decide(outcome: &AlertOutcome, now: DateTime<Utc>) -> Option<NotifyReason
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GroupItem {
     pub fingerprint: String,
+    /// `uid` de la règle, que le filtre par étiquettes d'un canal peut viser.
+    /// Par défaut vide : les lignes déjà en file avant cette version se relisent.
+    #[serde(default)]
+    pub rule_uid: String,
     pub rule_name: String,
     pub severity: Severity,
     pub reason: NotifyReason,
@@ -187,6 +224,11 @@ pub struct GroupItem {
 pub struct AlertGroup {
     pub target_id: Option<TargetId>,
     pub target_name: String,
+    /// Collecteur de l'équipement et étiquettes de sa fiche, renseignés par le
+    /// cycle après le regroupement : c'est ce que lit le filtre d'un canal.
+    /// Vides pour le groupe des séries sans équipement identifié.
+    pub target_kind: String,
+    pub target_tags: BTreeMap<String, String>,
     /// Sévérité la plus élevée du groupe : c'est elle qui donne le ton du message.
     pub severity: Severity,
     pub items: Vec<GroupItem>,
@@ -229,6 +271,7 @@ pub fn group(outcomes: &[AlertOutcome], now: DateTime<Utc>) -> Vec<AlertGroup> {
         let severity = outcome.effective_severity(now);
         let item = GroupItem {
             fingerprint: outcome.fingerprint.clone(),
+            rule_uid: outcome.rule_uid.clone(),
             rule_name: outcome.rule_name.clone(),
             severity,
             reason,
@@ -246,6 +289,8 @@ pub fn group(outcomes: &[AlertOutcome], now: DateTime<Utc>) -> Vec<AlertGroup> {
         let group = groups.entry(outcome.target_id).or_insert_with(|| AlertGroup {
             target_id: outcome.target_id,
             target_name: outcome.target_name.clone(),
+            target_kind: String::new(),
+            target_tags: BTreeMap::new(),
             severity: Severity::Info,
             items: Vec::new(),
             channels: Vec::new(),
@@ -311,6 +356,7 @@ mod tests {
             channels: vec![1],
             repeat_interval: Some(Duration::from_secs(3600)),
             escalate_after: None,
+            unacked_after: None,
             just_transitioned: true,
         }
     }
@@ -507,6 +553,90 @@ mod tests {
         // Les canaux étaient en panne : rien n'a été consigné, on réessaie.
         assert_eq!(decide(&o, at(90)), Some(NotifyReason::Resolved));
         assert_eq!(decide(&o, at(600)), Some(NotifyReason::Resolved));
+    }
+
+    // ----------------------------------------------------------------------
+    // Relais vers le canal d'escalade
+    // ----------------------------------------------------------------------
+
+    #[test]
+    fn un_relais_part_une_seule_fois_apres_le_delai() {
+        let mut o = outcome("a", 1, "nas");
+        o.state.notify_count = 1;
+        o.state.last_notified_at = Some(at(0));
+        o.repeat_interval = None;
+        o.unacked_after = Some(Duration::from_secs(900));
+
+        assert_eq!(decide(&o, at(899)), None, "before the time, nothing");
+        assert_eq!(decide(&o, at(900)), Some(NotifyReason::Unacked));
+        // Une fois parti, il ne se répète pas : un seul relais, jamais deux.
+        o.state.last_notified_at = Some(at(900));
+        assert_eq!(decide(&o, at(5_400)), None);
+    }
+
+    #[test]
+    fn un_relais_ne_part_pas_si_l_alerte_est_acquittee() {
+        let mut o = outcome("a", 1, "nas");
+        o.state.notify_count = 1;
+        o.state.last_notified_at = Some(at(0));
+        o.repeat_interval = None;
+        o.unacked_after = Some(Duration::from_secs(900));
+        o.state.acked_until = Some(at(14_400));
+        o.state.acked_by = Some("admin".to_string());
+
+        assert_eq!(decide(&o, at(900)), None, "someone is on it");
+        assert_eq!(decide(&o, at(10_000)), None, "still acked");
+    }
+
+    #[test]
+    fn un_relais_ne_part_pas_si_l_alerte_est_resolue() {
+        let mut o = outcome("a", 1, "nas");
+        o.state.notify_count = 1;
+        o.state.last_notified_at = Some(at(0));
+        o.repeat_interval = None;
+        o.unacked_after = Some(Duration::from_secs(900));
+        o.state.phase = Phase::Resolved;
+        o.state.resolved_at = Some(at(60));
+
+        assert_eq!(
+            decide(&o, at(900)),
+            Some(NotifyReason::Resolved),
+            "the resolution, not a relay"
+        );
+        o.state.last_notified_at = Some(at(900));
+        assert_eq!(decide(&o, at(1_800)), None);
+    }
+
+    #[test]
+    fn un_relais_se_tait_aussi_pendant_une_maintenance() {
+        let mut o = outcome("a", 1, "nas");
+        o.state.notify_count = 1;
+        o.state.last_notified_at = Some(at(0));
+        o.repeat_interval = None;
+        o.unacked_after = Some(Duration::from_secs(900));
+        o.state.silenced = true;
+        assert_eq!(decide(&o, at(900)), None);
+    }
+
+    #[test]
+    fn l_escalade_de_severite_prime_sur_le_relais() {
+        // Les deux sont dus au même cycle : la sévérité monte d'abord, et le
+        // relais suivra au cycle d'après si personne n'a acquitté entre-temps.
+        let mut o = outcome("a", 1, "nas");
+        o.state.notify_count = 1;
+        o.state.last_notified_at = Some(at(0));
+        o.repeat_interval = None;
+        o.escalate_after = Some(Duration::from_secs(900));
+        o.unacked_after = Some(Duration::from_secs(900));
+        assert_eq!(decide(&o, at(900)), Some(NotifyReason::Escalation));
+    }
+
+    #[test]
+    fn un_relais_porte_l_identifiant_de_sa_regle() {
+        // Le filtre par étiquettes d'un canal vise des règles par `uid` : la
+        // ligne doit le porter jusqu'à la politique de notification.
+        let groups = group(&[outcome("a", 1, "nas")], at(0));
+        assert_eq!(groups[0].items[0].rule_uid, "cpu_high");
     }
 
     #[test]

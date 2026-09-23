@@ -20,6 +20,7 @@
 	import AgentsSection from '$lib/components/settings/AgentsSection.svelte';
 	import AssistantSection from '$lib/components/settings/AssistantSection.svelte';
 	import AppearanceSection from '$lib/components/settings/AppearanceSection.svelte';
+	import BackupSection from '$lib/components/settings/BackupSection.svelte';
 	import AboutSection from '$lib/components/settings/AboutSection.svelte';
 
 	/** Sections that used to live here, and where they went. */
@@ -46,6 +47,7 @@
 			: []),
 		{ id: 'agents', label: 'Agents' },
 		{ id: 'assistant', label: 'API & assistants' },
+		{ id: 'backup', label: 'Backup' },
 		{ id: 'appearance', label: 'Appearance' },
 		{ id: 'about', label: 'About' }
 	]);
@@ -164,7 +166,8 @@
 		{/if}
 		<div class="min-w-0 rise-in" style="--rise-delay: 120ms"><AgentsSection /></div>
 		<div class="min-w-0 rise-in" style="--rise-delay: 160ms"><AssistantSection /></div>
-		<div class="min-w-0 rise-in" style="--rise-delay: 200ms"><AppearanceSection /></div>
-		<div class="min-w-0 rise-in" style="--rise-delay: 240ms"><AboutSection /></div>
+		<div class="min-w-0 rise-in" style="--rise-delay: 200ms"><BackupSection /></div>
+		<div class="min-w-0 rise-in" style="--rise-delay: 240ms"><AppearanceSection /></div>
+		<div class="min-w-0 rise-in" style="--rise-delay: 280ms"><AboutSection /></div>
 	</div>
 </div>

@@ -27,7 +27,9 @@ use crate::collect::docker::{DockerClient, DockerResponse};
 
 /// Taille maximale du compte rendu envoyé au serveur. Le journal complet reste
 /// dans les traces de l'agent ; l'interface n'a besoin que de la fin.
-pub const RESULT_MAX_BYTES: usize = 4096;
+///
+/// Partagée avec le serveur, qui applique la même borne à ce qu'il reçoit.
+pub use dumbmonit_proto::COMMAND_RESULT_MAX_BYTES as RESULT_MAX_BYTES;
 
 /// Conteneurs que le serveur ne peut pas toucher : ceux de la supervision
 /// elle-même. Un « redémarre-toi » venu de l'interface finirait en boucle.
@@ -95,6 +97,12 @@ impl Action {
 ///
 /// La règle est stricte parce que le nom finit dans le chemin d'une requête au
 /// démon : un `../` ou un `?` y changerait le sens de l'appel.
+///
+/// Ce contrôle-ci ne suffit pas, et ne peut pas suffire : un conteneur se
+/// désigne aussi par son identifiant, douze caractères hexadécimaux qu'aucune
+/// règle sur les noms ne distinguera jamais d'un nom légitime. C'est
+/// [`refuse_reserved`], après inspection, qui rattrape ce cas — sur le nom que
+/// le démon rend, et non sur celui qu'on lui a donné.
 pub fn validate_name(name: &str) -> Result<()> {
     let mut chars = name.chars();
     let valid_first = chars.next().is_some_and(|c| c.is_ascii_alphanumeric());
@@ -102,9 +110,65 @@ pub fn validate_name(name: &str) -> Result<()> {
     if !valid_first || !valid_rest || name.len() > 128 {
         bail!("invalid container name '{name}'");
     }
-    let lower = name.to_ascii_lowercase();
-    if RESERVED_PREFIXES.iter().any(|prefix| lower.starts_with(prefix)) {
+    refuse_reserved(name)
+}
+
+/// Vrai si ce nom est celui d'un conteneur de la supervision.
+fn is_reserved(name: &str) -> bool {
+    let lower = name.trim_start_matches('/').to_ascii_lowercase();
+    RESERVED_PREFIXES.iter().any(|prefix| lower.starts_with(prefix))
+}
+
+fn refuse_reserved(name: &str) -> Result<()> {
+    if is_reserved(name) {
         bail!("'{name}' belongs to the monitoring stack and cannot be managed remotely");
+    }
+    Ok(())
+}
+
+/// Identifiant du conteneur dans lequel l'agent tourne, s'il en a un.
+///
+/// Lu dans le cgroup du processus : c'est la seule façon, depuis l'intérieur, de
+/// savoir quel conteneur on est. Sans cela, un agent lancé dans un conteneur
+/// nommé autrement que `dumbmonit-*` pourrait se voir demander de se remplacer
+/// lui-même — et disparaîtrait au milieu du travail, sans rien pouvoir en dire.
+#[cfg(target_os = "linux")]
+fn self_container_id() -> Option<String> {
+    let content = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    content.lines().find_map(|line| {
+        let path = line.rsplit(':').next()?;
+        // `/docker/<id>`, `/kubepods/.../<id>`, `…/docker-<id>.scope` selon le
+        // pilote de cgroups : dans tous les cas, l'identifiant est le dernier
+        // segment, éventuellement décoré.
+        let last = path.rsplit('/').next()?;
+        let id = last.trim_end_matches(".scope").rsplit('-').next()?;
+        (id.len() == 64 && id.chars().all(|c| c.is_ascii_hexdigit())).then(|| id.to_string())
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn self_container_id() -> Option<String> {
+    None
+}
+
+/// Refuse un conteneur de la supervision d'après ce que le démon en dit.
+///
+/// Appelé après inspection, donc quel que soit le moyen par lequel il a été
+/// désigné — nom, identifiant court, identifiant complet. L'agent ne fait pas
+/// confiance au serveur sur ce point : un serveur détourné ne doit pas pouvoir
+/// redémarrer la supervision elle-même, ni l'agent qui exécuterait l'ordre.
+fn refuse_reserved_container(inspected: &Value, asked: &str) -> Result<()> {
+    let name = inspected["Name"].as_str().unwrap_or_default();
+    if is_reserved(name) {
+        bail!(
+            "'{asked}' is the monitoring container {} and cannot be managed remotely",
+            name.trim_start_matches('/')
+        );
+    }
+    if let (Some(id), Some(mine)) = (inspected["Id"].as_str(), self_container_id())
+        && id == mine
+    {
+        bail!("'{asked}' is this agent's own container: it cannot restart or replace itself");
     }
     Ok(())
 }
@@ -544,12 +608,19 @@ async fn wait_until_healthy(docker: &DockerClient, id: &str, log: &mut Log) -> R
     }
 }
 
+/// Inspecte un conteneur, et refuse d'en rendre un de la supervision.
+///
+/// Le contrôle est ici, et pas seulement dans [`validate_name`], parce que
+/// c'est ici qu'on connaît enfin le vrai nom : toutes les actions passent par
+/// une inspection avant de toucher à quoi que ce soit.
 async fn inspect(docker: &DockerClient, name: &str) -> Result<Value> {
     let response = docker.get(&format!("/containers/{name}/json")).await?;
     if response.status == 404 {
         bail!("no container named {name}");
     }
-    response.json("container inspection")
+    let inspected: Value = response.json("container inspection")?;
+    refuse_reserved_container(&inspected, name)?;
+    Ok(inspected)
 }
 
 async fn inspect_image(docker: &DockerClient, reference: &str) -> Result<Value> {
@@ -798,6 +869,9 @@ mod tests {
     fn the_monitoring_stack_cannot_be_managed_remotely() {
         assert!(validate_name("dumbmonit-dumbmonit-1").is_err());
         assert!(validate_name("ezymonit-ezymonit-1").is_err());
+        // Un identifiant de conteneur passe ce contrôle-ci : rien dans sa forme
+        // ne le distingue d'un nom. C'est l'inspection qui le rattrape.
+        assert!(validate_name("9f4c1b2e3d5a").is_ok());
         assert!(validate_name("DumbMonit").is_err());
         assert!(validate_name("vaultwarden").is_ok());
     }
@@ -989,7 +1063,8 @@ mod tests {
     }
 
     fn client() -> PushClient {
-        PushClient::new("http://127.0.0.1:1", "dmon_test", Duration::from_secs(1)).expect("client")
+        PushClient::new("http://127.0.0.1:1", "dmon_test", None, Duration::from_secs(1))
+            .expect("client")
     }
 
     #[tokio::test]
@@ -1032,5 +1107,44 @@ mod tests {
         let mut log = Log::default();
         restart(&docker, "nginx-victim", &mut log).await.expect("restart");
         assert!(log.excerpt().contains("running (no healthcheck)"));
+    }
+
+    #[test]
+    fn the_monitoring_container_is_refused_even_when_named_by_its_id() {
+        // Le trou : `validate_name` ne peut pas refuser « 9f4c… », qui est un
+        // nom parfaitement valide. Seule l'inspection dit ce que c'est.
+        let inspected = json!({
+            "Id": "9f4c1b2e3d5a6f7081920a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f",
+            "Name": "/dumbmonit-dumbmonit-1"
+        });
+        let error = refuse_reserved_container(&inspected, "9f4c1b2e3d5a").unwrap_err().to_string();
+        assert!(error.contains("monitoring container"), "message inattendu : {error}");
+
+        // Sous son nom d'avant le renommage du produit, tout autant.
+        let legacy = json!({ "Id": "abc", "Name": "/EzyMonit" });
+        assert!(refuse_reserved_container(&legacy, "abc").is_err());
+
+        // Un conteneur ordinaire passe, désigné par son nom comme par son id.
+        let ordinary = json!({ "Id": "1234", "Name": "/nginx" });
+        assert!(refuse_reserved_container(&ordinary, "nginx").is_ok());
+        assert!(refuse_reserved_container(&ordinary, "1234").is_ok());
+        // Un conteneur sans nom lisible ne bloque pas l'action pour autant.
+        assert!(refuse_reserved_container(&json!({ "Id": "1234" }), "1234").is_ok());
+    }
+
+    #[test]
+    fn a_container_id_read_from_a_cgroup_line_is_recognised() {
+        // Les trois formes rencontrées selon le pilote de cgroups.
+        let id = "9f4c1b2e3d5a6f7081920a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f";
+        for line in [
+            format!("12:pids:/docker/{id}"),
+            format!("0::/system.slice/docker-{id}.scope"),
+            format!("1:name=systemd:/kubepods/besteffort/pod123/{id}"),
+        ] {
+            let path = line.rsplit(':').next().unwrap();
+            let last = path.rsplit('/').next().unwrap();
+            let found = last.trim_end_matches(".scope").rsplit('-').next().unwrap();
+            assert_eq!(found, id, "ligne non reconnue : {line}");
+        }
     }
 }

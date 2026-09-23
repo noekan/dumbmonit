@@ -57,7 +57,7 @@ How the state is decided:
 | Operational | The last probe succeeded (uptime probes), or the device reported within three polling periods. |
 | Degraded | Up now, but at least one probe failed within the last hour. |
 | Down | The last probe failed, the device stopped reporting, or its configuration is in error. |
-| Maintenance | A maintenance window is in progress and the service is down: expected, not an outage. |
+| Maintenance | A maintenance window is in progress and the service is down: expected, not an outage. Either an announcement on this page, or an alerting [maintenance window](../alerting/maintenance.md) covering that device. |
 | No data | Never probed yet, or disabled. |
 
 Uptime for probes (`http`, `tcp`, `dns`, `ping`, `tls`) is the share of
@@ -80,6 +80,13 @@ On the **Status** page, under the list of pages, **Incidents and maintenance**
 - A **maintenance** window has a start and an end and moves through *Scheduled
   → In progress → Completed*. While it is in progress the banner says
   "Scheduled maintenance" and services that are down show as *Maintenance*.
+
+A [maintenance window scheduled in Alerts](../alerting/maintenance.md) does the
+same thing for the one device it covers, without an announcement: that service
+reads *Maintenance* instead of red while the window is open, and the page's
+overall state says *Maintenance* when nothing else is down or degraded. Only
+windows that name a device surface this way; the window's name and comment stay
+private.
 
 An announcement is shown on one page or on **all pages**.
 

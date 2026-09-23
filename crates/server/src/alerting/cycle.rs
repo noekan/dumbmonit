@@ -101,6 +101,10 @@ pub struct CycleInput {
     pub silences: Vec<Silence>,
     /// Surcharges par équipement (seuil, seuil de retour, désactivation).
     pub overrides: Vec<RuleOverride>,
+    /// Délai d'escalade de la politique globale : au bout de ce temps sans
+    /// acquittement, l'alerte part aussi sur le canal d'escalade. `None` quand
+    /// l'instance n'en a pas configuré, et c'est le cas par défaut.
+    pub unacked_after: Option<std::time::Duration>,
 }
 
 /// Une transition à journaliser.
@@ -503,11 +507,22 @@ pub fn plan_cycle(input: CycleInput, baselines: &mut BaselineStore) -> CycleOutc
             channels: rule.channels.clone(),
             repeat_interval: rule.repeat_interval,
             escalate_after: rule.escalate_after,
+            unacked_after: input.unacked_after,
             just_transitioned: entry.transition.is_some(),
         });
     }
 
-    let groups = group::group(&alerts, now);
+    let mut groups = group::group(&alerts, now);
+    // Le filtre d'un canal raisonne sur la fiche de l'équipement (son
+    // collecteur, ses étiquettes), pas sur les étiquettes de la série : ce sont
+    // celles-là que l'utilisateur a saisies, et elles restent justes même quand
+    // la série n'en porte aucune.
+    for group in &mut groups {
+        if let Some(node) = group.target_id.and_then(|id| index.by_id.get(&id)) {
+            group.target_kind = node.kind.clone();
+            group.target_tags = node.tags.clone();
+        }
+    }
     CycleOutcome { alerts, groups, history, carried_over }
 }
 
@@ -649,6 +664,7 @@ mod tests {
             id,
             name: format!("device-{id}"),
             address: format!("10.0.0.{id}"),
+            kind: "snmp".to_string(),
             parent_id: parent,
             via_agent: None,
             tags: BTreeMap::new(),
@@ -701,6 +717,7 @@ mod tests {
             targets,
             previous,
             silences: Vec::new(),
+            unacked_after: None,
             overrides: Vec::new(),
         }
     }
@@ -953,6 +970,51 @@ mod tests {
         let relay = outcome.alerts.iter().find(|a| a.target_id == Some(9)).expect("relay");
         assert_eq!(relay.state.phase, Phase::Ok);
         assert!(!relay.state.suppressed);
+    }
+
+    #[test]
+    fn le_delai_d_escalade_de_la_politique_atteint_le_groupe() {
+        // Règle sans rappel : sans escalade, l'alerte ne parlerait qu'une fois.
+        let cpu = rule("cpu_high", RuleKind::Threshold, 90.0, 0);
+        let mut baselines = BaselineStore::default();
+
+        let mut first = input(
+            at(0),
+            vec![RuleObservations { rule: cpu.clone(), series: Some(vec![point(1, 95.0)]) }],
+            vec![node(1, None)],
+            Vec::new(),
+        );
+        first.unacked_after = Some(std::time::Duration::from_secs(900));
+        let outcome = plan_cycle(first, &mut baselines);
+        assert_eq!(outcome.groups[0].items[0].reason, NotifyReason::Firing);
+        // Le groupe porte aussi la fiche de l'équipement, dont vit le filtre de
+        // routage d'un canal.
+        assert_eq!(outcome.groups[0].target_kind, "snmp");
+        let mut stored = to_stored(&outcome);
+        mark_notified(&mut stored, &outcome, at(0));
+
+        // Un quart d'heure plus tard, toujours personne : le relais est dû.
+        let mut later = input(
+            at(900),
+            vec![RuleObservations { rule: cpu.clone(), series: Some(vec![point(1, 95.0)]) }],
+            vec![node(1, None)],
+            stored.clone(),
+        );
+        later.unacked_after = Some(std::time::Duration::from_secs(900));
+        let outcome = plan_cycle(later, &mut baselines);
+        assert_eq!(outcome.groups[0].items[0].reason, NotifyReason::Unacked);
+
+        // La même minute, mais acquittée : rien ne part.
+        stored[0].state.acked_until = Some(at(14_400));
+        let mut acked = input(
+            at(900),
+            vec![RuleObservations { rule: cpu, series: Some(vec![point(1, 95.0)]) }],
+            vec![node(1, None)],
+            stored,
+        );
+        acked.unacked_after = Some(std::time::Duration::from_secs(900));
+        let outcome = plan_cycle(acked, &mut baselines);
+        assert!(outcome.groups.is_empty(), "somebody is on it");
     }
 
     #[test]

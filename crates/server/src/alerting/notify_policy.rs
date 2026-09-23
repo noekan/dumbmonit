@@ -26,6 +26,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::alerting::group::{AlertGroup, GroupItem, NotifyReason};
+use crate::alerting::matcher::{ChannelMatcher, MatchContext};
 use crate::alerting::model::{Severity, TargetId};
 use crate::alerting::silence::Schedule;
 
@@ -68,6 +69,13 @@ pub struct GlobalPolicy {
     /// URL publique de l'instance, pour les liens vers l'équipement dans les
     /// messages. Vide : `DUMBMONIT_PUBLIC_URL`, sinon pas de lien.
     pub public_url: String,
+    /// Escalade : délai sans acquittement au bout duquel l'alerte part aussi
+    /// sur [`Self::escalate_channel`]. 0 : pas d'escalade.
+    #[serde(default)]
+    pub escalate_after_secs: u32,
+    /// Canal prévenu en second. `None` : pas d'escalade, quel que soit le délai.
+    #[serde(default)]
+    pub escalate_channel: Option<i64>,
 }
 
 impl Default for GlobalPolicy {
@@ -79,6 +87,8 @@ impl Default for GlobalPolicy {
             flap_window_secs: DEFAULT_FLAP_WINDOW_SECS,
             flap_hold_secs: DEFAULT_FLAP_HOLD_SECS,
             public_url: String::new(),
+            escalate_after_secs: 0,
+            escalate_channel: None,
         }
     }
 }
@@ -89,6 +99,12 @@ impl GlobalPolicy {
         let raw = if self.public_url.trim().is_empty() { env_fallback? } else { &self.public_url };
         let trimmed = raw.trim().trim_end_matches('/');
         (!trimmed.is_empty()).then(|| trimmed.to_string())
+    }
+
+    /// Escalade configurée : délai et canal. `None` dès que l'un des deux manque.
+    pub fn escalation(&self) -> Option<(TimeDelta, i64)> {
+        let channel = self.escalate_channel?;
+        (self.escalate_after_secs > 0).then(|| (secs(self.escalate_after_secs), channel))
     }
 }
 
@@ -105,6 +121,11 @@ pub struct ChannelPolicy {
     /// Heures calmes : pendant la fenêtre, seule la sévérité `critical` passe ;
     /// le reste attend et part en résumé à la fin.
     pub quiet_hours: Option<Schedule>,
+    /// Ce que le canal accepte de recevoir : étiquettes d'équipement, type de
+    /// collecteur, règle. Vide — et c'est le cas de tous les canaux existants —
+    /// signifie « tout ».
+    #[serde(default)]
+    pub matcher: ChannelMatcher,
 }
 
 impl Default for ChannelPolicy {
@@ -114,6 +135,7 @@ impl Default for ChannelPolicy {
             notify_resolved: true,
             min_interval_secs: 0,
             quiet_hours: None,
+            matcher: ChannelMatcher::default(),
         }
     }
 }
@@ -352,6 +374,11 @@ pub fn plan(
                 continue;
             }
 
+            if item.reason == NotifyReason::Unacked {
+                handoff(&active, policy, group, &item, ledger, &mut queue, &mut plan, now);
+                continue;
+            }
+
             for recipient in &targets {
                 route(recipient, group, &item, ledger, &mut queue, &mut plan, now);
             }
@@ -390,10 +417,24 @@ fn route(
 ) {
     let fp = item.fingerprint.as_str();
     let policy = &recipient.policy;
+    // Le relais d'escalade traverse les filtres du canal : l'utilisateur a
+    // désigné ce canal précisément pour être réveillé, une sévérité minimale ou
+    // des heures calmes le rendraient muet au seul moment où il compte.
+    let escalating = item.reason == NotifyReason::Unacked;
 
-    if item.severity < policy.min_severity {
-        plan.note(fp, format!("below the minimum severity of channel {}", recipient.id));
-        return;
+    if !escalating {
+        if item.severity < policy.min_severity {
+            plan.note(fp, format!("below the minimum severity of channel {}", recipient.id));
+            return;
+        }
+        if !policy.matcher.accepts(&MatchContext {
+            rule_uid: item.rule_uid.as_str(),
+            kind: group.target_kind.as_str(),
+            tags: &group.target_tags,
+        }) {
+            plan.note(fp, format!("outside the routing filter of channel {}", recipient.id));
+            return;
+        }
     }
     if item.reason == NotifyReason::Resolved && !policy.notify_resolved {
         plan.note(fp, format!("channel {} does not announce resolutions", recipient.id));
@@ -427,7 +468,8 @@ fn route(
             plan.note(fp, format!("channel {} never announced the firing", recipient.id));
             return;
         }
-    } else if policy.min_interval_secs > 0
+    } else if !escalating
+        && policy.min_interval_secs > 0
         && item.reason != NotifyReason::Flapping
         && let Some(last) = last_sent
         && now.signed_duration_since(last.at) < secs(policy.min_interval_secs)
@@ -444,7 +486,7 @@ fn route(
     }
 
     // Heures calmes : seule la sévérité la plus haute passe tout de suite.
-    let hold = if policy.in_quiet_hours(now) && item.severity < Severity::Critical {
+    let hold = if !escalating && policy.in_quiet_hours(now) && item.severity < Severity::Critical {
         Hold::Quiet
     } else {
         Hold::Batch
@@ -481,6 +523,74 @@ fn route(
             true,
         )),
     }
+}
+
+/// Relaie une alerte que personne n'a acquittée vers le canal d'escalade.
+///
+/// Deux garde-fous, et ils comptent autant que le relais lui-même :
+///
+/// * escalader une alerte que personne n'a encore reçue n'a aucun sens — pendant
+///   les heures calmes, ou quand le service de notification est en panne, la
+///   première annonce dort en file. Le relais attend alors, et l'empreinte est
+///   retirée de `handled` pour que le cycle suivant la repropose intacte ;
+/// * le délai se recompte depuis la première annonce réellement partie, pas
+///   depuis le déclenchement : sortir des heures calmes ne doit pas faire sonner
+///   les deux messages dans la même minute.
+#[allow(clippy::too_many_arguments)]
+fn handoff(
+    active: &[&Recipient],
+    policy: &GlobalPolicy,
+    group: &AlertGroup,
+    item: &GroupItem,
+    ledger: &Ledger,
+    queue: &mut Vec<(QueuedItem, bool)>,
+    plan: &mut Plan,
+    now: DateTime<Utc>,
+) {
+    let fp = item.fingerprint.as_str();
+    let Some((after, channel_id)) = policy.escalation() else {
+        // La politique a changé entre l'évaluation et l'envoi : rien à faire.
+        plan.note(fp, "no escalation channel configured");
+        return;
+    };
+
+    let first_sent = ledger
+        .log
+        .iter()
+        .filter(|entry| {
+            entry.channel_id != INTAKE_CHANNEL
+                && entry.fingerprint == fp
+                && entry.reason.is_firing_like()
+        })
+        .map(|entry| entry.at)
+        .min();
+
+    let due = match first_sent {
+        None => {
+            plan.handled.remove(fp);
+            plan.note(fp, "escalation waiting: nobody has been told yet");
+            return;
+        }
+        Some(first) => first + after,
+    };
+    if now < due {
+        plan.handled.remove(fp);
+        plan.note(
+            fp,
+            format!(
+                "escalation waiting: {} s since the first message, {} s needed",
+                now.signed_duration_since(due - after).num_seconds(),
+                after.num_seconds()
+            ),
+        );
+        return;
+    }
+
+    let Some(recipient) = active.iter().copied().find(|r| r.id == channel_id) else {
+        plan.note(fp, format!("escalation channel {channel_id} is missing or disabled"));
+        return;
+    };
+    route(recipient, group, item, ledger, queue, plan, now);
 }
 
 /// Vide ce qui est mûr dans la file de chaque canal.
@@ -588,6 +698,8 @@ fn outgoing(
         let group = groups.entry(queued.target_id).or_insert_with(|| AlertGroup {
             target_id: queued.target_id,
             target_name: queued.target_name.clone(),
+            target_kind: String::new(),
+            target_tags: BTreeMap::new(),
             severity: Severity::Info,
             items: Vec::new(),
             channels: Vec::new(),
@@ -620,6 +732,7 @@ fn outgoing(
 mod tests {
     use super::*;
     use crate::alerting::machine::EffectivePhase;
+    use crate::alerting::matcher::Condition;
 
     fn at(seconds: i64) -> DateTime<Utc> {
         DateTime::from_timestamp(1_700_000_000 + seconds, 0).expect("valid timestamp")
@@ -628,6 +741,7 @@ mod tests {
     fn item(fp: &str, reason: NotifyReason, severity: Severity) -> GroupItem {
         GroupItem {
             fingerprint: fp.to_string(),
+            rule_uid: fp.to_string(),
             rule_name: fp.to_string(),
             severity,
             reason,
@@ -648,6 +762,8 @@ mod tests {
         AlertGroup {
             target_id: Some(target),
             target_name: format!("device-{target}"),
+            target_kind: "snmp".to_string(),
+            target_tags: BTreeMap::new(),
             severity,
             items,
             channels: Vec::new(),
@@ -692,6 +808,284 @@ mod tests {
         for (fp, until) in &plan.flap_holds {
             ledger.flap_holds.insert(fp.clone(), *until);
         }
+    }
+
+    /// Un groupe avec les étiquettes d'un équipement, pour le filtre de routage.
+    fn tagged_group(
+        target: TargetId,
+        kind: &str,
+        tags: &[(&str, &str)],
+        items: Vec<GroupItem>,
+        now: DateTime<Utc>,
+    ) -> AlertGroup {
+        let mut group = group(target, items, now);
+        group.target_kind = kind.to_string();
+        group.target_tags =
+            tags.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect();
+        group
+    }
+
+    fn matcher(include: Vec<Condition>, exclude: Vec<Condition>) -> ChannelPolicy {
+        ChannelPolicy { matcher: ChannelMatcher { include, exclude }, ..ChannelPolicy::default() }
+    }
+
+    fn tag_condition(key: &str, value: &str) -> Condition {
+        Condition::Tag { key: key.to_string(), value: value.to_string() }
+    }
+
+    // ----------------------------------------------------------------------
+    // Filtre de routage
+    // ----------------------------------------------------------------------
+
+    #[test]
+    fn un_canal_filtre_par_etiquette_ne_recoit_que_les_siens() {
+        let channels = [
+            recipient(1, matcher(vec![tag_condition("site", "cellar")], Vec::new())),
+            recipient(2, ChannelPolicy::default()),
+        ];
+        let cave = tagged_group(
+            1,
+            "synology",
+            &[("site", "cellar")],
+            vec![item("disk", NotifyReason::Firing, Severity::Warning)],
+            at(0),
+        );
+        let cellar_plan = plan(&[cave], &channels, &immediate(), &Ledger::default(), at(0));
+        let recipients: Vec<i64> = cellar_plan.outgoing.iter().map(|o| o.channel_id).collect();
+        assert_eq!(recipients, vec![1, 2], "both want it");
+
+        let grenier = tagged_group(
+            2,
+            "synology",
+            &[("site", "attic")],
+            vec![item("disk", NotifyReason::Firing, Severity::Warning)],
+            at(0),
+        );
+        let attic_plan = plan(&[grenier], &channels, &immediate(), &Ledger::default(), at(0));
+        let recipients: Vec<i64> = attic_plan.outgoing.iter().map(|o| o.channel_id).collect();
+        assert_eq!(recipients, vec![2], "the filtered channel is out of scope");
+        assert!(
+            attic_plan.verdicts.get("disk").is_some_and(|v| v.contains("routing filter")),
+            "the history must say why"
+        );
+    }
+
+    #[test]
+    fn une_exclusion_ecarte_un_equipement_du_canal() {
+        let channels = [recipient(1, matcher(Vec::new(), vec![tag_condition("role", "lab")]))];
+        let labo = tagged_group(
+            1,
+            "agent",
+            &[("role", "lab")],
+            vec![item("cpu", NotifyReason::Firing, Severity::Critical)],
+            at(0),
+        );
+        let lab_plan = plan(&[labo], &channels, &immediate(), &Ledger::default(), at(0));
+        assert!(lab_plan.outgoing.is_empty(), "the lab never wakes anybody");
+        assert!(lab_plan.handled.contains("cpu"), "handled all the same: never replayed");
+
+        let nas = tagged_group(
+            2,
+            "agent",
+            &[("role", "storage")],
+            vec![item("cpu", NotifyReason::Firing, Severity::Critical)],
+            at(0),
+        );
+        let nas_plan = plan(&[nas], &channels, &immediate(), &Ledger::default(), at(0));
+        assert_eq!(nas_plan.outgoing.len(), 1);
+    }
+
+    #[test]
+    fn un_canal_sans_filtre_recoit_tout_comme_avant() {
+        // Le cas de toutes les instances existantes : rien ne change.
+        let channels = [recipient(1, ChannelPolicy::default())];
+        let everything = tagged_group(
+            1,
+            "proxmox",
+            &[("site", "attic"), ("role", "lab")],
+            vec![item("cpu", NotifyReason::Firing, Severity::Info)],
+            at(0),
+        );
+        let outcome = plan(&[everything], &channels, &immediate(), &Ledger::default(), at(0));
+        assert_eq!(outcome.outgoing.len(), 1);
+    }
+
+    // ----------------------------------------------------------------------
+    // Escalade vers un second canal
+    // ----------------------------------------------------------------------
+
+    fn escalating() -> GlobalPolicy {
+        GlobalPolicy {
+            batch_window_secs: 0,
+            escalate_after_secs: 900,
+            escalate_channel: Some(2),
+            ..GlobalPolicy::default()
+        }
+    }
+
+    #[test]
+    fn un_relais_ne_part_que_sur_le_canal_d_escalade() {
+        let mut ledger = Ledger::default();
+        let channels =
+            [recipient(1, ChannelPolicy::default()), recipient(2, ChannelPolicy::default())];
+
+        let first = plan(
+            &[group(1, vec![item("cpu", NotifyReason::Firing, Severity::Warning)], at(0))],
+            &channels,
+            &escalating(),
+            &ledger,
+            at(0),
+        );
+        assert_eq!(first.outgoing.len(), 2, "both channels hear the firing");
+        apply(&mut ledger, &first, at(0));
+
+        // Un quart d'heure plus tard, toujours personne : le cycle produit un
+        // relais, qui ne doit atterrir que sur le canal 2.
+        let relay = plan(
+            &[group(1, vec![item("cpu", NotifyReason::Unacked, Severity::Warning)], at(900))],
+            &channels,
+            &escalating(),
+            &ledger,
+            at(900),
+        );
+        let recipients: Vec<i64> = relay.outgoing.iter().map(|o| o.channel_id).collect();
+        assert_eq!(recipients, vec![2], "one extra hop, and only one");
+        assert!(relay.handled.contains("cpu"));
+    }
+
+    #[test]
+    fn un_relais_attend_que_la_premiere_annonce_soit_reellement_partie() {
+        // Heures calmes sur l'unique canal : la première annonce dort en file.
+        let quiet = Schedule::Weekly {
+            days: (0..7).collect(),
+            start_minute: 0,
+            end_minute: 23 * 60 + 59,
+            utc_offset_minutes: 0,
+            timezone: None,
+        };
+        let policy = ChannelPolicy { quiet_hours: Some(quiet), ..ChannelPolicy::default() };
+        let channels = [recipient(1, policy), recipient(2, ChannelPolicy::default())];
+        let mut ledger = Ledger::default();
+
+        // La règle ne vise que le canal 1 ; le canal 2 n'est là que pour l'escalade.
+        let mut firing =
+            group(1, vec![item("cpu", NotifyReason::Firing, Severity::Warning)], at(0));
+        firing.channels = vec![1];
+        let first = plan(&[firing], &channels, &escalating(), &ledger, at(0));
+        assert!(first.outgoing.is_empty(), "swallowed by the quiet hours");
+        apply(&mut ledger, &first, at(0));
+
+        let mut unacked =
+            group(1, vec![item("cpu", NotifyReason::Unacked, Severity::Warning)], at(900));
+        unacked.channels = vec![1];
+        let relay = plan(&[unacked], &channels, &escalating(), &ledger, at(900));
+        assert!(relay.outgoing.is_empty(), "nobody has been told: nothing to escalate");
+        assert!(
+            !relay.handled.contains("cpu"),
+            "the fingerprint stays pending so the next cycle can try again"
+        );
+        assert!(relay.verdicts.get("cpu").is_some_and(|v| v.contains("nobody has been told")));
+    }
+
+    #[test]
+    fn le_delai_du_relais_se_recompte_depuis_la_premiere_annonce() {
+        let channels =
+            [recipient(1, ChannelPolicy::default()), recipient(2, ChannelPolicy::default())];
+        // La première annonce n'est partie qu'à t+600 (panne du service, file).
+        let ledger = Ledger {
+            log: vec![LogEntry {
+                channel_id: 1,
+                fingerprint: "cpu".to_string(),
+                reason: NotifyReason::Firing,
+                at: at(600),
+            }],
+            ..Ledger::default()
+        };
+
+        let too_soon = plan(
+            &[group(1, vec![item("cpu", NotifyReason::Unacked, Severity::Warning)], at(900))],
+            &channels,
+            &escalating(),
+            &ledger,
+            at(900),
+        );
+        assert!(too_soon.outgoing.is_empty(), "only five minutes since the first message");
+        assert!(!too_soon.handled.contains("cpu"));
+
+        let due = plan(
+            &[group(1, vec![item("cpu", NotifyReason::Unacked, Severity::Warning)], at(1500))],
+            &channels,
+            &escalating(),
+            &ledger,
+            at(1500),
+        );
+        assert_eq!(due.outgoing.len(), 1);
+        assert_eq!(due.outgoing[0].channel_id, 2);
+    }
+
+    #[test]
+    fn le_relais_traverse_les_filtres_du_canal_d_escalade() {
+        // Le canal d'escalade est réglé « critique seulement » et en heures
+        // calmes : il a pourtant été désigné pour réveiller quelqu'un.
+        let quiet = Schedule::Weekly {
+            days: (0..7).collect(),
+            start_minute: 0,
+            end_minute: 23 * 60 + 59,
+            utc_offset_minutes: 0,
+            timezone: None,
+        };
+        let strict = ChannelPolicy {
+            min_severity: Severity::Critical,
+            quiet_hours: Some(quiet),
+            matcher: ChannelMatcher {
+                include: vec![tag_condition("site", "nowhere")],
+                exclude: Vec::new(),
+            },
+            ..ChannelPolicy::default()
+        };
+        let channels = [recipient(1, ChannelPolicy::default()), recipient(2, strict)];
+        let ledger = Ledger {
+            log: vec![LogEntry {
+                channel_id: 1,
+                fingerprint: "cpu".to_string(),
+                reason: NotifyReason::Firing,
+                at: at(0),
+            }],
+            ..Ledger::default()
+        };
+        let relay = plan(
+            &[group(1, vec![item("cpu", NotifyReason::Unacked, Severity::Warning)], at(900))],
+            &channels,
+            &escalating(),
+            &ledger,
+            at(900),
+        );
+        assert_eq!(relay.outgoing.len(), 1, "the escalation channel must not stay silent");
+        assert_eq!(relay.outgoing[0].channel_id, 2);
+    }
+
+    #[test]
+    fn un_canal_d_escalade_absent_ne_bloque_pas_le_cycle() {
+        let channels = [recipient(1, ChannelPolicy::default())];
+        let ledger = Ledger {
+            log: vec![LogEntry {
+                channel_id: 1,
+                fingerprint: "cpu".to_string(),
+                reason: NotifyReason::Firing,
+                at: at(0),
+            }],
+            ..Ledger::default()
+        };
+        let relay = plan(
+            &[group(1, vec![item("cpu", NotifyReason::Unacked, Severity::Warning)], at(900))],
+            &channels,
+            &escalating(),
+            &ledger,
+            at(900),
+        );
+        assert!(relay.outgoing.is_empty());
+        assert!(relay.verdicts.get("cpu").is_some_and(|v| v.contains("missing or disabled")));
+        assert!(relay.handled.contains("cpu"), "no infinite retry on a channel that is gone");
     }
 
     #[test]
@@ -944,6 +1338,7 @@ mod tests {
             start_minute: 22 * 60,
             end_minute: 7 * 60,
             utc_offset_minutes: 0,
+            timezone: None,
         };
         let channels =
             [recipient(1, ChannelPolicy { quiet_hours: Some(quiet), ..ChannelPolicy::default() })];

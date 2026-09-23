@@ -15,6 +15,7 @@
 		updateChannel,
 		type AlertSeverity,
 		type Channel,
+		type ChannelMatcher,
 		type ChannelPayload,
 		type QuietHours
 	} from '$lib/api';
@@ -22,6 +23,8 @@
 	import { kindDocUrl, kindIcon, type KindField, type KindInfo } from './kinds';
 	import ChannelFieldInput from './ChannelFieldInput.svelte';
 	import QuietHoursEditor from './QuietHoursEditor.svelte';
+	import MatcherEditor from './MatcherEditor.svelte';
+	import { matcherIsEmpty } from '$lib/components/alerts/helpers';
 
 	interface Props {
 		kinds: KindInfo[];
@@ -80,6 +83,9 @@
 	let notifyResolved = $state(untrack(() => channel?.policy?.notify_resolved ?? true));
 	let minInterval = $state(untrack(() => channel?.policy?.min_interval_secs ?? 0));
 	let quietHours = $state<QuietHours | null>(untrack(() => channel?.policy?.quiet_hours ?? null));
+	let matcher = $state<ChannelMatcher | null>(
+		untrack(() => (matcherIsEmpty(channel?.policy?.matcher) ? null : channel!.policy.matcher))
+	);
 	let showDelivery = $state(
 		untrack(
 			() =>
@@ -87,7 +93,8 @@
 				(channel.policy?.min_severity !== 'info' ||
 					channel.policy?.notify_resolved === false ||
 					(channel.policy?.min_interval_secs ?? 0) > 0 ||
-					channel.policy?.quiet_hours != null)
+					channel.policy?.quiet_hours != null ||
+					!matcherIsEmpty(channel.policy?.matcher))
 		)
 	);
 	const intervalOptions = $derived(
@@ -225,7 +232,8 @@
 				min_severity: minSeverity,
 				notify_resolved: notifyResolved,
 				min_interval_secs: minInterval,
-				quiet_hours: quietHours
+				quiet_hours: quietHours,
+				matcher
 			}
 		};
 		// Rules: on create, always send `secrets` (possibly `{}`). On edit, send
@@ -439,6 +447,7 @@
 								<Toggle id="channel-resolved" bind:checked={notifyResolved} disabled={saving} label="Tell me when it clears" />
 							</Field>
 							<QuietHoursEditor value={quietHours} idPrefix="channel-quiet" disabled={saving} onchange={(next) => (quietHours = next)} />
+							<MatcherEditor value={matcher} {minSeverity} disabled={saving} onchange={(next) => (matcher = next)} />
 						</div>
 					{/if}
 				</fieldset>

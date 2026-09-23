@@ -15,7 +15,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use dumbmonit_proto::{
-    AgentCommand, CMD_CONTAINER_RESTART, CMD_CONTAINER_UPDATE, CommandReport, TargetId,
+    AGENT_SECRET_HEADER, AgentCommand, CMD_CONTAINER_RESTART, CMD_CONTAINER_UPDATE, CommandReport,
+    TargetId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -31,7 +32,13 @@ const RECENT_COMMANDS: i64 = 20;
 
 /// Les conteneurs du moniteur lui-même : il ne se redémarre ni ne se met à jour
 /// par son propre canal — il ne serait plus là pour en rendre compte.
-const RESERVED_PREFIXES: &[&str] = &["dumbmonit", "dumbmonit"];
+///
+/// `ezymonit` reste de la partie : les conteneurs créés avant le renommage du
+/// produit portent encore ce nom, et sont tout aussi fatals à toucher. La même
+/// liste, mot pour mot, vit dans `crates/agent/src/commands.rs` : le serveur
+/// refuse d'émettre, l'agent refuse d'exécuter, et ni l'un ni l'autre ne fait
+/// confiance à l'autre pour cela.
+const RESERVED_PREFIXES: &[&str] = &["dumbmonit", "ezymonit"];
 
 // ------------------------------------------------------------- agent side
 
@@ -44,6 +51,11 @@ pub struct Rejection {
 impl Rejection {
     pub fn not_found(message: &str) -> Self {
         Self { status: StatusCode::NOT_FOUND, message: message.to_string() }
+    }
+
+    /// Refus opposé à une machine qui se réclame de l'identité d'une autre.
+    pub fn not_this_machine() -> Self {
+        Self { status: StatusCode::FORBIDDEN, message: agent::BINDING_MISMATCH.to_string() }
     }
 }
 
@@ -60,6 +72,9 @@ impl From<agent::IngestError> for Rejection {
                 status: StatusCode::UNAUTHORIZED,
                 message: "Enrollment token missing, unknown or revoked.".to_string(),
             },
+            agent::IngestError::Forbidden(why) => {
+                Self { status: StatusCode::FORBIDDEN, message: why }
+            }
             agent::IngestError::BadRequest(why) => {
                 Self { status: StatusCode::BAD_REQUEST, message: why }
             }
@@ -90,19 +105,37 @@ pub fn agent_routes() -> Router<AppState> {
     Router::new().route("/agent/commands", get(pending)).route("/agent/commands/{id}", post(report))
 }
 
-/// Vérifie le jeton et la clé, renvoie l'identifiant du jeton.
-async fn authenticate(state: &AppState, headers: &HeaderMap, key: &str) -> Result<i64, Rejection> {
+/// Vérifie le jeton, puis que la machine qui parle est bien celle de cette clé.
+///
+/// La clé d'identité voyage en clair dans l'URL et n'est un secret pour
+/// personne : sans le second contrôle, n'importe quelle machine du parc
+/// viendrait chercher — donc consommer — les commandes Docker d'une autre.
+///
+/// Renvoie l'identifiant du jeton et la cible autorisée.
+pub async fn authenticate(
+    state: &AppState,
+    headers: &HeaderMap,
+    key: &str,
+) -> Result<(i64, TargetId), Rejection> {
     let bearer =
         headers.get(axum::http::header::AUTHORIZATION).and_then(|value| value.to_str().ok());
     let token_id = agent::authenticate_token(&state.pool, bearer)
         .await?
         .ok_or_else(|| Rejection::from(agent::IngestError::Unauthorized))?;
-    if key.trim().is_empty() {
+    let key = key.trim();
+    if key.is_empty() {
         return Err(Rejection::from(agent::IngestError::BadRequest(
             "the 'key' query parameter is required".to_string(),
         )));
     }
-    Ok(token_id)
+    let secret = headers.get(AGENT_SECRET_HEADER).and_then(|value| value.to_str().ok());
+    match agent::authorise_key(&state.pool, key, agent::extract_secret(secret)).await? {
+        agent::KeyAuth::Allowed { target_id, .. } => Ok((token_id, target_id)),
+        agent::KeyAuth::Denied => Err(Rejection::not_this_machine()),
+        agent::KeyAuth::Unknown => {
+            Err(Rejection::not_found("Unknown machine: push a batch first."))
+        }
+    }
 }
 
 /// `GET /api/agent/commands?key=…` : les commandes en attente pour cette machine.
@@ -111,11 +144,8 @@ async fn pending(
     headers: HeaderMap,
     Query(query): Query<KeyQuery>,
 ) -> Result<Json<Vec<AgentCommand>>, Rejection> {
-    let token_id = authenticate(&state, &headers, &query.key).await?;
-    let pending = commands::pending_for_key(&state.pool, query.key.trim()).await?;
-    let Some((_, commands)) = pending else {
-        return Err(Rejection::not_found("Unknown machine: push a batch first."));
-    };
+    let (token_id, target_id) = authenticate(&state, &headers, &query.key).await?;
+    let commands = commands::pending_for_target(&state.pool, target_id).await?;
     agent::touch_token(&state.pool, token_id).await?;
     Ok(Json(commands))
 }
@@ -128,8 +158,8 @@ async fn report(
     Query(query): Query<KeyQuery>,
     Json(report): Json<CommandReport>,
 ) -> Result<StatusCode, Rejection> {
-    authenticate(&state, &headers, &query.key).await?;
-    let accepted = commands::report(&state.pool, query.key.trim(), id, &report).await?;
+    let (_, target_id) = authenticate(&state, &headers, &query.key).await?;
+    let accepted = commands::report(&state.pool, target_id, id, &report).await?;
     if !accepted {
         return Err(Rejection::not_found("Command not found for this machine."));
     }
@@ -141,6 +171,7 @@ async fn report(
 pub fn ui_routes() -> Router<AppState> {
     Router::new()
         .route("/targets/{id}/agent", get(agent_host))
+        .route("/targets/{id}/agent/rebind", post(allow_rebind))
         .route("/targets/{id}/containers", get(list_containers))
         .route("/targets/{id}/containers/{name}/policy", put(set_policy))
         .route("/targets/{id}/containers/{name}/restart", post(restart))
@@ -169,12 +200,26 @@ pub struct AgentHostView {
     /// Nombre d'équipements interrogés à travers cet agent (`via_agent`).
     pub relayed: usize,
     pub last_seen_at: Option<String>,
+    /// Où en est la liaison de cette machine à son agent :
+    ///
+    /// - `bound` : l'agent détient un secret propre à cette machine, personne
+    ///   d'autre ne peut pousser en son nom ni prendre ses commandes ;
+    /// - `pending` : le binaire sait se lier, le prochain lot y suffira ;
+    /// - `unsupported` : agent antérieur à la liaison, à réinstaller.
+    pub binding: &'static str,
+    /// Vrai pour l'état `bound`, pour que l'interface n'ait pas à comparer des
+    /// chaînes pour allumer un voyant.
+    pub bound: bool,
+    pub bound_at: Option<String>,
+    /// Fin de la fenêtre de reliaison ouverte à la main, si elle court encore.
+    pub rebind_until: Option<String>,
 }
 
 impl AgentHostView {
     fn new(info: agent::HostInfo, relayed: usize) -> Self {
         Self {
             commands_supported: info.commands_supported(),
+            binding: info.binding_state(),
             hostname: info.hostname,
             os: info.os,
             os_version: info.os_version,
@@ -183,6 +228,9 @@ impl AgentHostView {
             relay: info.relay,
             site: info.site,
             relayed,
+            bound: info.bound,
+            bound_at: info.bound_at,
+            rebind_until: info.rebind_until,
             last_seen_at: info.last_seen_at,
         }
     }
@@ -536,6 +584,34 @@ async fn agent_host(
     Ok(Json(AgentHostView::new(info, relayed)))
 }
 
+/// Réponse à l'ouverture d'une fenêtre de reliaison.
+#[derive(Debug, Serialize)]
+pub struct RebindWindow {
+    /// Fin de la fenêtre, en UTC sans suffixe comme partout ailleurs.
+    pub rebind_until: String,
+    /// Durée de la fenêtre, pour que l'interface n'ait pas à la recalculer.
+    pub minutes: i64,
+}
+
+/// `POST /api/targets/{id}/agent/rebind` : autorise cette machine à se relier.
+///
+/// La seule issue prévue quand le secret d'une machine est perdu — disque
+/// refait, conteneur d'agent recréé sans son volume. Volontairement manuelle et
+/// datée : une machine liée doit le rester tant que personne n'a décidé
+/// autrement, sans quoi la liaison ne protégerait de rien.
+async fn allow_rebind(
+    State(state): State<AppState>,
+    Path(id): Path<TargetId>,
+    who: Option<Extension<CurrentPrincipal>>,
+) -> ApiResult<Json<RebindWindow>> {
+    agent_target(&state, id).await?;
+    let until = agent::allow_rebind(&state.pool, id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("No agent has reported for device {id} yet.")))?;
+    tracing::info!(cible = id, par = requester(who.as_deref()), "fenêtre de reliaison ouverte");
+    Ok(Json(RebindWindow { rebind_until: until, minutes: agent::REBIND_WINDOW_MINUTES }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -625,8 +701,13 @@ mod tests {
         assert!(validate_name("web;rm -rf").is_err());
         assert!(validate_name("../web").is_err());
         assert!(validate_name(&"a".repeat(129)).is_err());
-        // Le moniteur ne se touche pas lui-même.
+        // Le moniteur ne se touche pas lui-même, sous aucun de ses deux noms.
         assert!(validate_name("dumbmonit-dumbmonit-1").is_err());
         assert!(validate_name("DumbMonit").is_err());
+        assert!(validate_name("ezymonit-ezymonit-1").is_err(), "le nom d'avant le renommage");
+        assert!(validate_name("EzyMonit-agent").is_err());
+        // Le contrôle porte sur un nom : un identifiant de conteneur y échappe
+        // par construction, et c'est l'agent qui le rattrape après inspection.
+        assert!(validate_name("9f4c1b2e3d5a").is_ok());
     }
 }

@@ -274,6 +274,9 @@
 			<p class="mt-2 text-sm text-ink-2">
 				Every route is listed in the <a class="underline decoration-line underline-offset-2 hover:text-ink" href="https://dumbmonit.readthedocs.io/en/latest/reference/api/" target="_blank" rel="noreferrer">HTTP API reference</a>.
 			</p>
+			<p class="mt-2 text-sm text-ink-2">
+				A Prometheus or Grafana you already run can read this instance with the same token — <code class="font-mono text-[0.8125rem]">/metrics</code> for the server's own health, <code class="font-mono text-[0.8125rem]">/federate</code> for the measurements, <code class="font-mono text-[0.8125rem]">/prometheus</code> as a Grafana data source: see <a class="underline decoration-line underline-offset-2 hover:text-ink" href="https://dumbmonit.readthedocs.io/en/latest/reference/metrics/#scraping-dumbmonit" target="_blank" rel="noreferrer">Scraping DumbMonit</a>.
+			</p>
 		</div>
 
 		<!-- Token list -->

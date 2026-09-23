@@ -19,6 +19,15 @@ pigeon flying across. Under `prefers-reduced-motion`, everything is still.
 
 The single primary action of the page is **Add a device**.
 
+## The first-run guide
+
+On a new instance, the page under the bulletin is not empty: it is a three-step
+guide — add a device, connect a way to be told, check a message arrives. Each
+step is one click, each can be waved off on its own, and **Skip the guide** puts
+all three away. The choice is stored on the instance, so a second browser does
+not start the guide over. See
+[Add your first device](../install/first-device.md#the-three-first-steps).
+
 ## Needs you
 
 The list of what needs you now, most severe first: unreachable devices, then
@@ -57,6 +66,18 @@ the screen kept awake. ++esc++ or **Exit** returns to the overview. Open it from
 the command palette ("Wall mode") or by typing the URL.
 
 ![Wall mode](../assets/screenshots/wall-light.png){ loading=lazy }
+
+## Install it on a phone
+
+The interface ships a web manifest, so a phone can add it to the home screen:
+**Share → Add to Home Screen** on iOS, **Install app** in the Chrome menu on
+Android. It then opens without the browser chrome, in the theme the phone is
+set to.
+
+There is deliberately **no offline mode and no service worker**. A monitoring
+screen that shows a cached page is worse than one that says it cannot reach the
+server: the whole point is that what you read is current. With no worker, an
+upgraded server is also served straight away, with no stale build to clear.
 
 ## Command palette
 

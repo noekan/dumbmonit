@@ -98,6 +98,10 @@ back for a paid edition.
 - **Dependency suppression** — declare a device as the parent of others; when the
   parent goes down, its descendants' alerts are suppressed instead of sent.
 - **Grouping by host**, deduplication, periodic reminders and escalation.
+- **Acknowledge an alert** — "I know, stop reminding me": reminders go quiet
+  for four hours by default (up to thirty days) with an optional note, while the
+  condition keeps being tracked. Resolution is still announced, and clears the
+  acknowledgement, so the same alert notifies again if it comes back.
 - **Maintenance windows**, one-off or weekly.
 - **Notification policy** — hysteresis (trigger/clear thresholds), flap hold,
   per-channel cooldown, quiet hours, batching and an hourly cap, so a bad night
@@ -124,10 +128,26 @@ back for a paid edition.
 - Mobile works for reading state, silencing an alert and scheduling maintenance.
 - **Public status pages** (`/s/<slug>`) — groups of monitors, incidents, RSS
   feed and a status badge, Uptime Kuma / Kener style.
-- **Accounts** — admin and viewer roles, plus **OIDC / SSO** (Authentik,
-  Authelia, Keycloak, Pocket ID…) with group-to-role mapping.
+- **Accounts** — admin and viewer roles, an optional **TOTP second factor**
+  with recovery codes, an audit log of sign-ins and account changes, plus
+  **OIDC / SSO** (Authentik, Authelia, Keycloak, Pocket ID…) with
+  group-to-role mapping.
+- **REST API with scoped tokens** — `read` or `write`, created in
+  *Settings → API & assistants*; account and token management stays off limits
+  to them. See [the API reference](https://dumbmonit.readthedocs.io/en/latest/reference/api/).
+- **Install it on a phone** — a web manifest and home-screen icons; there is
+  deliberately no offline mode, so the screen never shows yesterday's state.
 - **Built-in MCP server** — connect Claude, ChatGPT or any MCP client with a
   scoped token and ask "is everything fine?" or "silence the NAS for an hour".
+- **Readable by the Prometheus or Grafana you already run** — `GET /metrics`
+  exposes the instance's own health, `GET /federate` the measurements by
+  selector, and `/prometheus` answers as a Prometheus data source, all behind a
+  read-only API token.
+- **Backup and restore** — the whole configuration, credentials included, as
+  one file encrypted with a passphrase you choose, which restores onto a fresh
+  instance with a dry run first; plus a daily online copy of the database and
+  of `secret.key` in `/data/backups/`, and a built-in rule when it stops
+  happening.
 
 ## Quick start
 
@@ -142,19 +162,28 @@ source instead, clone the repository and use `docker compose up -d --build`
 (about ten minutes; Docker is the only requirement).
 
 Then open http://localhost:8080. The first visit lands on `/setup`, where you
-choose the instance password. Add a device with its IP address and SNMP
-community: the collection profile is detected automatically.
+create the first admin account. The overview then walks you through three
+steps — add a device, connect a notification channel, check that a message
+arrives — and each one is a single click. Add a device with its IP address and
+SNMP community: the collection profile is detected automatically.
 
 - **Another port**: `DUMBMONIT_PORT=8099 docker compose up -d` (8080 is busy on
   most homelab machines).
 - **Update**: `docker compose pull && docker compose up -d` (from source:
   `git pull && docker compose up -d --build`).
-- **Lost password**: `DUMBMONIT_RESET_PASSWORD=1 docker compose up -d` clears the
-  password and all sessions at startup; the UI asks for a new one at `/setup`.
+- **Lost password**: another admin can set a new one in *Settings → Users*. If
+  no admin can sign in, `DUMBMONIT_RESET_PASSWORD=1 docker compose up -d`
+  removes every account and session at startup — devices, rules and channels are
+  untouched — and the UI asks you to create the first admin again at `/setup`.
   Then run `docker compose up -d` again without the variable.
 - **ICMP ping monitors** work without any capability: the container runs as a
   non-root user and `docker-compose.yml` sets the `net.ipv4.ping_group_range`
   sysctl that allows ICMP echo sockets. Keep those lines.
+- **Backup**: *Settings → Backup* downloads the whole configuration as one
+  encrypted file and restores it, and the server keeps a daily copy of its
+  database in `/data/backups/`. `/data/secret.key` is what decrypts device
+  credentials — a backup without it restores an instance that cannot talk to
+  anything. See [Backup and restore](https://dumbmonit.readthedocs.io/en/latest/install/backup/).
 
 ### Installing the agent
 
@@ -218,7 +247,7 @@ Everything goes through environment variables; none is required.
 | `DUMBMONIT_FLUSH_INTERVAL_SECS` | `5` | Write period towards VictoriaMetrics |
 | `DUMBMONIT_LOG` | `info` | Log filter (`tracing` syntax) |
 | `DUMBMONIT_AGENT_DIR` | `/agents` | Agent binaries served under `/download/…` |
-| `DUMBMONIT_RESET_PASSWORD` | *(empty)* | Set to `1` to clear the password and sessions at startup |
+| `DUMBMONIT_RESET_PASSWORD` | *(empty)* | Set to `1` to remove every account and session at startup |
 
 The `DUMBMONIT_PORT` variable is read by `docker-compose.yml` only and sets the
 host port (default `8080`). The former `EZYMONIT_*` names are still accepted,
@@ -243,10 +272,10 @@ and state.
 
 ```
 crates/proto     shared types: Sample, Target, Credential, trait Collector (+ ProbeError)
-crates/collectors  snmp (profiles/*.yaml), proxmox, pbs, pdm, synology, uptime — shared by the server and the relay agent
+crates/collectors  snmp (profiles/*.yaml), proxmox, pbs, pdm, pmg, synology, uptime — shared by the server and the relay agent
 crates/server    the binary
   api/           axum routes; spa.rs serves the embedded web UI
-  auth/          single instance password, HttpOnly session cookie, rate limit
+  auth/          accounts and roles, HttpOnly session cookie, TOTP, OIDC, API tokens, rate limit
   collectors/    the agent collector (pushed metrics, commands, tokens) and the relay hub; re-exports crates/collectors
   scheduler.rs   runs every enabled target on its interval through the collector registry, or delegates it to its relay agent
   tsdb/          VictoriaMetrics writer (batched flush) + query proxy
@@ -289,9 +318,10 @@ used daily on the author's own homelab, but it is not ready for anyone who needs
 it to be boring: the HTTP API is not frozen, the database schema still moves,
 and some integrations have only been exercised against simulated devices, not
 the real hardware. Known gaps and open bugs are tracked in the
-[issues](https://github.com/noekan/dumbmonit/issues); the biggest ones today are
-a push/heartbeat monitor, API tokens for the whole REST API (they only cover the
-MCP endpoint for now), config export/import and 2FA. The project was called
+[issues](https://github.com/noekan/dumbmonit/issues). Heartbeat monitors,
+scoped API tokens covering the whole REST API and the TOTP second factor have
+since shipped, as has backup and restore; there is still no upgrade guarantee
+across schema changes. The project was called
 EzyMonit until September 2026: `EZYMONIT_*` variables and the old agent
 installation are still accepted and migrated.
 

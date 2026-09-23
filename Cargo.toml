@@ -13,6 +13,10 @@ repository = "https://github.com/noekan/dumbmonit"
 anyhow = "1.0"
 async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["std", "serde", "clock"] }
+# Base IANA des fuseaux : une fenêtre de maintenance « tous les dimanches à 2 h
+# locales » doit rester à 2 h locales des deux côtés du changement d'heure, ce
+# qu'un décalage fixe ne sait pas faire.
+chrono-tz = { version = "0.10", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"

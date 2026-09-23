@@ -26,7 +26,8 @@
 	let error = $state<unknown>(null);
 	/** True when the server predates `/api/collectors`. */
 	let unavailable = $state(false);
-	let scanning = $state(false);
+	/** `?scan=1` opens the network scan straight away: the first-run guide links to it. */
+	let scanning = $state(page.url.searchParams.get('scan') === '1');
 
 	async function load(signal?: AbortSignal) {
 		loading = true;
@@ -74,6 +75,7 @@
 		scanning = false;
 		expanded = false;
 		const url = new URL(page.url);
+		url.searchParams.delete('scan');
 		url.searchParams.set('kind', kind);
 		await goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
 		await tick();
@@ -93,6 +95,15 @@
 		scanning = true;
 		const url = new URL(page.url);
 		url.searchParams.delete('kind');
+		url.searchParams.set('scan', '1');
+		void goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
+	}
+
+	/** Leaving the scan drops the flag, so a reload does not reopen it. */
+	function closeScan() {
+		scanning = false;
+		const url = new URL(page.url);
+		url.searchParams.delete('scan');
 		void goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
 	}
 
@@ -188,7 +199,7 @@
 				{:else if scanning}
 					<Panel title="Scan my network" description="Finds SNMP devices on a network range and adds them in one go.">
 						{#snippet aside()}
-							<Button size="sm" variant="ghost" onclick={() => (scanning = false)}>Choose a type instead</Button>
+							<Button size="sm" variant="ghost" onclick={closeScan}>Choose a type instead</Button>
 						{/snippet}
 						<Discovery />
 					</Panel>

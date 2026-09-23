@@ -76,6 +76,9 @@ Alert history is kept 90 days and the baselines of series that disappeared for
 
 - Through the server: `GET /api/metrics/query` and `GET /api/metrics/query_range`,
   with the session cookie. Range results are capped at 2,000 points per series.
+- From an existing Prometheus or Grafana: `GET /federate`, `GET /metrics` and
+  the `/prometheus` data source, with an API token —
+  [below](#scraping-dumbmonit).
 - Directly, in development: the overlay `docker-compose.dev.yml` publishes
   the embedded VictoriaMetrics on `http://localhost:8428`, with its own UI at
   `http://localhost:8428/vmui/`. In production it listens on the container's
@@ -92,3 +95,158 @@ avg by (host) (avg_over_time(dumbmonit_probe_success[30d]))
 # Every device that has not reported for 5 minutes
 time() - tlast_over_time(dumbmonit_up[7d]) > 300
 ```
+
+## Scraping DumbMonit
+
+If you already run a Prometheus or a Grafana, you do not need a second stack.
+Three routes sit outside `/api`, where a scraper looks for them:
+
+| Route | What it returns |
+|---|---|
+| `GET /metrics` | The health of the DumbMonit instance itself: scheduler, probes, writes, alerting, notifications, agents, database. A few dozen series, always the same number — never one per device. |
+| `GET /federate` | The measurements, selected by `match[]`, exactly as Prometheus federates another Prometheus: the latest point of each selected series. |
+| `GET /prometheus/api/v1/…` | The read half of the Prometheus API, relayed to the store: what a Grafana data source calls. |
+
+All three take `Authorization: Bearer dmt_…` with the **`read`** scope — a token
+created in Settings → *API & assistants*, the same kind the
+[MCP server](../using/assistant.md) uses. No cookie is involved, so no
+`X-Requested-With` header is needed; a session cookie is accepted too, so you
+can open any of them from a signed-in browser. A token is limited to 120 calls
+a minute: plenty for a scrape every 15 seconds, and enough for a Grafana
+dashboard of a few dozen panels — give a busy dashboard its own token rather
+than sharing one with a scraper.
+
+### Prometheus
+
+```yaml
+# prometheus.yml — DumbMonit's own health, then the measurements it collects.
+scrape_configs:
+  - job_name: dumbmonit
+    metrics_path: /metrics
+    scheme: http
+    authorization:
+      type: Bearer
+      credentials: dmt_0123456789abcdef0123456789abcdef
+    static_configs:
+      - targets: ['dumbmonit.lan:8080']
+
+  - job_name: dumbmonit-federate
+    metrics_path: /federate
+    scheme: http
+    honor_labels: true
+    scrape_interval: 60s
+    authorization:
+      type: Bearer
+      credentials: dmt_0123456789abcdef0123456789abcdef
+    params:
+      'match[]':
+        - '{__name__=~"dumbmonit_.*"}'
+    static_configs:
+      - targets: ['dumbmonit.lan:8080']
+```
+
+`honor_labels: true` keeps the `target` and `host` labels DumbMonit sets
+instead of overwriting them with the scrape job's own. Put the token in a file
+and use `authorization: {type: Bearer, credentials_file: /etc/prometheus/dumbmonit.token}`
+if you would rather not have it in the configuration.
+
+Without `match[]`, `/federate` selects `{__name__=~"dumbmonit_.*"}` — every
+series DumbMonit writes, and nothing belonging to another tool that shares the
+same VictoriaMetrics. Narrow it to keep a federation small:
+`{__name__=~"dumbmonit_.*",target="4"}` for one device,
+`{__name__="dumbmonit_up"}` for availability only. At most 10 selectors per
+request, and a response over 8 MiB is refused with a message telling you to
+narrow it — split a large fleet into several jobs with narrower selectors
+rather than one that asks for everything.
+`max_lookback=15m` widens the window in which the last point is looked for,
+for devices probed less often than every five minutes.
+
+```bash
+curl -H 'Authorization: Bearer dmt_…' http://localhost:8080/metrics
+curl -H 'Authorization: Bearer dmt_…' -G http://localhost:8080/federate \
+  --data-urlencode 'match[]={__name__=~"dumbmonit_.*",target="4"}'
+```
+
+### Grafana
+
+Point Grafana at **DumbMonit**, not at the VictoriaMetrics it runs: the child
+process listens on the container's loopback, has no authentication of its own,
+and exposes the routes that *delete* series as readily as the ones that read
+them. DumbMonit relays the read half of the Prometheus API under `/prometheus`,
+behind the same token, so Grafana talks to a normal Prometheus data source:
+
+1. **Connections → Data sources → Add → Prometheus**.
+2. **URL**: `http://dumbmonit.lan:8080/prometheus` (Grafana appends
+   `/api/v1/query` itself).
+3. **HTTP headers**: add one, `Authorization` = `Bearer dmt_…`. Grafana stores
+   it encrypted and never shows it again.
+4. **Save & test** — Grafana reports the data source is working, and every
+   `dumbmonit_*` series is then available in PromQL, with autocompletion on
+   metric and label names.
+
+Only the read routes are relayed — `query`, `query_range`, `series`, `labels`,
+label values, `metadata` and the version Grafana asks for when testing the
+connection. Anything else, `admin/tsdb/delete_series` first among them, answers
+`404`: this entry point cannot change or erase anything.
+
+If you already run a Prometheus, the other path works just as well: Prometheus
+federates DumbMonit with the job above, Grafana reads Prometheus, and the
+queries are identical.
+
+### Instance metrics
+
+Everything `GET /metrics` exposes. Values are read when you scrape; the
+`_total` counters are monotonic and reset only when the server restarts
+(`dumbmonit_uptime_seconds` tells you when that happened).
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `dumbmonit_build_info{version}` | gauge | Always 1. The `version` label is the running server version, the same one `/api/health` reports. |
+| `dumbmonit_uptime_seconds` | gauge | Seconds since the server process started. |
+| `dumbmonit_scheduler_cycles_total` | counter | Scheduler cycles run. The loop ticks once a second, so this doubles as a liveness signal. |
+| `dumbmonit_scheduler_cycle_seconds` | gauge | Duration of the last cycle. Normally under a millisecond: the cycle only dispatches, it does not wait for probes. |
+| `dumbmonit_scheduler_backlog` | gauge | Devices still due for a probe when the last cycle ended. Zero on a healthy instance; a lasting non-zero value means `DUMBMONIT_MAX_CONCURRENT_PROBES` is too low for the number of devices and their intervals. |
+| `dumbmonit_probes_total{kind}` | counter | Probes run, by device kind (`snmp`, `proxmox`, `http`…). Includes the ones a relay agent ran on the server's behalf. |
+| `dumbmonit_probes_failed_total{kind}` | counter | Probes that failed, by kind — an unreachable device or a configuration error. `rate(dumbmonit_probes_failed_total[15m]) / rate(dumbmonit_probes_total[15m])` is the failure ratio. |
+| `dumbmonit_samples_written_total` | counter | Samples accepted by VictoriaMetrics. |
+| `dumbmonit_sample_writes_failed_total` | counter | Batches VictoriaMetrics refused or did not answer. The batch stays buffered and is retried; a rising value with a rising `dumbmonit_samples_pending` means the store is down or full. |
+| `dumbmonit_samples_pending` | gauge | Samples still in the write buffer after the last flush. Normally 0. |
+| `dumbmonit_alerting_cycles_total` | counter | Alerting cycles run (one every `DUMBMONIT_ALERT_INTERVAL_SECS`, 30 s by default). |
+| `dumbmonit_alerting_cycle_seconds` | gauge | Duration of the last alerting cycle, query time included. Approaching the interval means the rules are querying more than the store can serve. |
+| `dumbmonit_alerting_rules_evaluated` | gauge | Rules evaluated in the last cycle. |
+| `dumbmonit_alerting_rules_failed` | gauge | Rules whose query failed in the last cycle. Their alerts are frozen, not resolved. Anything but 0 deserves a look at the logs. |
+| `dumbmonit_alerts{phase}` | gauge | Alerts the engine tracks, by phase: `ok`, `pending` (condition true, `for` not elapsed), `firing`, `resolved`. |
+| `dumbmonit_alerts_suppressed` | gauge | Alerts hidden because a parent device is down (the `suppressed` effective phase). |
+| `dumbmonit_alerts_silenced` | gauge | Alerts covered by a maintenance window. |
+| `dumbmonit_alerts_learning` | gauge | Baseline alerts still learning, and therefore silent. |
+| `dumbmonit_notifications_total{kind}` | counter | Notifications sent, by channel kind (`email`, `discord`, `ntfy`…). |
+| `dumbmonit_notifications_failed_total{kind}` | counter | Notifications the channel refused, by kind. They are requeued and retried; a steadily rising value is a broken webhook or SMTP account. |
+| `dumbmonit_agents` | gauge | Machines that have registered an agent. |
+| `dumbmonit_agents_stale` | gauge | Agents that have pushed nothing for five minutes. |
+| `dumbmonit_database_up` | gauge | 1 when SQLite answers — the same check as `/api/health`. |
+| `dumbmonit_database_bytes` | gauge | Size of `dumbmonit.db` and its write-ahead log. Does not include `/data/vm`. |
+| `dumbmonit_victoriametrics_up` | gauge | 1 when VictoriaMetrics answers — the same check as `/api/health`. 0 while the embedded child is restarting. |
+| `dumbmonit_victoriametrics_embedded` | gauge | 1 when this server runs VictoriaMetrics itself, 0 when `DUMBMONIT_VM_URL` points at an external one. |
+
+No metric on this page carries a per-device label: the document is the same
+size for one device and for a thousand, and no device name leaks to whoever
+can scrape it.
+
+Two alerts worth adding on your side, once DumbMonit is scraped:
+
+```
+# The monitoring stopped monitoring
+up{job="dumbmonit"} == 0
+
+# Measurements are piling up instead of being stored
+dumbmonit_samples_pending > 0 and increase(dumbmonit_sample_writes_failed_total[10m]) > 0
+```
+
+### Opening the routes without a token
+
+`DUMBMONIT_METRICS_PUBLIC=true` serves `/metrics`, `/federate` and
+`/prometheus/api/v1/…` to anyone who can reach the port, for people who filter
+the port themselves — **anyone on that network can then read every measurement
+of every device and the state of the instance, so only set it when something
+else already restricts who reaches the port.**
+

@@ -31,8 +31,9 @@ services:
       # generate it in /data/secret.key. It encrypts device credentials: losing
       # it means re-entering every one of them.
       # DUMBMONIT_SECRET: replace-me-with-32-random-characters
-      # Lost password: `DUMBMONIT_RESET_PASSWORD=1 docker compose up -d` clears
-      # the password at startup and the UI asks for a new one; then start again
+      # Locked out: `DUMBMONIT_RESET_PASSWORD=1 docker compose up -d` removes
+      # every account and session at startup — devices, rules and channels stay —
+      # and the UI asks you to create the first admin again; then start again
       # without the variable.
       DUMBMONIT_RESET_PASSWORD: ${DUMBMONIT_RESET_PASSWORD:-}
       # Embedded VictoriaMetrics: retention (months, or e.g. 30d / 2y) and the

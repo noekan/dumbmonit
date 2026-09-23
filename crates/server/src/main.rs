@@ -133,6 +133,9 @@ async fn run(config: Config) -> Result<()> {
     scheduler::spawn(state.clone());
     alerting::spawn(state.clone());
     collectors::agent::spawn_policy_scheduler(state.clone());
+    // Sauvegardes locales planifiées de la base, et la mesure qui dit qu'elles
+    // ont bien lieu (`backup::local`).
+    dumbmonit_server::backup::local::spawn(state.clone());
 
     let listener = tokio::net::TcpListener::bind(bind)
         .await

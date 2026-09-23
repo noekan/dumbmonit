@@ -10,6 +10,8 @@ import { normalizeCollector } from './types';
 import type {
 	AgentHost,
 	AgentToken,
+	AgentTokenPayload,
+	RebindWindow,
 	ApiToken,
 	ApiTokenScope,
 	AckPayload,
@@ -43,7 +45,11 @@ import type {
 	Target,
 	TargetId,
 	TargetPayload,
+	ChannelMatcher,
+	MatchPreview,
 	NotificationPolicy,
+	OnboardingState,
+	OnboardingPatch,
 	NotificationPolicyPayload,
 	RuleOverride,
 	RuleOverridePayload,
@@ -502,12 +508,12 @@ export function listAgentTokens(signal?: AbortSignal): Promise<AgentToken[]> {
 /**
  * Creates an enrolment token. `baseUrl` is the address through which machines
  * will reach this server — in practice `location.origin`.
+ *
+ * Without a scope the token is single use: it enrols one machine and then
+ * enrols nothing more. Pass `reusable` for a fleet.
  */
-export function createAgentToken(name: string, baseUrl: string): Promise<CreatedAgentToken> {
-	return request<CreatedAgentToken>('/agent/tokens', {
-		method: 'POST',
-		body: { name, base_url: baseUrl }
-	});
+export function createAgentToken(payload: AgentTokenPayload): Promise<CreatedAgentToken> {
+	return request<CreatedAgentToken>('/agent/tokens', { method: 'POST', body: payload });
 }
 
 export function revokeAgentToken(id: number): Promise<void> {
@@ -525,6 +531,14 @@ export async function getAgentHost(id: TargetId, signal?: AbortSignal): Promise<
 		if (cause instanceof ApiError && cause.missing) return null;
 		throw cause;
 	}
+}
+
+/**
+ * Lets this machine bind itself again at its next batch, for a limited window.
+ * The way back in after a reinstall took the agent's own secret with it.
+ */
+export function allowAgentRebind(id: TargetId): Promise<RebindWindow> {
+	return request<RebindWindow>(`/targets/${id}/agent/rebind`, { method: 'POST' });
 }
 
 // --- API tokens (assistants, MCP) -------------------------------------------
@@ -550,6 +564,20 @@ export function getNotificationPolicy(signal?: AbortSignal): Promise<Notificatio
 
 export function updateNotificationPolicy(payload: NotificationPolicyPayload): Promise<NotificationPolicy> {
 	return request<NotificationPolicy>('/notify/policy', { method: 'PUT', body: payload });
+}
+
+/**
+ * Which of the current devices a routing filter selects.
+ *
+ * The server runs the very filter the alerting engine runs, so the preview and
+ * the delivered notifications can never disagree.
+ */
+export function previewMatcher(matcher: ChannelMatcher, signal?: AbortSignal): Promise<MatchPreview> {
+	return request<MatchPreview>('/notify/match-preview', {
+		method: 'POST',
+		body: { matcher },
+		signal
+	});
 }
 
 /** Overrides of every rule, optionally only those of one device. */
@@ -628,4 +656,20 @@ export function addIncidentUpdate(id: number, payload: IncidentUpdatePayload): P
 /** Public document of a status page: no session, no cookie needed. */
 export function getPublicStatus(slug: string, signal?: AbortSignal): Promise<PublicStatus> {
 	return request<PublicStatus>(`/public/status/${encodeURIComponent(slug)}`, { signal });
+}
+
+// --- First-run guide (anticipated) ------------------------------------------
+
+/**
+ * Reads the first-run guide's state. Anticipated: a server without the route
+ * answers 404, and the caller then treats the guide as finished rather than
+ * showing a guide it could never dismiss.
+ */
+export function getOnboarding(signal?: AbortSignal): Promise<OnboardingState> {
+	return request<OnboardingState>('/onboarding', { signal, anticipated: true });
+}
+
+/** Dismisses a step, or the whole guide. Returns the state the server kept. */
+export function updateOnboarding(patch: OnboardingPatch): Promise<OnboardingState> {
+	return request<OnboardingState>('/onboarding', { method: 'PUT', body: patch });
 }

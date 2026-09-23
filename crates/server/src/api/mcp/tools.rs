@@ -1262,20 +1262,52 @@ fn schedule_text(schedule: &Schedule) -> String {
         Schedule::Once { starts_at, ends_at } => {
             format!("once, {} → {}", rfc3339(*starts_at), rfc3339(*ends_at))
         }
-        Schedule::Weekly { days, start_minute, end_minute, utc_offset_minutes } => {
-            const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        Schedule::Weekly { days, start_minute, end_minute, utc_offset_minutes, timezone } => {
             let days: Vec<&str> =
-                days.iter().filter_map(|d| DAYS.get(*d as usize).copied()).collect();
+                days.iter().filter_map(|d| WEEKDAYS.get(*d as usize).copied()).collect();
             format!(
-                "weekly on {}, {:02}:{:02} → {:02}:{:02} (UTC{:+})",
+                "weekly on {}, {:02}:{:02} → {:02}:{:02} ({})",
                 days.join("/"),
                 start_minute / 60,
                 start_minute % 60,
                 end_minute / 60,
                 end_minute % 60,
-                utc_offset_minutes / 60
+                zone_text(timezone.as_deref(), *utc_offset_minutes)
             )
         }
+        Schedule::Monthly {
+            days,
+            nth_weekdays,
+            start_minute,
+            duration_minutes,
+            utc_offset_minutes,
+            timezone,
+        } => {
+            let mut when: Vec<String> = days.iter().map(|day| format!("day {day}")).collect();
+            for nth in nth_weekdays {
+                let name = WEEKDAYS.get(nth.weekday as usize).copied().unwrap_or("?");
+                let rank = if nth.nth < 0 { "last".to_string() } else { format!("#{}", nth.nth) };
+                when.push(format!("{rank} {name}"));
+            }
+            format!(
+                "monthly on {}, {:02}:{:02} for {} min ({})",
+                when.join("/"),
+                start_minute / 60,
+                start_minute % 60,
+                duration_minutes,
+                zone_text(timezone.as_deref(), *utc_offset_minutes)
+            )
+        }
+    }
+}
+
+const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/// Fuseau d'une fenêtre récurrente, tel qu'on le dit à un assistant.
+fn zone_text(timezone: Option<&str>, utc_offset_minutes: i32) -> String {
+    match timezone.map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) => name.to_string(),
+        None => format!("UTC{:+}", utc_offset_minutes / 60),
     }
 }
 

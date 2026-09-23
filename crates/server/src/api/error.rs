@@ -11,6 +11,9 @@ use serde_json::json;
 pub enum ApiError {
     NotFound(String),
     BadRequest(String),
+    /// Le geste est compris, mais ce porteur-là n'a pas le droit de le faire.
+    /// Le message doit dire quoi faire à la place, pas seulement « interdit ».
+    Forbidden(String),
     Conflict(String),
     Internal(anyhow::Error),
 }
@@ -24,6 +27,7 @@ impl ApiError {
         match self {
             Self::NotFound(what) => (StatusCode::NOT_FOUND, what),
             Self::BadRequest(why) => (StatusCode::BAD_REQUEST, why),
+            Self::Forbidden(why) => (StatusCode::FORBIDDEN, why),
             Self::Conflict(why) => (StatusCode::CONFLICT, why),
             Self::Internal(error) => {
                 tracing::error!(?error, "internal error");

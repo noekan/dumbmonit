@@ -19,6 +19,36 @@ use serde::Deserialize;
 /// instance VictoriaMetrics que l'utilisateur partagerait avec d'autres outils.
 pub const METRIC_PREFIX: &str = "dumbmonit_";
 
+/// Pourquoi une lecture destinée à un collecteur externe a échoué.
+///
+/// Trois cas, et trois réponses différentes : ce que l'appelant peut corriger
+/// (`Refused`, `TooLarge`) n'est pas ce qu'il doit attendre (`Unreachable`).
+/// Les distinguer par un type plutôt que par le texte de l'erreur : « connection
+/// refused » contient le mot « refused » sans être un refus de la requête.
+#[derive(Debug)]
+pub enum ScrapeError {
+    /// VictoriaMetrics a répondu, et a refusé : sélecteur invalide, par exemple.
+    Refused { status: u16, detail: String },
+    /// La réponse dépasse le plafond que l'appelant s'est fixé.
+    TooLarge { max_bytes: usize },
+    /// Injoignable, ou réponse illisible.
+    Unreachable(anyhow::Error),
+}
+
+impl std::fmt::Display for ScrapeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Refused { status, detail } => write!(f, "refused ({status}): {detail}"),
+            Self::TooLarge { max_bytes } => write!(
+                f,
+                "the selected series are too large for one response (over {} MiB)",
+                max_bytes / (1024 * 1024)
+            ),
+            Self::Unreachable(error) => write!(f, "{error:#}"),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Victoria {
     http: reqwest::Client,
@@ -132,6 +162,82 @@ impl Victoria {
         Ok(())
     }
 
+    /// Fédère les séries désignées, au format d'exposition Prometheus.
+    ///
+    /// C'est la route que Prometheus appelle pour lire un autre Prometheus :
+    /// elle rend le dernier point de chaque série retenue par les sélecteurs,
+    /// horodaté, et rien d'autre. La réponse est lue avec un plafond plutôt
+    /// qu'en entier : un sélecteur trop large doit se solder par un refus
+    /// immédiat, pas par la mémoire du serveur.
+    pub async fn federate(
+        &self,
+        selectors: &[String],
+        max_lookback: Option<&str>,
+        max_bytes: usize,
+    ) -> std::result::Result<String, ScrapeError> {
+        let mut query: Vec<(&str, &str)> =
+            selectors.iter().map(|selector| ("match[]", selector.as_str())).collect();
+        if let Some(lookback) = max_lookback {
+            query.push(("max_lookback", lookback));
+        }
+
+        let response = self
+            .http
+            .get(format!("{}/federate", self.base_url))
+            .query(&query)
+            .send()
+            .await
+            .context("federating from VictoriaMetrics")
+            .map_err(ScrapeError::Unreachable)?;
+
+        read_capped(response, max_bytes).await
+    }
+
+    /// Relaie une route de lecture de l'API Prometheus, telle quelle.
+    ///
+    /// C'est ce qui permet à un Grafana de prendre le serveur pour une source
+    /// Prometheus ordinaire : il interroge `/api/v1/query`, `/api/v1/series` et
+    /// consorts, et reçoit la réponse de VictoriaMetrics sans traduction. La
+    /// liste des routes relayées est tenue par l'appelant ; ici, rien n'est
+    /// interprété — sauf la taille, qui reste bornée.
+    pub async fn proxy_read(
+        &self,
+        path: &str,
+        query: Option<&str>,
+        form: Option<String>,
+        max_bytes: usize,
+    ) -> std::result::Result<(u16, String), ScrapeError> {
+        let url = match query.filter(|q| !q.is_empty()) {
+            Some(query) => format!("{}/api/v1/{path}?{query}", self.base_url),
+            None => format!("{}/api/v1/{path}", self.base_url),
+        };
+        let request = match form {
+            Some(body) => self
+                .http
+                .post(url)
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(body),
+            None => self.http.get(url),
+        };
+
+        let response = request
+            .send()
+            .await
+            .context("querying VictoriaMetrics")
+            .map_err(ScrapeError::Unreachable)?;
+        // Le statut est relayé tel quel : une requête PromQL invalide doit
+        // revenir à Grafana avec le message de VictoriaMetrics, qui nomme
+        // l'erreur de syntaxe, et non sous une forme réécrite ici. Un refus
+        // n'est donc pas une erreur pour cet appelant, contrairement à la
+        // fédération.
+        let status = response.status().as_u16();
+        match read_capped(response, max_bytes).await {
+            Ok(body) => Ok((status, body)),
+            Err(ScrapeError::Refused { status, detail }) => Ok((status, detail)),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Exécute une requête MetricsQL instantanée.
     pub async fn query(&self, query: &str) -> Result<Vec<InstantSeries>> {
         let response = self
@@ -151,6 +257,37 @@ impl Victoria {
         let parsed: InstantResponse =
             response.json().await.context("unreadable VictoriaMetrics response")?;
         Ok(parsed.data.result)
+    }
+}
+
+/// Lit le corps d'une réponse en s'arrêtant net au-delà du plafond.
+///
+/// Le corps n'est jamais accumulé en entier avant d'être mesuré : un sélecteur
+/// qui ramènerait toute la base est interrompu en cours de lecture, pas après.
+async fn read_capped(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+) -> std::result::Result<String, ScrapeError> {
+    let refused = (!response.status().is_success()).then(|| response.status().as_u16());
+    let mut body = Vec::with_capacity(8 * 1024);
+    loop {
+        let chunk = response
+            .chunk()
+            .await
+            .context("reading the answer from VictoriaMetrics")
+            .map_err(ScrapeError::Unreachable)?;
+        let Some(chunk) = chunk else { break };
+        body.extend_from_slice(&chunk);
+        if body.len() > max_bytes {
+            return Err(ScrapeError::TooLarge { max_bytes });
+        }
+    }
+    let text = String::from_utf8(body)
+        .context("the answer from VictoriaMetrics is not valid UTF-8")
+        .map_err(ScrapeError::Unreachable)?;
+    match refused {
+        Some(status) => Err(ScrapeError::Refused { status, detail: text.trim().to_string() }),
+        None => Ok(text),
     }
 }
 

@@ -10,10 +10,8 @@ const ONLY = process.argv.slice(2);
 const FULL = process.env.FULL !== '0';
 const SIZES = process.env.DESKTOP_ONLY ? [[1440, 900, 'desktop']] : [[1440, 900, 'desktop'], [390, 844, 'mobile']];
 const pages = [
-  ['overview', '/'], ['devices', '/targets'], ['device-pve', '/targets/27'], ['device-pbs', '/targets/28'], ['device-nas', '/targets/29'],
-  ['device-agent', '/targets/6'], ['new', '/targets/new'], ['new-snmp', '/targets/new?kind=snmp'], ['new-proxmox', '/targets/new?kind=proxmox'],
-  ['alerts', '/alerts'], ['alerts-notifications', '/alerts#notifications'], ['status', '/status'], ['status-new', '/status/new'],
-  ['settings', '/settings'], ['login', '/login'], ['setup', '/setup'], ['wall', '/wall']
+  ['device-pmg', '/targets/36'], ['device-pdm', '/targets/37'],
+  ['device-pve', '/targets/27'], ['device-pbs', '/targets/28']
 ];
 (async () => {
   const browser = await puppeteer.launch({ executablePath: '/usr/bin/chromium-browser', args: ['--no-sandbox', '--disable-gpu'] });

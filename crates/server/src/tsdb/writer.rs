@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 
 use super::Victoria;
+use crate::stats::stats;
 
 /// Au-delà, on considère que VictoriaMetrics est durablement indisponible et on
 /// sacrifie les échantillons les plus anciens plutôt que la mémoire du serveur.
@@ -101,6 +102,7 @@ async fn flush(victoria: &Victoria, buffer: &mut Vec<Sample>) {
     match victoria.write(buffer).await {
         Ok(()) => {
             debug!(count = buffer.len(), "samples written");
+            stats().samples_written(buffer.len(), 0);
             buffer.clear();
         }
         Err(error) => {
@@ -116,6 +118,7 @@ async fn flush(victoria: &Victoria, buffer: &mut Vec<Sample>) {
             } else {
                 warn!(%error, pending = buffer.len(), "write deferred");
             }
+            stats().sample_write_failed(buffer.len());
         }
     }
 }

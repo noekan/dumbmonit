@@ -1061,6 +1061,21 @@ async fn build_public(state: &AppState, page: &StatusPage) -> ApiResult<PublicSt
         items.iter().filter_map(|item| targets.get(&item.target_id)).collect();
     let metrics = collect_metrics(&state.victoria, &shown, days, now).await;
 
+    // Maintenance planifiée : une fenêtre de maintenance posée dans l'alerting
+    // vaut annonce publique. Sans cela, la page montre du rouge pendant que
+    // l'opérateur est sciemment en train de redémarrer la machine, et les
+    // lecteurs apprennent à ignorer la page.
+    let silences = db::alerts::list_silences(&state.pool).await?;
+    let planned: HashSet<TargetId> = shown
+        .iter()
+        .filter(|target| {
+            let labels = target.base_labels();
+            crate::alerting::silence::first_match(&silences, now, Some(target.id), &labels)
+                .is_some()
+        })
+        .map(|target| target.id)
+        .collect();
+
     // Incidents : ceux de la page et les globaux, depuis le début de l'historique
     // affiché (au moins trente jours, pour la liste des incidents passés).
     let since = now - TimeDelta::days(days.max(PAST_INCIDENTS_DAYS));
@@ -1116,19 +1131,24 @@ async fn build_public(state: &AppState, page: &StatusPage) -> ApiResult<PublicSt
     let mut groups: Vec<PublicGroup> = Vec::new();
     let mut n_down = 0usize;
     let mut n_degraded = 0usize;
+    let mut n_maintenance = 0usize;
     let mut n_items = 0usize;
     for item in items {
         let Some(target) = targets.get(&item.target_id) else { continue };
         let mut state_word = item_state(target, statuses.get(&target.id), &metrics, now);
         // Pendant une maintenance, une panne est attendue : on le dit plutôt que
-        // d'afficher une alerte que personne ne doit traiter.
-        if maintenance_active && matches!(state_word, "down" | "degraded") {
+        // d'afficher une alerte que personne ne doit traiter. Une maintenance
+        // déclarée sur la page vaut pour tous ses services ; une fenêtre de
+        // maintenance de l'alerting ne vaut que pour l'équipement qu'elle vise.
+        let under_maintenance = maintenance_active || planned.contains(&target.id);
+        if under_maintenance && matches!(state_word, "down" | "degraded") {
             state_word = "maintenance";
         }
         n_items += 1;
         match state_word {
             "down" => n_down += 1,
             "degraded" => n_degraded += 1,
+            "maintenance" => n_maintenance += 1,
             _ => {}
         }
         let daily = metrics.daily.get(&target.id).unwrap_or(&empty_daily);
@@ -1159,7 +1179,12 @@ async fn build_public(state: &AppState, page: &StatusPage) -> ApiResult<PublicSt
         }
     }
 
-    let overall = if maintenance_active {
+    // « Maintenance » en tête de page dès qu'une maintenance est déclarée, ou
+    // que tout ce qui ne va pas est couvert par une fenêtre : sinon un service
+    // réellement en panne serait maquillé en maintenance.
+    let overall = if maintenance_active
+        || (n_maintenance > 0 && n_down == 0 && n_degraded == 0 && !open_incident)
+    {
         "maintenance"
     } else if major_incident || (n_down > 0 && n_down == n_items) {
         "major"

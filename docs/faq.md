@@ -2,17 +2,23 @@
 
 ## I lost the password
 
-There is no recovery e-mail and no second account. Start the server once with
-`DUMBMONIT_RESET_PASSWORD=1`:
+Ask another administrator first: in Settings → **Users**, **Edit** on your
+account sets a new password and shows it once, and **Reset 2FA** on the same
+row clears a second factor that locks you out. That is the everyday answer —
+an instance with two admin accounts never needs the rest of this page.
+
+When nobody can sign in any more, there is no recovery e-mail: start the
+server once with `DUMBMONIT_RESET_PASSWORD=1`:
 
 ```bash
 DUMBMONIT_RESET_PASSWORD=1 docker compose up -d dumbmonit
 ```
 
-The password and every session are cleared at startup and the UI shows
-`/setup` again. Choose a new password, then start again without the variable
-(`docker compose up -d dumbmonit`, with the variable unset or empty in your
-environment). Devices, rules and channels are untouched.
+Every account and every session is removed at startup and the UI shows
+`/setup` again. Create the first administrator, then start again without the
+variable (`docker compose up -d dumbmonit`, with the variable unset or empty in
+your environment). Devices, rules, channels and the single sign-on settings are
+untouched.
 
 ## No data after adding a device
 

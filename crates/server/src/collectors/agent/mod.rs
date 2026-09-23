@@ -31,8 +31,11 @@ use dumbmonit_proto::{Collector, MetricKind, ProbeError, Sample, Target};
 use sqlx::SqlitePool;
 
 pub use policy::spawn_policy_scheduler;
-pub use receive::{IngestError, ingest};
-pub use store::{HostInfo, TokenRecord, create_token, host, list_hosts, list_tokens, revoke_token};
+pub use receive::{BINDING_MISMATCH, IngestError, ingest};
+pub use store::{
+    HostInfo, KeyAuth, REBIND_WINDOW_MINUTES, TokenPolicy, TokenRecord, allow_rebind,
+    authorise_key, create_token, host, list_hosts, list_tokens, revoke_token,
+};
 
 /// Vérifie un en-tête `Authorization` d'agent et renvoie l'identifiant du jeton.
 ///
@@ -51,6 +54,11 @@ pub async fn authenticate_token(
 /// Note l'usage d'un jeton (canal de commandes).
 pub async fn touch_token(pool: &SqlitePool, id: i64) -> Result<(), anyhow::Error> {
     store::touch_token(pool, id).await
+}
+
+/// Extrait le secret de liaison d'un en-tête `x-dumbmonit-agent-secret`.
+pub fn extract_secret(header: Option<&str>) -> Option<&str> {
+    token::extract_secret(header)
 }
 
 /// Tolérance minimale avant de déclarer une machine muette.
@@ -152,7 +160,8 @@ mod tests {
             .await
             .expect("chiffrement");
 
-        let (token_record, _) = store::create_token(&pool, "parc").await.expect("jeton");
+        let (token_record, _) =
+            store::create_token(&pool, "parc", store::TokenPolicy::default()).await.expect("jeton");
         let identity = dumbmonit_proto::AgentIdentity {
             hostname: "nas".into(),
             os: "linux".into(),
@@ -165,9 +174,11 @@ mod tests {
             site: None,
             machine_id: Some("id-nas".into()),
             tags: Default::default(),
+            binding_supported: true,
         };
-        let registration =
-            store::register(&pool, &cipher, &identity, token_record.id).await.expect("machine");
+        let registration = store::register(&pool, &cipher, &identity, token_record.id, None)
+            .await
+            .expect("machine");
 
         if let Some(ts) = last_seen_ms {
             store::record_batch(&pool, registration.target_id, ts, 10).await.expect("lot");
@@ -190,7 +201,11 @@ mod tests {
 
         let samples = AgentCollector::new(pool).probe(&target(30)).await.expect("cible joignable");
         let age = samples.iter().find(|s| s.metric == "agent_last_batch_age_seconds").expect("âge");
-        assert!((4.0..=10.0).contains(&age.value), "âge inattendu : {}", age.value);
+        // Borne haute large à dessein : sur une machine chargée, la préparation
+        // du test prend elle-même plusieurs secondes. Ce que la borne attrape
+        // n'est pas une dérive de quelques secondes mais une erreur d'unité —
+        // des millisecondes rendues comme des secondes, par exemple.
+        assert!((4.0..=60.0).contains(&age.value), "âge inattendu : {}", age.value);
     }
 
     #[tokio::test]

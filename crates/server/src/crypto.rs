@@ -35,8 +35,18 @@ impl Cipher {
             .hash_password_into(secret.as_bytes(), salt, &mut key_bytes)
             .map_err(|e| anyhow::anyhow!("Argon2id key derivation failed: {e}"))?;
 
+        Ok(Self::from_key(key_bytes))
+    }
+
+    /// Construit un chiffreur à partir d'une clé de 32 octets déjà dérivée.
+    ///
+    /// Sert aux sauvegardes exportables ([`crate::backup`]), qui dérivent leur
+    /// clé d'une phrase de passe saisie par l'opérateur avec des paramètres
+    /// Argon2id qui leur sont propres et inscrits dans le lot — et non du secret
+    /// d'instance, qui n'existe pas encore sur la machine de destination.
+    pub fn from_key(key_bytes: [u8; 32]) -> Self {
         let key = Key::<Aes256Gcm>::from(key_bytes);
-        Ok(Self { inner: Aes256Gcm::new(&key) })
+        Self { inner: Aes256Gcm::new(&key) }
     }
 
     /// Chiffre en préfixant le nonce aléatoire au texte chiffré.

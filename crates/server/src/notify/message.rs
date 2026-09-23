@@ -432,6 +432,9 @@ fn line(item: &GroupItem, now: DateTime<Utc>) -> String {
     if item.reason == NotifyReason::Escalation {
         line.push_str(" — escalation");
     }
+    if item.reason == NotifyReason::Unacked {
+        line.push_str(" — still unacknowledged");
+    }
     if item.phase == EffectivePhase::Suppressed {
         line.push_str(" — suppressed");
     }
@@ -712,6 +715,7 @@ mod tests {
     fn item(name: &str, reason: NotifyReason, severity: Severity) -> GroupItem {
         GroupItem {
             fingerprint: name.to_string(),
+            rule_uid: name.to_string(),
             rule_name: name.to_string(),
             severity,
             reason,
@@ -731,6 +735,8 @@ mod tests {
         AlertGroup {
             target_id: Some(1),
             target_name: "nas".to_string(),
+            target_kind: "snmp".to_string(),
+            target_tags: std::collections::BTreeMap::new(),
             severity: Severity::Warning,
             items,
             channels: Vec::new(),
@@ -877,6 +883,12 @@ mod tests {
         let message =
             render(&group(vec![item("CPU", NotifyReason::Escalation, Severity::Critical)]));
         assert!(message.text.contains("escalation"));
+    }
+
+    #[test]
+    fn un_relais_d_escalade_se_lit_dans_la_ligne() {
+        let message = render(&group(vec![item("CPU", NotifyReason::Unacked, Severity::Critical)]));
+        assert!(message.text.contains("still unacknowledged"), "{}", message.text);
     }
 
     #[test]

@@ -57,6 +57,12 @@ serde_yaml_ng = "0.10"
 # petit.
 regex = { version = "1", default-features = false, features = ["std", "unicode-perl"] }
 
+[dev-dependencies]
+# Répertoires jetables pour les tests du secret de liaison : ils écrivent un
+# fichier et en vérifient les permissions, ce qui n'a de sens que sur un vrai
+# système de fichiers.
+tempfile = "3"
+
 [target.'cfg(windows)'.dependencies]
 # Intégration au gestionnaire de services : point d'entrée du service, prise en
 # charge de l'ordre d'arrêt, et interrogation de l'état des services surveillés.

@@ -2,6 +2,7 @@ mod agent_commands;
 mod agent_files;
 mod alerts;
 mod auth;
+mod backup;
 mod channels;
 mod collectors;
 mod discovery;
@@ -12,9 +13,11 @@ mod mcp;
 mod metrics;
 mod notify_policy;
 mod oidc;
+mod onboarding;
 mod pbs;
 mod pdm;
 mod pmg;
+mod prometheus;
 mod proxmox;
 mod push;
 mod relay;
@@ -62,6 +65,7 @@ pub fn router(state: AppState) -> Router {
         .route("/users/{id}", put(users::update).delete(users::delete))
         .route("/collectors", get(collectors::list))
         .route("/discovery", post(discovery::scan))
+        .route("/onboarding", get(onboarding::get).put(onboarding::put))
         .route("/targets", get(targets::list).post(targets::create))
         .route("/targets/{id}", get(targets::get_one).put(targets::update).delete(targets::delete))
         .route("/targets/{id}/probe", post(targets::probe_now))
@@ -104,6 +108,8 @@ pub fn router(state: AppState) -> Router {
         .merge(pmg::routes())
         // Moniteurs en poussée : jeton d'une cible et sa régénération (`push.rs`).
         .merge(push::ui_routes())
+        // Sauvegarde et restauration de l'instance (`backup.rs`).
+        .merge(backup::routes())
         // `route_layer` plutôt que `layer` : le garde ne s'applique qu'aux routes
         // effectivement déclarées ici, jamais au repli qui sert l'interface.
         .route_layer(middleware::from_fn_with_state(
@@ -157,6 +163,10 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .nest("/api", public.merge(protected).merge(assistant).fallback(spa::api_not_found))
+        // Lecture par un Prometheus ou un Grafana déjà en place, hors `/api` :
+        // `/metrics` (santé de l'instance) et `/federate` (les mesures), sous
+        // jeton `read` — voir `prometheus.rs`.
+        .merge(prometheus::routes(state.clone()))
         // Distribution de l'agent, hors `/api` : ce sont les URL que les scripts
         // d'installation lisent, publiques par nécessité (voir `agent_files`).
         .route("/install.sh", get(agent_files::install_sh))
@@ -181,21 +191,90 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// Politique de contenu commune, sans la partie qui dépend de la requête.
+///
+/// L'interface ne charge rien qui ne vienne d'elle-même : les polices sont
+/// embarquées dans le build, uPlot aussi, et le seul appel réseau est celui de
+/// son propre `/api`. Tout part donc de `default-src 'none'`, et chaque
+/// directive ouverte ci-dessous l'est pour une raison vérifiée sur le build :
+///
+/// - `script-src` : `'self'` pour les modules de `_app/`, plus le nonce de la
+///   réponse pour les deux scripts en ligne de la page (choix du thème avant le
+///   premier rendu, amorce de SvelteKit). Leur contenu — donc leur empreinte —
+///   change à chaque construction ; un nonce par réponse est ce qui permet de
+///   s'en passer sans rouvrir `'unsafe-inline'`.
+/// - `style-src` : `'unsafe-inline'` est **nécessaire et ne peut pas être
+///   resserré**. Svelte pose des attributs `style=` sur les éléments (les
+///   directives `style:` des composants, le `display: contents` du gabarit), et
+///   un attribut n'est couvert ni par un nonce ni par une empreinte — seul
+///   `'unsafe-hashes'` le serait, ce qui revient au même en moins lisible. Le
+///   risque résiduel est l'exfiltration par feuille de style injectée, qui
+///   suppose déjà une injection HTML.
+/// - `img-src` : les icônes de l'interface sont des `data:` SVG produits par le
+///   build (les flèches de `<select>`, par exemple).
+/// - `font-src`, `connect-src` : `'self'` et rien d'autre. Aucune police
+///   Google, aucun CDN, aucune télémétrie — et la politique le rend vérifiable.
+/// - `base-uri 'none'`, `form-action 'self'`, `object-src` hérité de
+///   `default-src 'none'` : de quoi rendre inopérantes les variantes
+///   d'injection qui ne passent pas par un script.
+const CSP_BASE: &str = "default-src 'none'; \
+     style-src 'self' 'unsafe-inline'; \
+     img-src 'self' data:; \
+     font-src 'self'; \
+     connect-src 'self'; \
+     base-uri 'none'; \
+     form-action 'self'";
+
 /// En-têtes de protection posés sur toute réponse, interface comme API.
 ///
 /// L'interface est une application monopage : encadrée dans une page tierce,
 /// elle se prête au détournement de clic. Seules les pages de statut publiques
 /// (`/s/…`) sont faites pour être intégrées ailleurs ; elles restent encadrables.
-async fn security_headers(request: Request, next: Next) -> Response {
+async fn security_headers(mut request: Request, next: Next) -> Response {
     let embeddable = request.uri().path().starts_with("/s/");
+    // Un nonce par réponse : 128 bits d'aléa, inutilisables une seconde fois.
+    let nonce = hex::encode(rand::random::<[u8; 16]>());
+    request.extensions_mut().insert(spa::Nonce(nonce.clone()));
+
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
     headers.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
     headers.insert("referrer-policy", HeaderValue::from_static("same-origin"));
-    if !embeddable {
-        headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
-        headers
-            .insert("content-security-policy", HeaderValue::from_static("frame-ancestors 'none'"));
+    let policy = match embeddable {
+        // Une page de statut est faite pour être intégrée dans l'intranet de
+        // quelqu'un : lui interdire d'être encadrée la rendrait inutile.
+        true => format!("{CSP_BASE}; script-src 'self' 'nonce-{nonce}'"),
+        false => {
+            headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+            format!("{CSP_BASE}; script-src 'self' 'nonce-{nonce}'; frame-ancestors 'none'")
+        }
+    };
+    if let Ok(value) = HeaderValue::from_str(&policy) {
+        headers.insert("content-security-policy", value);
     }
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_policy_forbids_everything_it_does_not_name() {
+        assert!(CSP_BASE.starts_with("default-src 'none'"));
+        // Rien d'extérieur : pas de joker, pas de `http:`, aucun domaine tiers.
+        assert!(!CSP_BASE.contains('*'), "un joker ouvrirait la porte : {CSP_BASE}");
+        assert!(!CSP_BASE.contains("http"), "aucune origine externe : {CSP_BASE}");
+        // Les scripts ne sont jamais autorisés en ligne sans nonce.
+        assert!(!CSP_BASE.contains("script-src"), "script-src dépend de la réponse");
+    }
+
+    #[test]
+    fn each_response_gets_its_own_nonce() {
+        let first = hex::encode(rand::random::<[u8; 16]>());
+        let second = hex::encode(rand::random::<[u8; 16]>());
+        assert_ne!(first, second);
+        // Le nonce doit tenir dans un en-tête HTTP tel quel.
+        assert!(HeaderValue::from_str(&format!("{CSP_BASE}; script-src 'nonce-{first}'")).is_ok());
+    }
 }

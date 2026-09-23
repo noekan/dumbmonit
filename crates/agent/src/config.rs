@@ -152,6 +152,10 @@ pub struct Config {
     /// Sauvegardes Plakar.
     pub plakar: PlakarConfig,
     pub max_buffered_samples: usize,
+    /// Fichier où l'agent range le secret de liaison que le serveur lui
+    /// attribue. À côté de la configuration par défaut, pour qu'un déplacement
+    /// de l'une emmène l'autre.
+    pub secret_path: PathBuf,
     pub log_level: tracing::Level,
     /// Variables `EZYMONIT_*` encore utilisées, sous la forme (ancien nom, nouveau
     /// nom) : le journal n'existe pas encore quand la configuration est lue, les
@@ -189,6 +193,23 @@ impl fmt::Debug for Config {
 }
 
 impl Config {
+    /// Emplacement du secret de liaison lorsque rien ne le précise.
+    ///
+    /// `DUMBMONIT_AGENT_SECRET_FILE` prime — c'est ce qu'on monte en volume pour
+    /// un agent en conteneur, dont le `/etc` disparaît à chaque recréation.
+    fn resolve_secret_path(env: &EnvSource, config_path: Option<&Path>) -> PathBuf {
+        if let Some(explicit) = env.get("DUMBMONIT_AGENT_SECRET_FILE") {
+            let explicit = explicit.trim();
+            if !explicit.is_empty() {
+                return PathBuf::from(explicit);
+            }
+        }
+        match config_path {
+            Some(path) => crate::binding::beside(path),
+            None => crate::binding::beside(&Self::default_path()),
+        }
+    }
+
     /// Emplacement du fichier de configuration lorsque rien n'est précisé.
     ///
     /// Une installation antérieure au renommage du produit (`/etc/ezymonit`,
@@ -229,10 +250,17 @@ impl Config {
                 );
             }
         };
-        Self::merge(file, EnvSource::process())
+        Self::merge_at(file, EnvSource::process(), Some(path))
     }
 
+    /// Fusion sans fichier de configuration sur le disque : les tests s'en
+    /// servent pour exercer les surcharges d'environnement à l'unité.
+    #[cfg(test)]
     fn merge(file: FileConfig, env: EnvSource) -> Result<Self> {
+        Self::merge_at(file, env, None)
+    }
+
+    fn merge_at(file: FileConfig, env: EnvSource, config_path: Option<&Path>) -> Result<Self> {
         let server_url = env
             .get("DUMBMONIT_AGENT_URL")
             .or(file.server_url)
@@ -417,6 +445,7 @@ impl Config {
             system_health,
             plakar,
             max_buffered_samples,
+            secret_path: Self::resolve_secret_path(&env, config_path),
             log_level,
             deprecated_env: env.deprecated(),
         })

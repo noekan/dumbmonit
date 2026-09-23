@@ -17,6 +17,7 @@ use tracing::{debug, info, warn};
 use crate::collectors::relay::{self, EnqueueError, JobResult};
 use crate::db;
 use crate::state::AppState;
+use crate::stats::stats;
 
 /// Granularité de la boucle. Plus fin serait inutile : la période minimale
 /// d'interrogation est de dix secondes.
@@ -105,11 +106,19 @@ async fn run(state: AppState) -> anyhow::Result<()> {
                 probe_once(state, target).await;
             });
         }
+
+        // Ce qui reste dû après le tour : des cibles que la boucle n'a pas pu
+        // lancer faute de jeton d'exécution. C'est la seule mesure de retard qui
+        // ait un sens — `/metrics` la publie sous `dumbmonit_scheduler_backlog`.
+        let ended = Instant::now();
+        let backlog = next_run.values().filter(|due| **due <= ended).count();
+        stats().scheduler_cycle(ended.duration_since(now), backlog);
     }
 }
 
 async fn probe_once(state: AppState, target: dumbmonit_proto::Target) {
     let result = state.collectors.probe(&target, state.config.probe_timeout).await;
+    stats().probe(&target.kind, result.is_err());
 
     let error_message = match result {
         Ok(samples) => {

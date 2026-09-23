@@ -159,6 +159,7 @@ Everything goes through environment variables; none is required.
 | `DUMBMONIT_COOKIE_SECURE` | *(off)* | Set to `1` behind a TLS reverse proxy to mark the session cookie `Secure`. |
 | `DUMBMONIT_ALERT_INTERVAL_SECS` | `30` | Alert evaluation period (never below 10). |
 | `DUMBMONIT_ALERT_HISTORY_DAYS` | 90 days | Retention of alert history. See the [configuration reference](../reference/configuration.md) for a caveat about its unit. |
+| `DUMBMONIT_BACKUP_ENABLED` | on | Scheduled local backups of the database into `/data/backups/`. `DUMBMONIT_BACKUP_DIR`, `_INTERVAL_HOURS` (24) and `_KEEP` (7) tune them; see [Backup and restore](backup.md). |
 
 The full list, with details, is in the [configuration reference](../reference/configuration.md).
 `EZYMONIT_*` names from before the rename are still read as a fallback; see
@@ -171,9 +172,11 @@ key derived from the instance secret. On first start, DumbMonit generates this
 secret in `/data/secret.key` (inside the `dumbmonit-data` volume).
 
 !!! danger "Back up `secret.key` together with the database"
-    Without it, device credentials are unrecoverable. The server detects a
+    Without it, device credentials are unrecoverable: a database restored on its
+    own gives an instance that cannot talk to anything. The server detects a
     missing or changed key at startup and refuses to continue with an explicit
-    message, rather than failing silently on every probe.
+    message, rather than failing silently on every probe. The scheduled backups
+    copy it for you — see [Backup and restore](backup.md).
 
 If you prefer to own the secret, set `DUMBMONIT_SECRET` in the Compose file
 instead (32 random characters or more). Keep it in your password manager.
@@ -186,6 +189,12 @@ docker compose up -d
 ```
 
 Database migrations run at startup. VictoriaMetrics data is untouched.
+
+!!! tip "Take a backup first"
+    **Settings → Backup → Back up now** writes a consistent copy of the database
+    and of `secret.key` into `/data/backups/` in a few seconds, and it is what
+    you restore from if the upgrade goes wrong. See
+    [Backup and restore](backup.md).
 
 ### From 0.1.0-alpha.1
 
@@ -253,10 +262,16 @@ One named volume, `dumbmonit-data`, holds everything:
 |---|---|
 | `dumbmonit.db` | Devices, rules, channels, alert state, sessions. |
 | `secret.key` | The instance secret. |
+| `backups/` | The scheduled local backups: a copy of the database and of the secret, daily by default, seven kept. |
 | `vm/` | VictoriaMetrics time series (12 months of retention by default). |
 
-The volume has a fixed name, whatever the directory of the Compose file is
-called. To back up, stop the stack and archive it:
+DumbMonit backs its own database up on a schedule, and exports the whole
+configuration — devices, credentials, rules, channels — as a single file
+encrypted with a passphrase you choose, which restores onto a fresh instance.
+Both are in **[Backup and restore](backup.md)**, together with what to do before
+an upgrade and the one rule about `secret.key` that is worth reading twice.
+
+To archive the volume itself, graphs included, stop the stack and tar it:
 
 ```bash
 docker compose stop

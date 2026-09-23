@@ -8,6 +8,7 @@ use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
 use crate::backoff::Backoff;
+use crate::binding::Binding;
 use crate::buffer::PendingBuffer;
 use crate::client::{PushClient, PushError};
 use crate::collect::docker::DockerProbe;
@@ -67,13 +68,25 @@ pub struct Agent {
     /// Période courante : celle de la configuration, jusqu'à ce que le serveur en
     /// demande une autre dans son accusé de réception.
     interval: Duration,
+    /// Secret de liaison de cette machine : ce qui prouve au serveur que c'est
+    /// bien elle qui parle, et pas une voisine porteuse du même jeton de parc.
+    binding: Binding,
+    /// Vrai une fois le refus de liaison signalé, pour ne le dire qu'une fois
+    /// par panne plutôt qu'à chaque tentative.
+    binding_refused: bool,
 }
 
 impl Agent {
     pub fn new(config: Config) -> Result<Self> {
         let identity = crate::identity::detect(&config);
-        let client = PushClient::new(&config.server_url, &config.token, HTTP_TIMEOUT)
-            .context("preparing the push client")?;
+        let binding = Binding::load(&config.secret_path);
+        let client = PushClient::new(
+            &config.server_url,
+            &config.token,
+            binding.secret().map(str::to_string),
+            HTTP_TIMEOUT,
+        )
+        .context("preparing the push client")?;
         let commands = CommandRunner::new(
             config.commands,
             client.clone(),
@@ -91,6 +104,8 @@ impl Agent {
             backoff: Backoff::new(BACKOFF_BASE, BACKOFF_MAX),
             commands,
             relay: None,
+            binding,
+            binding_refused: false,
             identity,
             client,
             config,
@@ -245,9 +260,16 @@ impl Agent {
                     info!(attempts = self.backoff.attempts(), "connection to the server restored");
                 }
                 self.backoff.reset();
+                self.binding_refused = false;
                 debug!(target = ack.target_id, accepted = ack.accepted, "batch accepted");
+                self.adopt_binding(ack.agent_secret.clone(), ack.bound);
                 self.adopt_interval(ack.interval_secs);
                 FlushOutcome::Sent { count }
+            }
+            Err(PushError::Forbidden(message)) => {
+                self.buffer.restore(batch.samples);
+                self.on_binding_refused(&message);
+                FlushOutcome::Failed(PushError::Forbidden(message))
             }
             Err(error) if error.is_retryable() => {
                 self.buffer.restore(batch.samples);
@@ -281,6 +303,41 @@ impl Agent {
             }
             _ => warn!(pending, "measurements lost: the server did not answer before shutdown"),
         }
+    }
+
+    /// Range le secret de liaison que le serveur vient d'attribuer.
+    ///
+    /// Il n'arrive qu'une fois, dans l'accusé de réception du lot qui a lié la
+    /// machine. Tout ce qui suit le présentera à chaque requête.
+    fn adopt_binding(&mut self, issued: Option<String>, bound: bool) {
+        let Some(secret) = issued else {
+            if !bound {
+                // Le serveur nous connaît sans nous avoir liés : c'est le cas
+                // d'un enregistrement d'avant la liaison, pas une anomalie.
+                debug!("this machine is not bound to this agent installation yet");
+            }
+            return;
+        };
+        self.binding.save(&secret);
+        self.client.set_secret(Some(secret));
+        info!("this machine is now bound to this agent installation");
+    }
+
+    /// Le serveur ne reconnaît pas notre liaison.
+    ///
+    /// On oublie le secret : le garder n'ouvre rien, et repartir sans lui est
+    /// exactement ce qu'il faut faire dès que quelqu'un aura cliqué « Allow
+    /// re-enrolment » dans l'interface. Les mesures restent en tampon
+    /// entre-temps, l'agent réessaie avec sa temporisation habituelle.
+    fn on_binding_refused(&mut self, message: &str) {
+        self.binding.forget();
+        self.client.set_secret(None);
+        if self.binding_refused {
+            debug!(reason = message, "still refused by the server");
+            return;
+        }
+        self.binding_refused = true;
+        warn!(reason = message, "this agent is not recognised for this machine");
     }
 
     /// Adopte la période demandée par le serveur.
@@ -334,6 +391,7 @@ mod tests {
             system_health: crate::collect::system_health::SystemHealthConfig::default(),
             plakar: crate::collect::plakar::PlakarConfig::default(),
             max_buffered_samples: 1_000,
+            secret_path: std::path::PathBuf::from("/inexistant/agent-secret"),
             log_level: tracing::Level::INFO,
             deprecated_env: Vec::new(),
         }
