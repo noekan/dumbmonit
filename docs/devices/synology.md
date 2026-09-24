@@ -70,6 +70,16 @@ A Synology device gets its own panel above the charts:
 * **Volumes** — one row per volume: usage bar, used of total, RAID type and
   file system, the volume's state in DSM's word (normal, degraded, crashed,
   repairing…);
+* **Storage pools** — one row per pool: RAID type, the pool's state in DSM's
+  word, how many of its disks DSM reports as failed, and how much of it is
+  already handed to volumes. This is where redundancy lives: a RAID 5 that
+  loses a disk keeps the volume on top of it at `normal` while it rebuilds, so
+  the volume row says nothing and this one says everything. A pool fully
+  allocated to its volumes is the normal end state, not a warning, so this
+  figure is a sentence rather than a coloured gauge;
+* **SSD cache** — one row per cache: its RAID type, its state and its size.
+  The section is absent on a NAS without a cache. DSM's `load_info` carries no
+  cache mode or hit rate, so neither is shown;
 * **Disks** — one row per bay: model, size, temperature, SMART verdict, DSM's
   bad-sector verdict, the unreadable-sector counter and, on an SSD, the life
   left as a small bar;

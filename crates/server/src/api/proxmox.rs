@@ -53,6 +53,10 @@ pub struct GuestView {
     pub memory_used_bytes: Option<f64>,
     pub memory_total_bytes: Option<f64>,
     pub memory_percent: Option<f64>,
+    /// Mémoire occupée sur l'hôte par le processus de la machine : ce que
+    /// l'invité voit, plus le surcoût d'émulation. Elle dépasse régulièrement
+    /// la mémoire allouée, et c'est elle que paie l'hyperviseur.
+    pub memory_host_bytes: Option<f64>,
     /// Mémoire effectivement allouée par le ballon, quand il est configuré.
     pub balloon_bytes: Option<f64>,
     /// Occupation du disque racine : conteneurs toujours, machines virtuelles
@@ -118,9 +122,9 @@ fn lookback(target: &Target) -> u64 {
 }
 
 const GAUGES: &str = "status_info|running|cpu_percent|cpu_count|memory_used_bytes|\
-                      memory_total_bytes|memory_percent|balloon_bytes|disk_used_bytes|\
-                      disk_total_bytes|disk_used_percent|agent_running|uptime_seconds|\
-                      pool_info|locked|os_info|ip_info";
+                      memory_total_bytes|memory_percent|memory_host_bytes|balloon_bytes|\
+                      disk_used_bytes|disk_total_bytes|disk_used_percent|agent_running|\
+                      uptime_seconds|pool_info|locked|os_info|ip_info";
 
 fn gauges_query(id: TargetId, window: u64) -> String {
     format!(
@@ -183,6 +187,7 @@ fn assemble(
             "memory_used_bytes" => guest.memory_used_bytes = Some(value),
             "memory_total_bytes" => guest.memory_total_bytes = Some(value),
             "memory_percent" => guest.memory_percent = Some(value),
+            "memory_host_bytes" => guest.memory_host_bytes = Some(value),
             "balloon_bytes" => guest.balloon_bytes = Some(value),
             "disk_used_bytes" => guest.disk_used_bytes = Some(value),
             "disk_total_bytes" => guest.disk_total_bytes = Some(value),
@@ -236,6 +241,7 @@ fn assemble(
             guest.cpu_percent = None;
             guest.memory_used_bytes = None;
             guest.memory_percent = None;
+            guest.memory_host_bytes = None;
             guest.balloon_bytes = None;
             guest.network_in_bps = None;
             guest.network_out_bps = None;
@@ -295,6 +301,21 @@ pub struct NodeView {
     pub uptime_seconds: Option<f64>,
     /// Version de `pve-manager` installée sur ce nœud-ci.
     pub version: Option<String>,
+    /// Part du temps processeur passée à attendre le stockage. Un nœud à 10 %
+    /// de processeur et 30 % d'attente n'a plus de marge, et rien d'autre ne le
+    /// dit.
+    pub cpu_iowait_percent: Option<f64>,
+    /// Mémoire récupérée par KSM en partageant les pages identiques des
+    /// invités : ce qui permet au nœud d'héberger plus que sa RAM.
+    pub ksm_shared_bytes: Option<f64>,
+    /// Paquets Proxmox dont une version plus récente est disponible.
+    pub packages_upgradable: Option<f64>,
+    /// `true` quand un noyau plus récent que celui en marche est installé :
+    /// le nœud tourne sur l'ancien jusqu'à son redémarrage.
+    pub reboot_required: Option<bool>,
+    /// Noyau en marche, et noyau installé qui attend le redémarrage.
+    pub kernel_running: Option<String>,
+    pub kernel_installed: Option<String>,
     /// Démons du nœud arrêtés ou en échec, par leur nom d'unité.
     pub services_down: Vec<String>,
     /// Interfaces déclarées au démarrage qui ne sont pas montées.
@@ -322,7 +343,24 @@ pub struct VolumeGroupView {
 }
 
 /// Séries à une valeur par nœud.
-const NODE_GAUGES: &str = "up|cpu_percent|memory_percent|rootfs_percent|uptime_seconds";
+const NODE_GAUGES: &str = "up|cpu_percent|memory_percent|rootfs_percent|uptime_seconds|\
+                           cpu_iowait_percent|ksm_shared_bytes|pve_packages_upgradable|\
+                           reboot_required";
+
+/// Ce que le cluster dit de lui-même, en plus de ses nœuds.
+///
+/// La liste des nœuds reste la matière du panneau ; l'armement du chien de
+/// garde HA, lui, vaut pour tout le cluster et n'a pas de nœud à qui
+/// appartenir. Il est `null` sur les versions qui ne renvoient pas la ligne
+/// `fencing` (avant Proxmox VE 9).
+#[derive(Debug, Default, Serialize, PartialEq)]
+pub struct NodesView {
+    pub nodes: Vec<NodeView>,
+    /// `armed`, `standby`, `unknown`… le mot de Proxmox.
+    pub fencing_state: Option<String>,
+    /// `true` quand le chien de garde isolera effectivement un nœud perdu.
+    pub fencing_armed: Option<bool>,
+}
 
 /// Séries dont chaque point décrit un enfant du nœud : un démon, une interface,
 /// un pool, un groupe de volumes, ou la version du nœud lui-même.
@@ -337,22 +375,40 @@ fn node_query(id: TargetId, window: u64, names: &str) -> String {
     )
 }
 
+fn fencing_query(id: TargetId, window: u64) -> String {
+    format!(
+        "last_over_time(dumbmonit_proxmox_ha_fencing_armed{{target=\"{id}\"}}[{window}s]) \
+         keep_metric_names"
+    )
+}
+
 pub async fn list_nodes(
     State(state): State<AppState>,
     Path(id): Path<TargetId>,
-) -> ApiResult<Json<Vec<NodeView>>> {
+) -> ApiResult<Json<NodesView>> {
     let target = proxmox_target(&state, id).await?;
     let window = lookback(&target);
-    let (q_gauges, q_parts) =
-        (node_query(id, window, NODE_GAUGES), node_query(id, window, NODE_PARTS));
-    let (gauges, parts) =
-        futures::join!(state.victoria.query(&q_gauges), state.victoria.query(&q_parts));
+    let (q_gauges, q_parts, q_fencing) = (
+        node_query(id, window, NODE_GAUGES),
+        node_query(id, window, NODE_PARTS),
+        fencing_query(id, window),
+    );
+    let (gauges, parts, fencing) = futures::join!(
+        state.victoria.query(&q_gauges),
+        state.victoria.query(&q_parts),
+        state.victoria.query(&q_fencing),
+    );
     let gauges = gauges.map_err(|error| ApiError::BadRequest(format!("{error:#}")))?;
     let parts = parts.map_err(|error| ApiError::BadRequest(format!("{error:#}")))?;
-    Ok(Json(assemble_nodes(&gauges, &parts)))
+    let fencing = fencing.map_err(|error| ApiError::BadRequest(format!("{error:#}")))?;
+    Ok(Json(assemble_nodes(&gauges, &parts, &fencing)))
 }
 
-fn assemble_nodes(gauges: &[InstantSeries], parts: &[InstantSeries]) -> Vec<NodeView> {
+fn assemble_nodes(
+    gauges: &[InstantSeries],
+    parts: &[InstantSeries],
+    fencing: &[InstantSeries],
+) -> NodesView {
     let mut nodes: BTreeMap<String, NodeView> = BTreeMap::new();
     // Les pools et les groupes sont indexés à part : une série par mesure, et il
     // en faut deux ou trois pour composer une ligne.
@@ -374,6 +430,14 @@ fn assemble_nodes(gauges: &[InstantSeries], parts: &[InstantSeries]) -> Vec<Node
             "memory_percent" => view.memory_percent = Some(value),
             "rootfs_percent" => view.rootfs_percent = Some(value),
             "uptime_seconds" => view.uptime_seconds = Some(value),
+            "cpu_iowait_percent" => view.cpu_iowait_percent = Some(value),
+            "ksm_shared_bytes" => view.ksm_shared_bytes = Some(value),
+            "pve_packages_upgradable" => view.packages_upgradable = Some(value),
+            "reboot_required" => {
+                view.reboot_required = Some(value > 0.0);
+                view.kernel_running = Some(label(series, "running")).filter(|v| !v.is_empty());
+                view.kernel_installed = Some(label(series, "installed")).filter(|v| !v.is_empty());
+            }
             _ => {}
         }
     }
@@ -439,7 +503,13 @@ fn assemble_nodes(gauges: &[InstantSeries], parts: &[InstantSeries]) -> Vec<Node
         view.services_down.sort();
         view.interfaces_offline.sort();
     }
-    list
+
+    let mut view = NodesView { nodes: list, ..Default::default() };
+    if let Some(series) = fencing.first() {
+        view.fencing_state = Some(label(series, "state")).filter(|state| !state.is_empty());
+        view.fencing_armed = series.value.1.parse::<f64>().ok().map(|value| value > 0.0);
+    }
+    view
 }
 
 // --- Ceph --------------------------------------------------------------------
@@ -753,6 +823,37 @@ mod tests {
         assert_eq!(list[0].disk_used_bytes, None);
     }
 
+    /// La mémoire vue de l'hôte, qui dépasse celle que l'invité croit avoir du
+    /// surcoût d'émulation — et qui s'efface, comme le reste, quand la machine
+    /// s'arrête.
+    #[test]
+    fn la_memoire_cote_hote_accompagne_celle_de_linvite() {
+        let vm = invite("100", "web01", "pve1", "qemu");
+        let mut status = vm.clone();
+        status.push(("status", "running"));
+        let gauges = vec![
+            serie("dumbmonit_proxmox_guest_status_info", &status, 1.0),
+            serie("dumbmonit_proxmox_guest_memory_used_bytes", &vm, 3.4e9),
+            serie("dumbmonit_proxmox_guest_memory_total_bytes", &vm, 4.0e9),
+            serie("dumbmonit_proxmox_guest_memory_percent", &vm, 85.0),
+            serie("dumbmonit_proxmox_guest_memory_host_bytes", &vm, 4.1e9),
+        ];
+        let list = assemble(&gauges, &[], &[], &[]);
+        assert_eq!(list[0].memory_used_bytes, Some(3.4e9));
+        assert_eq!(list[0].memory_host_bytes, Some(4.1e9));
+        assert_eq!(list[0].memory_percent, Some(85.0), "le taux reste celui de l'invité");
+        assert!(gauges_query(1, 300).contains("memory_host_bytes"), "la série est demandée");
+
+        let mut arretee = vm.clone();
+        arretee.push(("status", "stopped"));
+        let gauges = vec![
+            serie("dumbmonit_proxmox_guest_status_info", &arretee, 1.0),
+            serie("dumbmonit_proxmox_guest_memory_host_bytes", &vm, 4.1e9),
+        ];
+        let list = assemble(&gauges, &[], &[], &[]);
+        assert_eq!(list[0].memory_host_bytes, None, "une machine éteinte n'occupe plus l'hôte");
+    }
+
     #[test]
     fn sans_mot_detat_le_drapeau_running_fait_foi() {
         let vm = invite("100", "old", "pve1", "qemu");
@@ -866,7 +967,13 @@ mod tests {
             ),
         ];
 
-        let list = assemble_nodes(&gauges, &parts);
+        let fencing =
+            vec![serie("dumbmonit_proxmox_ha_fencing_armed", &[("state", "standby")], 0.0)];
+
+        let view = assemble_nodes(&gauges, &parts, &fencing);
+        assert_eq!(view.fencing_state.as_deref(), Some("standby"));
+        assert_eq!(view.fencing_armed, Some(false));
+        let list = view.nodes;
         assert_eq!(list.len(), 2);
         let pve1 = &list[0];
         assert_eq!(pve1.name, "pve1");
@@ -881,6 +988,47 @@ mod tests {
         assert_eq!(pve1.volume_groups[0].used_percent, Some(72.0));
         assert!(!list[1].up, "pve2 n'a pas répondu");
         assert_eq!(list[1].thin_pools.len(), 0);
+    }
+
+    /// Les indicateurs ajoutés après la confrontation à un vrai cluster : ce
+    /// qui se collectait déjà sans jamais arriver jusqu'à la page.
+    #[test]
+    fn le_noeud_porte_son_attente_disque_son_ksm_et_son_redemarrage() {
+        let pve1 = &[("node", "pve1")][..];
+        let gauges = vec![
+            serie("dumbmonit_proxmox_node_up", pve1, 1.0),
+            serie("dumbmonit_proxmox_node_cpu_iowait_percent", pve1, 2.4),
+            serie("dumbmonit_proxmox_node_ksm_shared_bytes", pve1, 7.8e9),
+            serie("dumbmonit_proxmox_node_pve_packages_upgradable", pve1, 3.0),
+            serie(
+                "dumbmonit_proxmox_node_reboot_required",
+                &[("node", "pve1"), ("running", "7.0.6-2-pve"), ("installed", "7.0.14-11-pve")],
+                1.0,
+            ),
+            serie("dumbmonit_proxmox_node_up", &[("node", "pve2")], 1.0),
+            serie(
+                "dumbmonit_proxmox_node_reboot_required",
+                &[("node", "pve2"), ("running", "7.0.14-11-pve"), ("installed", "")],
+                0.0,
+            ),
+        ];
+
+        let view = assemble_nodes(&gauges, &[], &[]);
+        let pve1 = view.nodes.iter().find(|node| node.name == "pve1").unwrap();
+        assert_eq!(pve1.cpu_iowait_percent, Some(2.4));
+        assert_eq!(pve1.ksm_shared_bytes, Some(7.8e9));
+        assert_eq!(pve1.packages_upgradable, Some(3.0));
+        assert_eq!(pve1.reboot_required, Some(true));
+        assert_eq!(pve1.kernel_running.as_deref(), Some("7.0.6-2-pve"));
+        assert_eq!(pve1.kernel_installed.as_deref(), Some("7.0.14-11-pve"));
+
+        let pve2 = view.nodes.iter().find(|node| node.name == "pve2").unwrap();
+        assert_eq!(pve2.reboot_required, Some(false));
+        assert_eq!(pve2.kernel_installed, None, "rien n'attend, pas d'étiquette vide");
+        assert_eq!(pve2.cpu_iowait_percent, None, "une série absente ne devient pas zéro");
+
+        assert_eq!(view.fencing_state, None, "sans ligne fencing, rien n'est affirmé");
+        assert_eq!(view.fencing_armed, None);
     }
 
     #[test]

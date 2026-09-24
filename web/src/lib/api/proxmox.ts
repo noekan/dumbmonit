@@ -4,7 +4,7 @@
  * device panel that uses them is the only importer.
  */
 import { ApiError, request } from './client';
-import type { ProxmoxCeph, ProxmoxGuest, ProxmoxNode, TargetId } from './types';
+import type { ProxmoxCeph, ProxmoxGuest, ProxmoxNodes, TargetId } from './types';
 
 /**
  * The guests of a Proxmox VE device, as the last probe left them. An older
@@ -23,16 +23,23 @@ export async function listProxmoxGuests(id: TargetId, signal?: AbortSignal): Pro
 	}
 }
 
+const NO_NODES: ProxmoxNodes = { nodes: [], fencing_state: null, fencing_armed: null };
+
 /**
- * The nodes of a Proxmox VE cluster with what is wrong on each. An older
- * server without the route reads as "no nodes known" rather than an error.
+ * The nodes of a Proxmox VE cluster with what is wrong on each, plus the
+ * cluster-wide HA watchdog. An older server — one that answered a bare array,
+ * or has no route at all — reads as "no node known" rather than an error.
  */
-export async function listProxmoxNodes(id: TargetId, signal?: AbortSignal): Promise<ProxmoxNode[]> {
+export async function listProxmoxNodes(id: TargetId, signal?: AbortSignal): Promise<ProxmoxNodes> {
 	try {
-		const nodes = await request<ProxmoxNode[]>(`/targets/${id}/proxmox/nodes`, { signal, anticipated: true });
-		return Array.isArray(nodes) ? nodes : [];
+		const reply = await request<ProxmoxNodes | ProxmoxNodes['nodes']>(`/targets/${id}/proxmox/nodes`, {
+			signal,
+			anticipated: true
+		});
+		if (Array.isArray(reply)) return { ...NO_NODES, nodes: reply };
+		return reply?.nodes ? reply : NO_NODES;
 	} catch (cause) {
-		if (cause instanceof ApiError && cause.missing) return [];
+		if (cause instanceof ApiError && cause.missing) return NO_NODES;
 		throw cause;
 	}
 }

@@ -97,6 +97,22 @@
 		...pools.map((pool) => ({ id: pool, label: pool, count: guests.filter((g) => g.pool === pool).length }))
 	]);
 
+	/**
+	 * The host-side memory of a guest, when it says something the guest's own
+	 * figure does not. A QEMU process occupies more than the memory it hands to
+	 * the guest — emulation, device models, page tables — and that surplus is
+	 * what the hypervisor actually pays for. Below 64 MiB or 5 % it is noise,
+	 * and the column stays as it was.
+	 */
+	function hostOverhead(g: ProxmoxGuest): number | null {
+		const host = g.memory_host_bytes;
+		const used = g.memory_used_bytes;
+		if (host === null || used === null) return null;
+		const extra = host - used;
+		if (extra < 64 * 1024 * 1024 || extra < used * 0.05) return null;
+		return extra;
+	}
+
 	function statusBucket(g: ProxmoxGuest): StatusFilter {
 		if (g.status === 'running') return 'running';
 		if (g.status === 'stopped') return 'stopped';
@@ -419,11 +435,20 @@
 									<td class="px-3 py-2 align-middle">
 										{#if g.memory_used_bytes !== null && g.memory_total_bytes !== null}
 											{@const tone = fillTone(g.memory_percent)}
+											{@const overhead = hostOverhead(g)}
 											<div class="flex flex-col gap-1">
 												<span class="tnum whitespace-nowrap text-ink">{formatBytes(g.memory_used_bytes)}<span class="text-ink-3"> / {formatBytes(g.memory_total_bytes)}</span></span>
 												<div class="h-1.5 w-full overflow-hidden rounded-full bg-surface-2" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(g.memory_percent ?? 0)} aria-label="Memory">
 													<div class={`h-full rounded-full ${FILL[tone]}`} style="width: {Math.min(100, g.memory_percent ?? 0)}%"></div>
 												</div>
+												{#if overhead !== null}
+													<span
+														class="tnum whitespace-nowrap text-[0.75rem] text-ink-3"
+														title={`${formatBytes(g.memory_host_bytes)} occupied on the host — ${formatBytes(overhead)} more than the guest sees`}
+													>
+														+{formatBytes(overhead)} on host
+													</span>
+												{/if}
 											</div>
 										{:else}
 											<span class="tnum whitespace-nowrap text-ink-3">{g.memory_total_bytes !== null ? `— / ${formatBytes(g.memory_total_bytes)}` : '—'}</span>
@@ -475,6 +500,9 @@
 													{#if g.ip} · {g.ip}{/if}
 													{#if g.lock} · locked by a {g.lock} operation{/if}
 													{#if g.balloon_bytes !== null} · balloon {formatBytes(g.balloon_bytes)}{/if}
+													{#if g.memory_host_bytes !== null}
+														· {formatBytes(g.memory_host_bytes)} on the host{#if hostOverhead(g) !== null}, {formatBytes(hostOverhead(g))} more than the guest sees{/if}
+													{/if}
 													{#if g.kind === 'qemu' && g.status === 'running'}
 														· guest agent {g.agent === true ? 'answering' : g.agent === false ? 'enabled but silent' : 'not enabled'}
 													{/if}

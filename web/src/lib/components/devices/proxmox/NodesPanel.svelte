@@ -12,13 +12,17 @@
 	 * - an LVM thin pool filling up. It puts every guest on it read-only at
 	 *   once, and its metadata volume usually saturates before its data.
 	 *
+	 * Two more, quieter: a node running an older kernel than the one already
+	 * installed (it only takes effect at the next reboot), and the packages
+	 * waiting to be upgraded. Both are stated in words, never a dot alone.
+	 *
 	 * Rows come from `GET /api/targets/{id}/proxmox/nodes`, assembled
 	 * server-side from the last probe.
 	 */
 	import { listProxmoxNodes } from '$lib/api/proxmox';
-	import type { ProxmoxNode, Target } from '$lib/api';
+	import type { ProxmoxNode, ProxmoxNodes, Target } from '$lib/api';
 	import { formatDuration } from '$lib/format';
-	import { EmptyState, ErrorNotice, Led, Plate, Skeleton } from '$lib/ui';
+	import { EmptyState, ErrorNotice, Led, Plate, Skeleton, type Tone } from '$lib/ui';
 	import FoldSection from '../FoldSection.svelte';
 	import { FILL, fillTone, formatBytes, formatPercent } from './format';
 
@@ -28,13 +32,14 @@
 
 	let { target }: Props = $props();
 
-	let nodes = $state<ProxmoxNode[]>([]);
+	let cluster = $state<ProxmoxNodes>({ nodes: [], fencing_state: null, fencing_armed: null });
+	const nodes = $derived(cluster.nodes);
 	let loading = $state(true);
 	let error = $state<unknown>(null);
 
 	async function load(signal?: AbortSignal) {
 		try {
-			nodes = await listProxmoxNodes(target.id, signal);
+			cluster = await listProxmoxNodes(target.id, signal);
 			error = null;
 		} catch (cause) {
 			if (signal?.aborted) return;
@@ -65,12 +70,28 @@
 		return values.length > 0 ? Math.max(...values) : 0;
 	}
 
+	/** Nodes running an older kernel than the one already installed. */
+	const awaitingReboot = $derived(nodes.filter((n) => n.reboot_required === true).length);
+
 	const summary = $derived.by(() => {
 		if (loading || error || nodes.length === 0) return undefined;
 		const online = nodes.filter((n) => n.up).length;
 		const parts = [`${nodes.length} ${nodes.length === 1 ? 'node' : 'nodes'}`, `${online} online`];
 		if (troubled > 0) parts.push(`${troubled} needing attention`);
+		if (awaitingReboot > 0) parts.push(`${awaitingReboot} awaiting reboot`);
 		return parts.join(' · ');
+	});
+
+	/**
+	 * The HA watchdog, which belongs to the cluster and not to a node. It only
+	 * arms once resources are handed to HA: until then it is on standby and no
+	 * node will be fenced — normal, but worth knowing before counting on it.
+	 */
+	const fencing = $derived.by((): { tone: Tone; label: string } | null => {
+		const state = cluster.fencing_state;
+		if (!state) return null;
+		if (cluster.fencing_armed) return { tone: 'signal', label: 'HA fencing armed' };
+		return { tone: 'info', label: `HA fencing ${state}` };
 	});
 
 	/** Every version seen, to spot the node left behind on an older release. */
@@ -91,8 +112,13 @@
 
 <FoldSection kind="proxmox-nodes" title="Nodes" {summary} defaultOpen={true} class="rise-in">
 	{#snippet aside()}
-		{#if !loading && !error && versions.length > 1}
-			<Plate tone="advisory" label={`Mixed versions: ${versions.join(', ')}`} size="sm" />
+		{#if !loading && !error}
+			{#if versions.length > 1}
+				<Plate tone="advisory" label={`Mixed versions: ${versions.join(', ')}`} size="sm" />
+			{/if}
+			{#if fencing}
+				<Plate tone={fencing.tone} label={fencing.label} size="sm" />
+			{/if}
 		{/if}
 	{/snippet}
 
@@ -137,10 +163,35 @@
 								</div>
 							{/each}
 						</div>
+						{#if node.cpu_iowait_percent !== null || (node.ksm_shared_bytes ?? 0) > 0}
+							<p class="tnum mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[0.75rem] text-ink-3">
+								{#if node.cpu_iowait_percent !== null}
+									<span title="CPU time spent waiting on storage">I/O wait {formatPercent(node.cpu_iowait_percent)}</span>
+								{/if}
+								{#if (node.ksm_shared_bytes ?? 0) > 0}
+									<span title="Memory reclaimed by sharing identical pages between guests">KSM sharing {formatBytes(node.ksm_shared_bytes)}</span>
+								{/if}
+							</p>
+						{/if}
 					{/if}
 
-					{#if down.length > 0 || offline.length > 0}
+					{#if down.length > 0 || offline.length > 0 || node.reboot_required || (node.packages_upgradable ?? 0) > 0}
 						<ul class="mt-3 flex flex-col gap-1 text-sm">
+							{#if node.reboot_required}
+								<li class="flex flex-wrap items-center gap-2">
+									<Plate tone="advisory" label="Reboot required" bare size="sm" />
+									<span class="tnum text-ink-2">
+										running kernel {node.kernel_running ?? '—'}, {node.kernel_installed ?? '—'} installed
+									</span>
+								</li>
+							{/if}
+							{#if (node.packages_upgradable ?? 0) > 0}
+								{@const count = node.packages_upgradable ?? 0}
+								<li class="flex flex-wrap items-center gap-2">
+									<Plate tone="advisory" label="Updates pending" bare size="sm" />
+									<span class="text-ink-2">{count} Proxmox {count === 1 ? 'package' : 'packages'} upgradable</span>
+								</li>
+							{/if}
 							{#if down.length > 0}
 								<li class="flex flex-wrap items-center gap-2">
 									<Plate tone="warning" label="Service down" bare size="sm" />
@@ -181,11 +232,19 @@
 									</tr>
 								{/each}
 								{#each node.volume_groups as group (group.name)}
-									{@const tone = fillTone(group.used_percent)}
 									<tr class="border-t border-line/60">
-										<td class="py-1 text-ink">{group.name}<span class="text-ink-3"> volume group</span></td>
+										<td class="py-1 text-ink">
+											{group.name}
+											<span class="text-ink-3">volume group</span>
+										</td>
 										<td class="tnum py-1 text-right text-ink-2">{formatBytes(group.size_bytes)}</td>
-										<td class={`tnum py-1 text-right ${tone === 'warning' ? 'text-warning-ink' : tone === 'advisory' ? 'text-advisory-ink' : 'text-ink'}`}>{formatPercent(group.used_percent)}</td>
+										<!--
+											Sans teinte : un groupe de volumes entièrement distribué à ses
+											volumes logiques est l'état normal d'une installation Proxmox, et
+											le peindre en rouge ferait crier un nœud parfaitement sain. Ce qui
+											sature vraiment, c'est le pool fin au-dessus — lui est teinté.
+										-->
+										<td class="tnum py-1 text-right text-ink">{formatPercent(group.used_percent)}</td>
 										<td class="py-1 text-right text-ink-3">—</td>
 									</tr>
 								{/each}

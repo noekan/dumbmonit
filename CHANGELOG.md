@@ -33,6 +33,20 @@ All notable changes to this project are documented here. The format follows
   (Proxmox VE 9 says whether the watchdog will actually fence),
   `guest_memory_host_bytes` and `guest_running_qemu_info` (the QEMU a VM was
   started with, which a live migration does not refresh).
+- **Everything collected from a NAS and a hypervisor now reaches their page.**
+  A Synology device gains a **Storage pools** section — RAID type, state in
+  DSM's own word, failed disks, and how much of the pool is already handed to
+  volumes — plus an **SSD cache** section that only appears when there is a
+  cache. Redundancy lives in the pool, not in the volume: a RAID 5 that loses a
+  disk keeps its volume at "normal" while it rebuilds, and until now that loss
+  was invisible on the page. A Proxmox VE node card now states **Reboot
+  required** in words, with the running and the installed kernel, along with
+  the number of upgradable Proxmox packages, the time the node spends waiting
+  on its disks and the memory KSM has reclaimed; the HA watchdog's state
+  (*armed* or *standby*) is stated beside the panel title. A guest's memory
+  cell shows how much more the VM occupies on the host than inside itself, when
+  the difference is worth reading — that surplus is the emulation overhead the
+  hypervisor pays.
 - **Maintenance windows that survive the clock change.** A window can now
   recur **monthly** — on days of the month ("the 1st and the 15th") or on a
   weekday of the month ("the first Sunday", "the last Friday") — with a start

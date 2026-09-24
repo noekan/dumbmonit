@@ -1586,6 +1586,11 @@ export interface ProxmoxGuest {
 	memory_used_bytes: number | null;
 	memory_total_bytes: number | null;
 	memory_percent: number | null;
+	/**
+	 * Memory the guest's process occupies on the host: what the guest sees plus
+	 * the emulation overhead. It regularly exceeds the allocated memory.
+	 */
+	memory_host_bytes: number | null;
 	balloon_bytes: number | null;
 	disk_used_bytes: number | null;
 	disk_total_bytes: number | null;
@@ -1634,12 +1639,31 @@ export interface ProxmoxNode {
 	rootfs_percent: number | null;
 	uptime_seconds: number | null;
 	version: string | null;
+	/** Share of CPU time spent waiting on storage. */
+	cpu_iowait_percent: number | null;
+	/** Memory reclaimed by KSM by sharing identical pages between guests. */
+	ksm_shared_bytes: number | null;
+	/** Proxmox packages for which a newer version is available. */
+	packages_upgradable: number | null;
+	/** A newer kernel than the running one is installed: the node awaits a reboot. */
+	reboot_required: boolean | null;
+	kernel_running: string | null;
+	kernel_installed: string | null;
 	/** Core Proxmox daemons that are not running on this node. */
 	services_down: string[];
 	/** Interfaces set to start at boot that are not up. */
 	interfaces_offline: string[];
 	thin_pools: ProxmoxThinPool[];
 	volume_groups: ProxmoxVolumeGroup[];
+}
+
+/** The cluster's nodes, plus what belongs to the cluster rather than to a node. */
+export interface ProxmoxNodes {
+	nodes: ProxmoxNode[];
+	/** Proxmox's own word for the HA watchdog: `armed`, `standby`… `null` before PVE 9. */
+	fencing_state: string | null;
+	/** `true` when the watchdog will really fence a lost node. */
+	fencing_armed: boolean | null;
 }
 
 export interface ProxmoxCephOsd {
@@ -1746,9 +1770,30 @@ export interface SynologyDisk {
 	unc_count: number | null;
 }
 
+/** A storage pool or an SSD cache: DSM gives both the same shape. */
+export interface SynologyPool {
+	id: string;
+	name: string;
+	/** DSM's own word: `shr_1`, `raid_5`, `basic`… */
+	raid_type: string;
+	/** DSM's own word: `normal`, `degrade`, `crashed`, `repairing`… */
+	status: string;
+	/** 0 normal, 1 attention, 2 critical. */
+	severity: number;
+	/** Disks of the group DSM reports as failed. */
+	failed_disks: number | null;
+	total_bytes: number | null;
+	/** Share already handed to volumes; DSM gives none for an SSD cache. */
+	used_bytes: number | null;
+}
+
 export interface SynologyOverview {
 	system: SynologySystem;
 	volumes: SynologyVolume[];
+	/** Storage pools: redundancy lives here, not in the volume. */
+	pools: SynologyPool[];
+	/** SSD caches; empty on a NAS without one. */
+	ssd_caches: SynologyPool[];
 	disks: SynologyDisk[];
 	/** Unix seconds of the newest reading, `null` before the first probe. */
 	sampled_at: number | null;

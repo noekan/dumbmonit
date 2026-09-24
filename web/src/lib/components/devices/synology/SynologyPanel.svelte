@@ -1,14 +1,17 @@
 <script lang="ts">
 	/**
 	 * What a Synology NAS has to show beyond charts: the system at a glance,
-	 * one row per volume with its usage and RAID state, one row per disk with
-	 * its temperature, SMART verdict and, on an SSD, its remaining life — then
-	 * the Active Backup for Business devices and their rhythm. Two reads of
-	 * what the probe stored, refreshed every minute; the NAS is never asked.
+	 * one row per volume with its usage and RAID state, one row per storage
+	 * pool — where redundancy actually lives, since a RAID 5 that lost a disk
+	 * keeps its volume "normal" while it rebuilds — the SSD caches when there
+	 * are any, one row per disk with its temperature, SMART verdict and, on an
+	 * SSD, its remaining life, then the Active Backup for Business devices and
+	 * their rhythm. Two reads of what the probe stored, refreshed every minute;
+	 * the NAS is never asked.
 	 */
 	import { untrack } from 'svelte';
 	import { getSynologyAbb, getSynologyOverview } from '$lib/api/synology';
-	import type { SynologyAbb, SynologyDisk, SynologyOverview, SynologyVolume, Target } from '$lib/api';
+	import type { SynologyAbb, SynologyDisk, SynologyOverview, SynologyPool, SynologyVolume, Target } from '$lib/api';
 	import { ApiError } from '$lib/api';
 	import { formatDuration } from '$lib/format';
 	import { ErrorNotice, Panel, Plate, Skeleton, type Tone } from '$lib/ui';
@@ -153,6 +156,19 @@
 		return { tone: 'signal', label: 'Storage healthy' };
 	});
 
+	/**
+	 * How much of a pool is already handed to volumes. Unlike a volume, a pool
+	 * fully allocated is the normal end state, not a warning — so this is a
+	 * sentence, never a coloured gauge.
+	 */
+	function allocation(pool: SynologyPool): string {
+		if (pool.total_bytes === null) return 'Capacity unknown: DSM reports no size for this group.';
+		if (pool.used_bytes === null) return `${formatBytes(pool.total_bytes)} raw capacity.`;
+		const share = pool.total_bytes > 0 ? Math.round((pool.used_bytes / pool.total_bytes) * 100) : null;
+		const of = `${formatBytes(pool.used_bytes)} of ${formatBytes(pool.total_bytes)} allocated to volumes`;
+		return share === null ? `${of}.` : `${of} (${share}%).`;
+	}
+
 	const percent = (value: number | null) => (value === null ? null : `${Math.round(value)}%`);
 	const identity = $derived(
 		[overview?.system.model, overview?.system.dsm_version].filter((part): part is string => !!part).join(' · ')
@@ -239,6 +255,62 @@
 				</ul>
 			{/if}
 		</Panel>
+
+		{#if overview.pools.length > 0}
+			<Panel
+				title="Storage pools"
+				description="Where redundancy lives: a RAID 5 that lost a disk keeps its volume normal while it rebuilds, and only the pool says so."
+				padded={false}
+				class="rise-in"
+			>
+				<ul class="divide-y divide-line">
+					{#each overview.pools as pool, i (pool.id)}
+						<li class="rise-in px-5 py-3" style="--rise-delay: {Math.min(i, 8) * 40}ms">
+							<div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+								<p class="min-w-0 font-semibold text-ink break-all">{pool.name || pool.id}</p>
+								<span class="text-[0.75rem] text-ink-3">{raidWord(pool.raid_type)}</span>
+								<Plate tone={toneOf(pool.severity)} label={stateWord(pool.status)} />
+								{#if (pool.failed_disks ?? 0) > 0}
+									{@const failed = pool.failed_disks ?? 0}
+									<Plate tone="warning" label={`${failed} failed ${failed === 1 ? 'disk' : 'disks'}`} bare />
+								{/if}
+							</div>
+							<p class="tnum mt-1.5 text-[0.8125rem] text-ink-2">
+								{allocation(pool)}
+								{#if pool.failed_disks === 0}<span class="text-ink-3"> No disk reported failed.</span>{/if}
+							</p>
+						</li>
+					{/each}
+				</ul>
+			</Panel>
+		{/if}
+
+		{#if overview.ssd_caches.length > 0}
+			<Panel
+				title="SSD cache"
+				description="Read or read-write cache in front of a volume. It never holds the only copy of your data, but a failed cache disk slows everything behind it."
+				padded={false}
+				class="rise-in"
+			>
+				<ul class="divide-y divide-line">
+					{#each overview.ssd_caches as cache, i (cache.id)}
+						<li class="rise-in flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-3" style="--rise-delay: {Math.min(i, 8) * 40}ms">
+							<p class="min-w-0 font-semibold text-ink break-all">{cache.name || cache.id}</p>
+							<span class="text-[0.75rem] text-ink-3">{raidWord(cache.raid_type)}</span>
+							<Plate tone={toneOf(cache.severity)} label={stateWord(cache.status)} />
+							{#if (cache.failed_disks ?? 0) > 0}
+								{@const failed = cache.failed_disks ?? 0}
+								<Plate tone="warning" label={`${failed} failed ${failed === 1 ? 'disk' : 'disks'}`} bare />
+							{/if}
+							<span class="tnum ml-auto text-[0.8125rem] text-ink-2">
+								<span class="text-ink-3">capacity</span>
+								{cache.total_bytes === null ? '—' : formatBytes(cache.total_bytes)}
+							</span>
+						</li>
+					{/each}
+				</ul>
+			</Panel>
+		{/if}
 
 		<Panel title="Disks" description="One row per bay: temperature, SMART verdict and, on an SSD, the life left." padded={false} class="rise-in">
 			{#if overview.disks.length === 0}

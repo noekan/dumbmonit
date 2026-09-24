@@ -14,6 +14,28 @@ then only what is wrong — the daemons that are not running, the interfaces
 declared at boot that are not up — and the fill of each LVM thin pool and
 volume group. A node that stopped answering keeps its card and reads *offline*.
 
+Two lines under the meters, when the node reports them: the share of CPU time
+spent waiting on storage (**I/O wait** — a node at 10 % CPU and 30 % I/O wait
+has no headroom left, and no other number says so) and the memory **KSM** has
+reclaimed by sharing identical pages between guests, which is how a node hosts
+more than its RAM.
+
+Two more entries join the "what is wrong" list, both in words:
+
+* **Reboot required** — a newer kernel is installed than the one running. The
+  card names both versions, since the node keeps running the old one until it
+  is rebooted. This comes from `/nodes/{node}/apt/versions`, which only needs
+  `Sys.Audit`;
+* **Updates pending** — how many Proxmox packages have a newer candidate
+  version, from the same call. It is not the same thing as `apt/update`, which
+  counts every pending package of the system but needs `Sys.Modify` and is
+  usually refused.
+
+When the cluster reports an HA watchdog (Proxmox VE 9 and later), its state is
+stated beside the panel title: *HA fencing armed* once resources are handed to
+HA, *HA fencing standby* while none are — in which case no node will be fenced,
+which is normal but worth knowing before counting on it.
+
 A cluster upgraded node by node shows it here: `/version` answers for the node
 that was asked, so each card carries its own version and a straggler is
 visible without opening a shell.
@@ -35,7 +57,7 @@ up. Each row shows:
 | Status | word + plate: running, stopped, paused, suspended, template | A template is listed but never counts as "stopped". |
 | Name, VMID, node | the inventory | |
 | CPU | `guest_cpu_percent`, of the cores allocated to the guest | A bar plus the number of cores. |
-| Memory | `guest_memory_used_bytes` / `guest_memory_total_bytes` | The balloon size when the VM has one. |
+| Memory | `guest_memory_used_bytes` / `guest_memory_total_bytes` | The balloon size when the VM has one. A second line, *+N on host*, appears when `guest_memory_host_bytes` is meaningfully above what the guest sees: a QEMU process costs the hypervisor more than the memory it hands over, and that surplus is the emulation overhead. Below 64 MiB or 5 % the line stays out. |
 | Disk | `guest_disk_used_bytes` / `guest_disk_total_bytes` | Containers: real usage. VMs: size always; usage only when the QEMU guest agent answers (see below), otherwise "size only". |
 | Network | `rate(guest_network_in/out_bytes)` over the last probes | |
 | Uptime | `guest_uptime_seconds` | |
