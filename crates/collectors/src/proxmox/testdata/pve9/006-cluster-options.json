@@ -1,0 +1,21 @@
+{
+ "data": {
+  "description": "",
+  "bwlimit": "clone=61440,default=61440,migration=61440,move=61440,restore=61440",
+  "consent-text": "Q2Ugc3lzdMOobWUgZXN0IHLDqXNlcnbDqSB1bmlxdWVtZW50IGF1eCB1dGlsaXNhdGV1cnMgYXV0b3Jpc8Opcy4gVG91dGUgdGVudGF0aXZlIApkJ2FjY8OocyBub24gYXV0b3Jpc8OpZSwgZGUgbW9kaWZpY2F0aW9uIG91IGQndXRpbGlzYXRpb24gYWJ1c2l2ZSBkZSBjZXR0ZSAKaW5mcmFzdHJ1Y3R1cmUgUHJveG1veCBWRSBlc3Qgc3RyaWN0ZW1lbnQgaW50ZXJkaXRlIGV0IHBhc3NpYmxlIGRlIHBvdXJzdWl0ZXMgCmp1ZGljaWFpcmVzLgoKRW4gdm91cyBjb25uZWN0YW50IMOgIGNlIHNlcnZldXIsIHZvdXMgYWNjZXB0ZXogbGVzIGNvbmRpdGlvbnMgc3VpdmFudGVzIDoKMS4gVm90cmUgYWN0aXZpdMOpIGZhaXQgbCdvYmpldCBkJ3VuIGVucmVnaXN0cmVtZW50IGV0IGQndW4gYXVkaXQgcGVybWFuZW50LgoyLiBWb3VzIG4ndXRpbGlzZXJleiBjZSBzeXN0w6htZSBxdWUgZGFucyBsZSBjYWRyZSBkZSB2b3MgZm9uY3Rpb25zIG9mZmljaWVsbGVzLgozLiBUb3V0ZSB1dGlsaXNhdGlvbiBhYnVzaXZlIHNlcmEgc2lnbmFsw6llIGltbcOpZGlhdGVtZW50IGF1eCBhdXRvcml0w6lzLgoKU2kgdm91cyBuJ8OqdGVzIHBhcyB1biB1dGlsaXNhdGV1ciBhdXRvcmlzw6ksIGTDqWNvbm5lY3Rlei12b3VzIGltbcOpZGlhdGVtZW50Lg==",
+  "email_from": "EMAIL_FROM-1",
+  "allowed-tags": [
+   "fw",
+   "mail",
+   "saas",
+   "waas"
+  ],
+  "tag-style": {
+   "shape": "full",
+   "ordering": "config"
+  },
+  "keyboard": "fr-ch",
+  "mac_prefix": "MAC_PREFIX-1",
+  "location": "latitude=46.546565,longitude=6.573365,name=BrainServe"
+ }
+}

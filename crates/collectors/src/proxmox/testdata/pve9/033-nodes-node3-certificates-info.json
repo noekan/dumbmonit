@@ -1,0 +1,35 @@
+{
+ "data": [
+  {
+   "subject": "SUBJECT-1",
+   "notbefore": 1661696358,
+   "fingerprint": "FINGERPRINT-1",
+   "public-key-bits": 4096,
+   "issuer": "ISSUER-1",
+   "filename": "pve-root-ca.pem",
+   "san": [],
+   "pem": "[2074 caractères retirés]",
+   "notafter": 1977056358,
+   "public-key-type": "rsaEncryption"
+  },
+  {
+   "public-key-bits": 2048,
+   "fingerprint": "FINGERPRINT-2",
+   "subject": "SUBJECT-2",
+   "notbefore": 1781335927,
+   "notafter": 1844407927,
+   "public-key-type": "rsaEncryption",
+   "issuer": "ISSUER-1",
+   "pem": "[1785 caractères retirés]",
+   "filename": "pve-ssl.pem",
+   "san": [
+    "SAN-1",
+    "SAN-2",
+    "SAN-3",
+    "SAN-4",
+    "SAN-5",
+    "SAN-6"
+   ]
+  }
+ ]
+}

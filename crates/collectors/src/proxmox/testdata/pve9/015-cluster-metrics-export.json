@@ -1,0 +1,2519 @@
+{
+ "data": {
+  "data": [
+   {
+    "timestamp": 1790263316,
+    "value": 12168197,
+    "metric": "uptime",
+    "id": "node/node2",
+    "type": "gauge"
+   },
+   {
+    "metric": "net_in",
+    "id": "node/node2",
+    "type": "derive",
+    "timestamp": 1790263316,
+    "value": 4830589319845
+   },
+   {
+    "metric": "net_out",
+    "id": "node/node2",
+    "type": "derive",
+    "timestamp": 1790263316,
+    "value": 17900688822081
+   },
+   {
+    "value": 3.65,
+    "timestamp": 1790263316,
+    "id": "node/node2",
+    "type": "gauge",
+    "metric": "cpu_avg1"
+   },
+   {
+    "metric": "cpu_avg5",
+    "id": "node/node2",
+    "type": "gauge",
+    "timestamp": 1790263316,
+    "value": 3.88
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 4.31,
+    "metric": "cpu_avg15",
+    "id": "node/node2",
+    "type": "gauge"
+   },
+   {
+    "metric": "cpu_max",
+    "type": "gauge",
+    "id": "node/node2",
+    "timestamp": 1790263316,
+    "value": 48
+   },
+   {
+    "id": "node/node2",
+    "type": "gauge",
+    "metric": "cpu_current",
+    "value": 0.0540562743889916,
+    "timestamp": 1790263316
+   },
+   {
+    "value": 0.0129595399466009,
+    "timestamp": 1790263316,
+    "type": "gauge",
+    "id": "node/node2",
+    "metric": "cpu_iowait"
+   },
+   {
+    "id": "node/node2",
+    "type": "gauge",
+    "metric": "mem_total",
+    "value": 405600071680,
+    "timestamp": 1790263316
+   },
+   {
+    "value": 148327579648,
+    "timestamp": 1790263316,
+    "type": "gauge",
+    "id": "node/node2",
+    "metric": "mem_used"
+   },
+   {
+    "metric": "swap_total",
+    "id": "node/node2",
+    "type": "gauge",
+    "timestamp": 1790263316,
+    "value": 0
+   },
+   {
+    "metric": "swap_used",
+    "type": "gauge",
+    "id": "node/node2",
+    "timestamp": 1790263316,
+    "value": 0
+   },
+   {
+    "metric": "disk_total",
+    "id": "node/node2",
+    "type": "gauge",
+    "timestamp": 1790263316,
+    "value": 865671315456
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 54358441984,
+    "metric": "disk_used",
+    "type": "gauge",
+    "id": "node/node2"
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/107",
+    "metric": "cpu_current",
+    "value": 0.00228049647217045,
+    "timestamp": 1790263316
+   },
+   {
+    "id": "qemu/107",
+    "type": "gauge",
+    "metric": "mem_used",
+    "value": 7553445888,
+    "timestamp": 1790263316
+   },
+   {
+    "value": 3668136596,
+    "timestamp": 1790263316,
+    "id": "qemu/107",
+    "type": "derive",
+    "metric": "disk_read"
+   },
+   {
+    "metric": "disk_write",
+    "type": "derive",
+    "id": "qemu/107",
+    "timestamp": 1790263316,
+    "value": 6820765184
+   },
+   {
+    "value": 424625616,
+    "timestamp": 1790263316,
+    "id": "qemu/107",
+    "type": "derive",
+    "metric": "net_in"
+   },
+   {
+    "value": 7577136,
+    "timestamp": 1790263316,
+    "id": "qemu/107",
+    "type": "derive",
+    "metric": "net_out"
+   },
+   {
+    "metric": "uptime",
+    "type": "gauge",
+    "id": "qemu/107",
+    "timestamp": 1790263316,
+    "value": 1969
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 3,
+    "metric": "cpu_max",
+    "type": "gauge",
+    "id": "qemu/107"
+   },
+   {
+    "metric": "mem_total",
+    "id": "qemu/107",
+    "type": "gauge",
+    "timestamp": 1790263316,
+    "value": 8589934592
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 34359738368,
+    "metric": "disk_total",
+    "id": "qemu/107",
+    "type": "gauge"
+   },
+   {
+    "metric": "cpu_current",
+    "type": "gauge",
+    "id": "qemu/126",
+    "timestamp": 1790263316,
+    "value": 0.386299813125158
+   },
+   {
+    "metric": "mem_used",
+    "id": "qemu/126",
+    "type": "gauge",
+    "timestamp": 1790263316,
+    "value": 2709311488
+   },
+   {
+    "id": "qemu/126",
+    "type": "derive",
+    "metric": "disk_read",
+    "value": 31489330176,
+    "timestamp": 1790263316
+   },
+   {
+    "metric": "disk_write",
+    "type": "derive",
+    "id": "qemu/126",
+    "timestamp": 1790263316,
+    "value": 69408187904
+   },
+   {
+    "type": "derive",
+    "id": "qemu/126",
+    "metric": "net_in",
+    "value": 173591705,
+    "timestamp": 1790263316
+   },
+   {
+    "metric": "net_out",
+    "type": "derive",
+    "id": "qemu/126",
+    "timestamp": 1790263316,
+    "value": 764348610
+   },
+   {
+    "metric": "uptime",
+    "id": "qemu/126",
+    "type": "gauge",
+    "timestamp": 1790263316,
+    "value": 764226
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/126",
+    "metric": "cpu_max",
+    "value": 4,
+    "timestamp": 1790263316
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 17179869184,
+    "metric": "mem_total",
+    "id": "qemu/126",
+    "type": "gauge"
+   },
+   {
+    "value": 483183820800,
+    "timestamp": 1790263316,
+    "type": "gauge",
+    "id": "qemu/126",
+    "metric": "disk_total"
+   },
+   {
+    "metric": "cpu_current",
+    "type": "gauge",
+    "id": "qemu/103",
+    "timestamp": 1790263316,
+    "value": 0.0860072955218569
+   },
+   {
+    "metric": "mem_used",
+    "id": "qemu/103",
+    "type": "gauge",
+    "timestamp": 1790263316,
+    "value": 2399580160
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 1984928162304,
+    "metric": "disk_read",
+    "id": "qemu/103",
+    "type": "derive"
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 13017625859072,
+    "metric": "disk_write",
+    "id": "qemu/103",
+    "type": "derive"
+   },
+   {
+    "value": 749484166623,
+    "timestamp": 1790263316,
+    "id": "qemu/103",
+    "type": "derive",
+    "metric": "net_in"
+   },
+   {
+    "id": "qemu/103",
+    "type": "derive",
+    "metric": "net_out",
+    "value": 58258415972,
+    "timestamp": 1790263316
+   },
+   {
+    "metric": "uptime",
+    "id": "qemu/103",
+    "type": "gauge",
+    "timestamp": 1790263316,
+    "value": 12168097
+   },
+   {
+    "metric": "cpu_max",
+    "id": "qemu/103",
+    "type": "gauge",
+    "timestamp": 1790263316,
+    "value": 4
+   },
+   {
+    "value": 8589934592,
+    "timestamp": 1790263316,
+    "id": "qemu/103",
+    "type": "gauge",
+    "metric": "mem_total"
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/103",
+    "metric": "disk_total",
+    "value": 118111600640,
+    "timestamp": 1790263316
+   },
+   {
+    "id": "qemu/133",
+    "type": "gauge",
+    "metric": "cpu_current",
+    "value": 0.0820978729981361,
+    "timestamp": 1790263316
+   },
+   {
+    "value": 1421684736,
+    "timestamp": 1790263316,
+    "id": "qemu/133",
+    "type": "gauge",
+    "metric": "mem_used"
+   },
+   {
+    "id": "qemu/133",
+    "type": "derive",
+    "metric": "disk_read",
+    "value": 1148819330048,
+    "timestamp": 1790263316
+   },
+   {
+    "metric": "disk_write",
+    "type": "derive",
+    "id": "qemu/133",
+    "timestamp": 1790263316,
+    "value": 1158263696896
+   },
+   {
+    "metric": "net_in",
+    "type": "derive",
+    "id": "qemu/133",
+    "timestamp": 1790263316,
+    "value": 20638164542
+   },
+   {
+    "metric": "net_out",
+    "type": "derive",
+    "id": "qemu/133",
+    "timestamp": 1790263316,
+    "value": 5787661899
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 11778862,
+    "metric": "uptime",
+    "type": "gauge",
+    "id": "qemu/133"
+   },
+   {
+    "id": "qemu/133",
+    "type": "gauge",
+    "metric": "cpu_max",
+    "value": 1,
+    "timestamp": 1790263316
+   },
+   {
+    "metric": "mem_total",
+    "type": "gauge",
+    "id": "qemu/133",
+    "timestamp": 1790263316,
+    "value": 2147483648
+   },
+   {
+    "value": 34359738368,
+    "timestamp": 1790263316,
+    "type": "gauge",
+    "id": "qemu/133",
+    "metric": "disk_total"
+   },
+   {
+    "metric": "cpu_current",
+    "type": "gauge",
+    "id": "qemu/139",
+    "timestamp": 1790263316,
+    "value": 0.0464243924691841
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 7220428800,
+    "metric": "mem_used",
+    "type": "gauge",
+    "id": "qemu/139"
+   },
+   {
+    "id": "qemu/139",
+    "type": "derive",
+    "metric": "disk_read",
+    "value": 37228327936,
+    "timestamp": 1790263316
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 6510088801280,
+    "metric": "disk_write",
+    "id": "qemu/139",
+    "type": "derive"
+   },
+   {
+    "metric": "net_in",
+    "id": "qemu/139",
+    "type": "derive",
+    "timestamp": 1790263316,
+    "value": 919203907517
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 481825023265,
+    "metric": "net_out",
+    "id": "qemu/139",
+    "type": "derive"
+   },
+   {
+    "id": "qemu/139",
+    "type": "gauge",
+    "metric": "uptime",
+    "value": 9273660,
+    "timestamp": 1790263316
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/139",
+    "metric": "cpu_max",
+    "value": 2,
+    "timestamp": 1790263316
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 8589934592,
+    "metric": "mem_total",
+    "type": "gauge",
+    "id": "qemu/139"
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 68719476736,
+    "metric": "disk_total",
+    "type": "gauge",
+    "id": "qemu/139"
+   },
+   {
+    "value": 0.0366508361598822,
+    "timestamp": 1790263316,
+    "id": "qemu/110",
+    "type": "gauge",
+    "metric": "cpu_current"
+   },
+   {
+    "value": 2708840448,
+    "timestamp": 1790263316,
+    "id": "qemu/110",
+    "type": "gauge",
+    "metric": "mem_used"
+   },
+   {
+    "type": "derive",
+    "id": "qemu/110",
+    "metric": "disk_read",
+    "value": 169324160000,
+    "timestamp": 1790263316
+   },
+   {
+    "metric": "disk_write",
+    "id": "qemu/110",
+    "type": "derive",
+    "timestamp": 1790263316,
+    "value": 358848535552
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 27651047026,
+    "metric": "net_in",
+    "id": "qemu/110",
+    "type": "derive"
+   },
+   {
+    "metric": "net_out",
+    "type": "derive",
+    "id": "qemu/110",
+    "timestamp": 1790263316,
+    "value": 36318697438
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 12168086,
+    "metric": "uptime",
+    "type": "gauge",
+    "id": "qemu/110"
+   },
+   {
+    "metric": "cpu_max",
+    "type": "gauge",
+    "id": "qemu/110",
+    "timestamp": 1790263316,
+    "value": 4
+   },
+   {
+    "metric": "mem_total",
+    "type": "gauge",
+    "id": "qemu/110",
+    "timestamp": 1790263316,
+    "value": 8589934592
+   },
+   {
+    "value": 59055800320,
+    "timestamp": 1790263316,
+    "type": "gauge",
+    "id": "qemu/110",
+    "metric": "disk_total"
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 0.0730573334120319,
+    "metric": "cpu_current",
+    "type": "gauge",
+    "id": "qemu/102"
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/102",
+    "metric": "mem_used",
+    "value": 8150159360,
+    "timestamp": 1790263316
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 1388209362944,
+    "metric": "disk_read",
+    "type": "derive",
+    "id": "qemu/102"
+   },
+   {
+    "value": 9956622113280,
+    "timestamp": 1790263316,
+    "id": "qemu/102",
+    "type": "derive",
+    "metric": "disk_write"
+   },
+   {
+    "value": 219503400462,
+    "timestamp": 1790263316,
+    "id": "qemu/102",
+    "type": "derive",
+    "metric": "net_in"
+   },
+   {
+    "id": "qemu/102",
+    "type": "derive",
+    "metric": "net_out",
+    "value": 206563389460,
+    "timestamp": 1790263316
+   },
+   {
+    "metric": "uptime",
+    "type": "gauge",
+    "id": "qemu/102",
+    "timestamp": 1790263316,
+    "value": 10814958
+   },
+   {
+    "value": 4,
+    "timestamp": 1790263316,
+    "id": "qemu/102",
+    "type": "gauge",
+    "metric": "cpu_max"
+   },
+   {
+    "value": 17179869184,
+    "timestamp": 1790263316,
+    "id": "qemu/102",
+    "type": "gauge",
+    "metric": "mem_total"
+   },
+   {
+    "metric": "disk_total",
+    "id": "qemu/102",
+    "type": "gauge",
+    "timestamp": 1790263316,
+    "value": 322122547200
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 0,
+    "metric": "disk_total",
+    "id": "storage/node2/BKP01",
+    "type": "gauge"
+   },
+   {
+    "metric": "disk_used",
+    "id": "storage/node2/BKP01",
+    "type": "gauge",
+    "timestamp": 1790263316,
+    "value": 0
+   },
+   {
+    "metric": "disk_total",
+    "id": "storage/node2/pool1",
+    "type": "gauge",
+    "timestamp": 1790263316,
+    "value": 0
+   },
+   {
+    "value": 0,
+    "timestamp": 1790263316,
+    "type": "gauge",
+    "id": "storage/node2/pool1",
+    "metric": "disk_used"
+   },
+   {
+    "id": "storage/node2/pool3",
+    "type": "gauge",
+    "metric": "disk_total",
+    "value": 0,
+    "timestamp": 1790263316
+   },
+   {
+    "metric": "disk_used",
+    "type": "gauge",
+    "id": "storage/node2/pool3",
+    "timestamp": 1790263316,
+    "value": 0
+   },
+   {
+    "metric": "disk_total",
+    "id": "storage/node2/local",
+    "type": "gauge",
+    "timestamp": 1790263316,
+    "value": 865671315456
+   },
+   {
+    "id": "storage/node2/local",
+    "type": "gauge",
+    "metric": "disk_used",
+    "value": 54358441984,
+    "timestamp": 1790263316
+   },
+   {
+    "metric": "disk_total",
+    "id": "storage/node2/pool2",
+    "type": "gauge",
+    "timestamp": 1790263316,
+    "value": 14257343768848
+   },
+   {
+    "timestamp": 1790263316,
+    "value": 6066271549944,
+    "metric": "disk_used",
+    "id": "storage/node2/pool2",
+    "type": "gauge"
+   },
+   {
+    "metric": "uptime",
+    "type": "gauge",
+    "id": "node/node1",
+    "timestamp": 1790263317,
+    "value": 8842876
+   },
+   {
+    "value": 782564432391403,
+    "timestamp": 1790263317,
+    "id": "node/node1",
+    "type": "derive",
+    "metric": "net_in"
+   },
+   {
+    "metric": "net_out",
+    "type": "derive",
+    "id": "node/node1",
+    "timestamp": 1790263317,
+    "value": 817931025879969
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 7.73,
+    "metric": "cpu_avg1",
+    "id": "node/node1",
+    "type": "gauge"
+   },
+   {
+    "value": 7.23,
+    "timestamp": 1790263317,
+    "id": "node/node1",
+    "type": "gauge",
+    "metric": "cpu_avg5"
+   },
+   {
+    "metric": "cpu_avg15",
+    "type": "gauge",
+    "id": "node/node1",
+    "timestamp": 1790263317,
+    "value": 6.42
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 64,
+    "metric": "cpu_max",
+    "id": "node/node1",
+    "type": "gauge"
+   },
+   {
+    "id": "node/node1",
+    "type": "gauge",
+    "metric": "cpu_current",
+    "value": 0.112574850299401,
+    "timestamp": 1790263317
+   },
+   {
+    "type": "gauge",
+    "id": "node/node1",
+    "metric": "cpu_iowait",
+    "value": 0.00259481037924152,
+    "timestamp": 1790263317
+   },
+   {
+    "metric": "mem_total",
+    "type": "gauge",
+    "id": "node/node1",
+    "timestamp": 1790263317,
+    "value": 270079578112
+   },
+   {
+    "value": 209429487616,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "node/node1",
+    "metric": "mem_used"
+   },
+   {
+    "metric": "swap_total",
+    "id": "node/node1",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 0
+   },
+   {
+    "metric": "swap_used",
+    "type": "gauge",
+    "id": "node/node1",
+    "timestamp": 1790263317,
+    "value": 0
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 468157071360,
+    "metric": "disk_total",
+    "type": "gauge",
+    "id": "node/node1"
+   },
+   {
+    "metric": "disk_used",
+    "id": "node/node1",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 7851868160
+   },
+   {
+    "id": "qemu/104",
+    "type": "gauge",
+    "metric": "cpu_current",
+    "value": 0.27168724599809,
+    "timestamp": 1790263317
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/104",
+    "metric": "mem_used",
+    "value": 11377500160,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 30577955840,
+    "timestamp": 1790263317,
+    "id": "qemu/104",
+    "type": "derive",
+    "metric": "disk_read"
+   },
+   {
+    "value": 217185005056,
+    "timestamp": 1790263317,
+    "type": "derive",
+    "id": "qemu/104",
+    "metric": "disk_write"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 1037523002,
+    "metric": "net_in",
+    "id": "qemu/104",
+    "type": "derive"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 309380946,
+    "metric": "net_out",
+    "id": "qemu/104",
+    "type": "derive"
+   },
+   {
+    "metric": "uptime",
+    "id": "qemu/104",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 696791
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/104",
+    "metric": "cpu_max",
+    "value": 4,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 17179869184,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/104",
+    "metric": "mem_total"
+   },
+   {
+    "metric": "disk_total",
+    "type": "gauge",
+    "id": "qemu/104",
+    "timestamp": 1790263317,
+    "value": 549755813888
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 0.031676539892154,
+    "metric": "cpu_current",
+    "type": "gauge",
+    "id": "qemu/115"
+   },
+   {
+    "value": 4706541568,
+    "timestamp": 1790263317,
+    "id": "qemu/115",
+    "type": "gauge",
+    "metric": "mem_used"
+   },
+   {
+    "metric": "disk_read",
+    "id": "qemu/115",
+    "type": "derive",
+    "timestamp": 1790263317,
+    "value": 86670916096
+   },
+   {
+    "metric": "disk_write",
+    "id": "qemu/115",
+    "type": "derive",
+    "timestamp": 1790263317,
+    "value": 104245921280
+   },
+   {
+    "type": "derive",
+    "id": "qemu/115",
+    "metric": "net_in",
+    "value": 7158436994,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 6321395281,
+    "timestamp": 1790263317,
+    "type": "derive",
+    "id": "qemu/115",
+    "metric": "net_out"
+   },
+   {
+    "id": "qemu/115",
+    "type": "gauge",
+    "metric": "uptime",
+    "value": 764236,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 4,
+    "timestamp": 1790263317,
+    "id": "qemu/115",
+    "type": "gauge",
+    "metric": "cpu_max"
+   },
+   {
+    "value": 17179869184,
+    "timestamp": 1790263317,
+    "id": "qemu/115",
+    "type": "gauge",
+    "metric": "mem_total"
+   },
+   {
+    "value": 137438953472,
+    "timestamp": 1790263317,
+    "id": "qemu/115",
+    "type": "gauge",
+    "metric": "disk_total"
+   },
+   {
+    "metric": "cpu_current",
+    "type": "gauge",
+    "id": "qemu/118",
+    "timestamp": 1790263317,
+    "value": 0.0287525515944167
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 2619572224,
+    "metric": "mem_used",
+    "id": "qemu/118",
+    "type": "gauge"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 564802286592,
+    "metric": "disk_read",
+    "type": "derive",
+    "id": "qemu/118"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 477119696896,
+    "metric": "disk_write",
+    "id": "qemu/118",
+    "type": "derive"
+   },
+   {
+    "value": 4690521933,
+    "timestamp": 1790263317,
+    "id": "qemu/118",
+    "type": "derive",
+    "metric": "net_in"
+   },
+   {
+    "id": "qemu/118",
+    "type": "derive",
+    "metric": "net_out",
+    "value": 5021259887,
+    "timestamp": 1790263317
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/118",
+    "metric": "uptime",
+    "value": 1932158,
+    "timestamp": 1790263317
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 2,
+    "metric": "cpu_max",
+    "id": "qemu/118",
+    "type": "gauge"
+   },
+   {
+    "value": 4294967296,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/118",
+    "metric": "mem_total"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 137438953472,
+    "metric": "disk_total",
+    "id": "qemu/118",
+    "type": "gauge"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 0.165855113999432,
+    "metric": "cpu_current",
+    "type": "gauge",
+    "id": "qemu/116"
+   },
+   {
+    "value": 17705082880,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/116",
+    "metric": "mem_used"
+   },
+   {
+    "value": 198630668800,
+    "timestamp": 1790263317,
+    "id": "qemu/116",
+    "type": "derive",
+    "metric": "disk_read"
+   },
+   {
+    "metric": "disk_write",
+    "type": "derive",
+    "id": "qemu/116",
+    "timestamp": 1790263317,
+    "value": 247218576896
+   },
+   {
+    "metric": "net_in",
+    "id": "qemu/116",
+    "type": "derive",
+    "timestamp": 1790263317,
+    "value": 8035909705
+   },
+   {
+    "type": "derive",
+    "id": "qemu/116",
+    "metric": "net_out",
+    "value": 6770768464,
+    "timestamp": 1790263317
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/116",
+    "metric": "uptime",
+    "value": 764233,
+    "timestamp": 1790263317
+   },
+   {
+    "metric": "cpu_max",
+    "id": "qemu/116",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 6
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 17179869184,
+    "metric": "mem_total",
+    "id": "qemu/116",
+    "type": "gauge"
+   },
+   {
+    "value": 375809638400,
+    "timestamp": 1790263317,
+    "id": "qemu/116",
+    "type": "gauge",
+    "metric": "disk_total"
+   },
+   {
+    "metric": "cpu_current",
+    "id": "qemu/106",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 0.199074869937614
+   },
+   {
+    "id": "qemu/106",
+    "type": "gauge",
+    "metric": "mem_used",
+    "value": 11312369664,
+    "timestamp": 1790263317
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 2089109304832,
+    "metric": "disk_read",
+    "type": "derive",
+    "id": "qemu/106"
+   },
+   {
+    "metric": "disk_write",
+    "type": "derive",
+    "id": "qemu/106",
+    "timestamp": 1790263317,
+    "value": 2360090462208
+   },
+   {
+    "metric": "net_in",
+    "type": "derive",
+    "id": "qemu/106",
+    "timestamp": 1790263317,
+    "value": 227526563969
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 96726762975,
+    "metric": "net_out",
+    "id": "qemu/106",
+    "type": "derive"
+   },
+   {
+    "metric": "uptime",
+    "type": "gauge",
+    "id": "qemu/106",
+    "timestamp": 1790263317,
+    "value": 6846143
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/106",
+    "metric": "cpu_max",
+    "value": 4,
+    "timestamp": 1790263317
+   },
+   {
+    "metric": "mem_total",
+    "id": "qemu/106",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 17179869184
+   },
+   {
+    "id": "qemu/106",
+    "type": "gauge",
+    "metric": "disk_total",
+    "value": 274877906944,
+    "timestamp": 1790263317
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/128",
+    "metric": "cpu_current",
+    "value": 0.0492204696785777,
+    "timestamp": 1790263317
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 8790904832,
+    "metric": "mem_used",
+    "type": "gauge",
+    "id": "qemu/128"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 74525050368,
+    "metric": "disk_read",
+    "type": "derive",
+    "id": "qemu/128"
+   },
+   {
+    "value": 509736247296,
+    "timestamp": 1790263317,
+    "id": "qemu/128",
+    "type": "derive",
+    "metric": "disk_write"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 10629122120707,
+    "metric": "net_in",
+    "id": "qemu/128",
+    "type": "derive"
+   },
+   {
+    "metric": "net_out",
+    "id": "qemu/128",
+    "type": "derive",
+    "timestamp": 1790263317,
+    "value": 10780691669718
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/128",
+    "metric": "uptime",
+    "value": 763536,
+    "timestamp": 1790263317
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/128",
+    "metric": "cpu_max",
+    "value": 4,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 8589934592,
+    "timestamp": 1790263317,
+    "id": "qemu/128",
+    "type": "gauge",
+    "metric": "mem_total"
+   },
+   {
+    "metric": "disk_total",
+    "id": "qemu/128",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 161061273600
+   },
+   {
+    "id": "qemu/125",
+    "type": "gauge",
+    "metric": "cpu_current",
+    "value": 0.0662770680820452,
+    "timestamp": 1790263317
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 10797920256,
+    "metric": "mem_used",
+    "id": "qemu/125",
+    "type": "gauge"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 6800986552320,
+    "metric": "disk_read",
+    "type": "derive",
+    "id": "qemu/125"
+   },
+   {
+    "id": "qemu/125",
+    "type": "derive",
+    "metric": "disk_write",
+    "value": 30172955534336,
+    "timestamp": 1790263317
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 72387580924,
+    "metric": "net_in",
+    "id": "qemu/125",
+    "type": "derive"
+   },
+   {
+    "metric": "net_out",
+    "type": "derive",
+    "id": "qemu/125",
+    "timestamp": 1790263317,
+    "value": 9388542170
+   },
+   {
+    "value": 8814446,
+    "timestamp": 1790263317,
+    "id": "qemu/125",
+    "type": "gauge",
+    "metric": "uptime"
+   },
+   {
+    "id": "qemu/125",
+    "type": "gauge",
+    "metric": "cpu_max",
+    "value": 4,
+    "timestamp": 1790263317
+   },
+   {
+    "metric": "mem_total",
+    "id": "qemu/125",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 17179869184
+   },
+   {
+    "metric": "disk_total",
+    "id": "qemu/125",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 241591910400
+   },
+   {
+    "value": 0.510723289338113,
+    "timestamp": 1790263317,
+    "id": "qemu/114",
+    "type": "gauge",
+    "metric": "cpu_current"
+   },
+   {
+    "metric": "mem_used",
+    "id": "qemu/114",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 9303080960
+   },
+   {
+    "type": "derive",
+    "id": "qemu/114",
+    "metric": "disk_read",
+    "value": 88845029376,
+    "timestamp": 1790263317
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 49142391808,
+    "metric": "disk_write",
+    "id": "qemu/114",
+    "type": "derive"
+   },
+   {
+    "value": 388484468,
+    "timestamp": 1790263317,
+    "type": "derive",
+    "id": "qemu/114",
+    "metric": "net_in"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 998877073,
+    "metric": "net_out",
+    "id": "qemu/114",
+    "type": "derive"
+   },
+   {
+    "metric": "uptime",
+    "type": "gauge",
+    "id": "qemu/114",
+    "timestamp": 1790263317,
+    "value": 119642
+   },
+   {
+    "id": "qemu/114",
+    "type": "gauge",
+    "metric": "cpu_max",
+    "value": 4,
+    "timestamp": 1790263317
+   },
+   {
+    "metric": "mem_total",
+    "type": "gauge",
+    "id": "qemu/114",
+    "timestamp": 1790263317,
+    "value": 17179869184
+   },
+   {
+    "value": 214748364800,
+    "timestamp": 1790263317,
+    "id": "qemu/114",
+    "type": "gauge",
+    "metric": "disk_total"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 0.052144457976315,
+    "metric": "cpu_current",
+    "type": "gauge",
+    "id": "qemu/100"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 17891586048,
+    "metric": "mem_used",
+    "id": "qemu/100",
+    "type": "gauge"
+   },
+   {
+    "id": "qemu/100",
+    "type": "derive",
+    "metric": "disk_read",
+    "value": 2312046387712,
+    "timestamp": 1790263317
+   },
+   {
+    "metric": "disk_write",
+    "id": "qemu/100",
+    "type": "derive",
+    "timestamp": 1790263317,
+    "value": 3076661625856
+   },
+   {
+    "metric": "net_in",
+    "id": "qemu/100",
+    "type": "derive",
+    "timestamp": 1790263317,
+    "value": 601411829171
+   },
+   {
+    "id": "qemu/100",
+    "type": "derive",
+    "metric": "net_out",
+    "value": 1695816597710,
+    "timestamp": 1790263317
+   },
+   {
+    "id": "qemu/100",
+    "type": "gauge",
+    "metric": "uptime",
+    "value": 8808437,
+    "timestamp": 1790263317
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/100",
+    "metric": "cpu_max",
+    "value": 4,
+    "timestamp": 1790263317
+   },
+   {
+    "metric": "mem_total",
+    "id": "qemu/100",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 17179869184
+   },
+   {
+    "value": 118111600640,
+    "timestamp": 1790263317,
+    "id": "qemu/100",
+    "type": "gauge",
+    "metric": "disk_total"
+   },
+   {
+    "value": 0.036306188030238,
+    "timestamp": 1790263317,
+    "id": "qemu/135",
+    "type": "gauge",
+    "metric": "cpu_current"
+   },
+   {
+    "metric": "mem_used",
+    "id": "qemu/135",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 2728812544
+   },
+   {
+    "value": 35495559168,
+    "timestamp": 1790263317,
+    "id": "qemu/135",
+    "type": "derive",
+    "metric": "disk_read"
+   },
+   {
+    "metric": "disk_write",
+    "type": "derive",
+    "id": "qemu/135",
+    "timestamp": 1790263317,
+    "value": 71933338624
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 2776127267,
+    "metric": "net_in",
+    "id": "qemu/135",
+    "type": "derive"
+   },
+   {
+    "metric": "net_out",
+    "type": "derive",
+    "id": "qemu/135",
+    "timestamp": 1790263317,
+    "value": 54313773
+   },
+   {
+    "value": 90967,
+    "timestamp": 1790263317,
+    "id": "qemu/135",
+    "type": "gauge",
+    "metric": "uptime"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 4,
+    "metric": "cpu_max",
+    "id": "qemu/135",
+    "type": "gauge"
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/135",
+    "metric": "mem_total",
+    "value": 17179869184,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 274877906944,
+    "timestamp": 1790263317,
+    "id": "qemu/135",
+    "type": "gauge",
+    "metric": "disk_total"
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/109",
+    "metric": "cpu_current",
+    "value": 0.0153509385631208,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 3296595968,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/109",
+    "metric": "mem_used"
+   },
+   {
+    "value": 426440071680,
+    "timestamp": 1790263317,
+    "type": "derive",
+    "id": "qemu/109",
+    "metric": "disk_read"
+   },
+   {
+    "id": "qemu/109",
+    "type": "derive",
+    "metric": "disk_write",
+    "value": 769749070336,
+    "timestamp": 1790263317
+   },
+   {
+    "id": "qemu/109",
+    "type": "derive",
+    "metric": "net_in",
+    "value": 16183118990,
+    "timestamp": 1790263317
+   },
+   {
+    "id": "qemu/109",
+    "type": "derive",
+    "metric": "net_out",
+    "value": 26407940759,
+    "timestamp": 1790263317
+   },
+   {
+    "id": "qemu/109",
+    "type": "gauge",
+    "metric": "uptime",
+    "value": 8814456,
+    "timestamp": 1790263317
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 4,
+    "metric": "cpu_max",
+    "type": "gauge",
+    "id": "qemu/109"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 12888047616,
+    "metric": "mem_total",
+    "id": "qemu/109",
+    "type": "gauge"
+   },
+   {
+    "value": 665719930880,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/109",
+    "metric": "disk_total"
+   },
+   {
+    "value": 0.134990793078872,
+    "timestamp": 1790263317,
+    "id": "qemu/129",
+    "type": "gauge",
+    "metric": "cpu_current"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 8394977280,
+    "metric": "mem_used",
+    "id": "qemu/129",
+    "type": "gauge"
+   },
+   {
+    "id": "qemu/129",
+    "type": "derive",
+    "metric": "disk_read",
+    "value": 172098643456,
+    "timestamp": 1790263317
+   },
+   {
+    "metric": "disk_write",
+    "type": "derive",
+    "id": "qemu/129",
+    "timestamp": 1790263317,
+    "value": 167147291648
+   },
+   {
+    "metric": "net_in",
+    "type": "derive",
+    "id": "qemu/129",
+    "timestamp": 1790263317,
+    "value": 13617043971
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 14401872684,
+    "metric": "net_out",
+    "type": "derive",
+    "id": "qemu/129"
+   },
+   {
+    "id": "qemu/129",
+    "type": "gauge",
+    "metric": "uptime",
+    "value": 764231,
+    "timestamp": 1790263317
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 4,
+    "metric": "cpu_max",
+    "type": "gauge",
+    "id": "qemu/129"
+   },
+   {
+    "metric": "mem_total",
+    "id": "qemu/129",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 17179869184
+   },
+   {
+    "id": "qemu/129",
+    "type": "gauge",
+    "metric": "disk_total",
+    "value": 274877906944,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 0,
+    "timestamp": 1790263317,
+    "id": "storage/node1/pool3",
+    "type": "gauge",
+    "metric": "disk_total"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 0,
+    "metric": "disk_used",
+    "id": "storage/node1/pool3",
+    "type": "gauge"
+   },
+   {
+    "value": 0,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "storage/node1/BKP01",
+    "metric": "disk_total"
+   },
+   {
+    "metric": "disk_used",
+    "type": "gauge",
+    "id": "storage/node1/BKP01",
+    "timestamp": 1790263317,
+    "value": 0
+   },
+   {
+    "id": "storage/node1/local",
+    "type": "gauge",
+    "metric": "disk_total",
+    "value": 470728179712,
+    "timestamp": 1790263317
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 10422976512,
+    "metric": "disk_used",
+    "type": "gauge",
+    "id": "storage/node1/local"
+   },
+   {
+    "metric": "disk_total",
+    "id": "storage/node1/pool1",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 15839839387648
+   },
+   {
+    "metric": "disk_used",
+    "id": "storage/node1/pool1",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 6018258491696
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 0,
+    "metric": "disk_total",
+    "type": "gauge",
+    "id": "storage/node1/pool2"
+   },
+   {
+    "metric": "disk_used",
+    "type": "gauge",
+    "id": "storage/node1/pool2",
+    "timestamp": 1790263317,
+    "value": 0
+   },
+   {
+    "value": 7467556,
+    "timestamp": 1790263317,
+    "id": "node/node3",
+    "type": "gauge",
+    "metric": "uptime"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 650998712691169,
+    "metric": "net_in",
+    "type": "derive",
+    "id": "node/node3"
+   },
+   {
+    "value": 134618741147062,
+    "timestamp": 1790263317,
+    "id": "node/node3",
+    "type": "derive",
+    "metric": "net_out"
+   },
+   {
+    "id": "node/node3",
+    "type": "gauge",
+    "metric": "cpu_avg1",
+    "value": 12.42,
+    "timestamp": 1790263317
+   },
+   {
+    "type": "gauge",
+    "id": "node/node3",
+    "metric": "cpu_avg5",
+    "value": 13.18,
+    "timestamp": 1790263317
+   },
+   {
+    "metric": "cpu_avg15",
+    "id": "node/node3",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 13.92
+   },
+   {
+    "value": 64,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "node/node3",
+    "metric": "cpu_max"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 0.153261205564142,
+    "metric": "cpu_current",
+    "id": "node/node3",
+    "type": "gauge"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 0.0015919629057187,
+    "metric": "cpu_iowait",
+    "type": "gauge",
+    "id": "node/node3"
+   },
+   {
+    "value": 270076751872,
+    "timestamp": 1790263317,
+    "id": "node/node3",
+    "type": "gauge",
+    "metric": "mem_total"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 179920941056,
+    "metric": "mem_used",
+    "id": "node/node3",
+    "type": "gauge"
+   },
+   {
+    "metric": "swap_total",
+    "type": "gauge",
+    "id": "node/node3",
+    "timestamp": 1790263317,
+    "value": 0
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 0,
+    "metric": "swap_used",
+    "type": "gauge",
+    "id": "node/node3"
+   },
+   {
+    "metric": "disk_total",
+    "id": "node/node3",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 952455266304
+   },
+   {
+    "metric": "disk_used",
+    "type": "gauge",
+    "id": "node/node3",
+    "timestamp": 1790263317,
+    "value": 6679429120
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/122",
+    "metric": "cpu_current",
+    "value": 0.0366370972971643,
+    "timestamp": 1790263317
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 2244767744,
+    "metric": "mem_used",
+    "id": "qemu/122",
+    "type": "gauge"
+   },
+   {
+    "type": "derive",
+    "id": "qemu/122",
+    "metric": "disk_read",
+    "value": 4262326272,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 3487246336,
+    "timestamp": 1790263317,
+    "type": "derive",
+    "id": "qemu/122",
+    "metric": "disk_write"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 36731049,
+    "metric": "net_in",
+    "type": "derive",
+    "id": "qemu/122"
+   },
+   {
+    "value": 231855339,
+    "timestamp": 1790263317,
+    "type": "derive",
+    "id": "qemu/122",
+    "metric": "net_out"
+   },
+   {
+    "id": "qemu/122",
+    "type": "gauge",
+    "metric": "uptime",
+    "value": 21950,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 2,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/122",
+    "metric": "cpu_max"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 4294967296,
+    "metric": "mem_total",
+    "id": "qemu/122",
+    "type": "gauge"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 137438953472,
+    "metric": "disk_total",
+    "type": "gauge",
+    "id": "qemu/122"
+   },
+   {
+    "metric": "cpu_current",
+    "type": "gauge",
+    "id": "qemu/101",
+    "timestamp": 1790263317,
+    "value": 0.76327286035759
+   },
+   {
+    "metric": "mem_used",
+    "type": "gauge",
+    "id": "qemu/101",
+    "timestamp": 1790263317,
+    "value": 14219022336
+   },
+   {
+    "metric": "disk_read",
+    "type": "derive",
+    "id": "qemu/101",
+    "timestamp": 1790263317,
+    "value": 17989131139584
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 6668844908544,
+    "metric": "disk_write",
+    "type": "derive",
+    "id": "qemu/101"
+   },
+   {
+    "type": "derive",
+    "id": "qemu/101",
+    "metric": "net_in",
+    "value": 150163926666,
+    "timestamp": 1790263317
+   },
+   {
+    "metric": "net_out",
+    "id": "qemu/101",
+    "type": "derive",
+    "timestamp": 1790263317,
+    "value": 814947660726
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 7467529,
+    "metric": "uptime",
+    "id": "qemu/101",
+    "type": "gauge"
+   },
+   {
+    "metric": "cpu_max",
+    "type": "gauge",
+    "id": "qemu/101",
+    "timestamp": 1790263317,
+    "value": 4
+   },
+   {
+    "value": 17179869184,
+    "timestamp": 1790263317,
+    "id": "qemu/101",
+    "type": "gauge",
+    "metric": "mem_total"
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/101",
+    "metric": "disk_total",
+    "value": 549755813888,
+    "timestamp": 1790263317
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/113",
+    "metric": "cpu_current",
+    "value": 0.115528980143725,
+    "timestamp": 1790263317
+   },
+   {
+    "id": "qemu/113",
+    "type": "gauge",
+    "metric": "mem_used",
+    "value": 10920845312,
+    "timestamp": 1790263317
+   },
+   {
+    "metric": "disk_read",
+    "type": "derive",
+    "id": "qemu/113",
+    "timestamp": 1790263317,
+    "value": 792375569920
+   },
+   {
+    "metric": "disk_write",
+    "type": "derive",
+    "id": "qemu/113",
+    "timestamp": 1790263317,
+    "value": 169125311488
+   },
+   {
+    "metric": "net_in",
+    "id": "qemu/113",
+    "type": "derive",
+    "timestamp": 1790263317,
+    "value": 8659159717
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 13985167235,
+    "metric": "net_out",
+    "type": "derive",
+    "id": "qemu/113"
+   },
+   {
+    "value": 764078,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/113",
+    "metric": "uptime"
+   },
+   {
+    "value": 4,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/113",
+    "metric": "cpu_max"
+   },
+   {
+    "value": 17177772032,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/113",
+    "metric": "mem_total"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 549755813888,
+    "metric": "disk_total",
+    "type": "gauge",
+    "id": "qemu/113"
+   },
+   {
+    "metric": "cpu_current",
+    "type": "gauge",
+    "id": "qemu/105",
+    "timestamp": 1790263317,
+    "value": 0.176346561657018
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 17269530624,
+    "metric": "mem_used",
+    "type": "gauge",
+    "id": "qemu/105"
+   },
+   {
+    "value": 158066017280,
+    "timestamp": 1790263317,
+    "id": "qemu/105",
+    "type": "derive",
+    "metric": "disk_read"
+   },
+   {
+    "metric": "disk_write",
+    "id": "qemu/105",
+    "type": "derive",
+    "timestamp": 1790263317,
+    "value": 308305204736
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 27478548798,
+    "metric": "net_in",
+    "type": "derive",
+    "id": "qemu/105"
+   },
+   {
+    "value": 26974163553,
+    "timestamp": 1790263317,
+    "type": "derive",
+    "id": "qemu/105",
+    "metric": "net_out"
+   },
+   {
+    "metric": "uptime",
+    "id": "qemu/105",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 764224
+   },
+   {
+    "id": "qemu/105",
+    "type": "gauge",
+    "metric": "cpu_max",
+    "value": 6,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 25769803776,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/105",
+    "metric": "mem_total"
+   },
+   {
+    "metric": "disk_total",
+    "type": "gauge",
+    "id": "qemu/105",
+    "timestamp": 1790263317,
+    "value": 274877906944
+   },
+   {
+    "id": "qemu/127",
+    "type": "gauge",
+    "metric": "cpu_current",
+    "value": 0.129695324431962,
+    "timestamp": 1790263317
+   },
+   {
+    "id": "qemu/127",
+    "type": "gauge",
+    "metric": "mem_used",
+    "value": 12202352640,
+    "timestamp": 1790263317
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 127909457920,
+    "metric": "disk_read",
+    "id": "qemu/127",
+    "type": "derive"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 194452049920,
+    "metric": "disk_write",
+    "id": "qemu/127",
+    "type": "derive"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 14137587342,
+    "metric": "net_in",
+    "type": "derive",
+    "id": "qemu/127"
+   },
+   {
+    "metric": "net_out",
+    "id": "qemu/127",
+    "type": "derive",
+    "timestamp": 1790263317,
+    "value": 16939885978
+   },
+   {
+    "metric": "uptime",
+    "id": "qemu/127",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 764222
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 4,
+    "metric": "cpu_max",
+    "type": "gauge",
+    "id": "qemu/127"
+   },
+   {
+    "value": 17179869184,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/127",
+    "metric": "mem_total"
+   },
+   {
+    "metric": "disk_total",
+    "type": "gauge",
+    "id": "qemu/127",
+    "timestamp": 1790263317,
+    "value": 1099511627776
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 0,
+    "metric": "uptime",
+    "type": "gauge",
+    "id": "qemu/108"
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/108",
+    "metric": "cpu_max",
+    "value": 4,
+    "timestamp": 1790263317
+   },
+   {
+    "metric": "mem_total",
+    "id": "qemu/108",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 4294967296
+   },
+   {
+    "value": 34359738368,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/108",
+    "metric": "disk_total"
+   },
+   {
+    "metric": "cpu_current",
+    "id": "qemu/137",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 0.379723159542166
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 29321089024,
+    "metric": "mem_used",
+    "id": "qemu/137",
+    "type": "gauge"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 446543078400,
+    "metric": "disk_read",
+    "type": "derive",
+    "id": "qemu/137"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 689572677120,
+    "metric": "disk_write",
+    "type": "derive",
+    "id": "qemu/137"
+   },
+   {
+    "id": "qemu/137",
+    "type": "derive",
+    "metric": "net_in",
+    "value": 25156110214,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 27281425412,
+    "timestamp": 1790263317,
+    "type": "derive",
+    "id": "qemu/137",
+    "metric": "net_out"
+   },
+   {
+    "metric": "uptime",
+    "type": "gauge",
+    "id": "qemu/137",
+    "timestamp": 1790263317,
+    "value": 764213
+   },
+   {
+    "metric": "cpu_max",
+    "type": "gauge",
+    "id": "qemu/137",
+    "timestamp": 1790263317,
+    "value": 6
+   },
+   {
+    "value": 34359738368,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/137",
+    "metric": "mem_total"
+   },
+   {
+    "metric": "disk_total",
+    "type": "gauge",
+    "id": "qemu/137",
+    "timestamp": 1790263317,
+    "value": 375809638400
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 0.0488494630628858,
+    "metric": "cpu_current",
+    "id": "qemu/134",
+    "type": "gauge"
+   },
+   {
+    "metric": "mem_used",
+    "id": "qemu/134",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 1413615616
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 628974456832,
+    "metric": "disk_read",
+    "id": "qemu/134",
+    "type": "derive"
+   },
+   {
+    "value": 682445809152,
+    "timestamp": 1790263317,
+    "type": "derive",
+    "id": "qemu/134",
+    "metric": "disk_write"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 14038866039,
+    "metric": "net_in",
+    "type": "derive",
+    "id": "qemu/134"
+   },
+   {
+    "type": "derive",
+    "id": "qemu/134",
+    "metric": "net_out",
+    "value": 3600186347,
+    "timestamp": 1790263317
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 7467433,
+    "metric": "uptime",
+    "type": "gauge",
+    "id": "qemu/134"
+   },
+   {
+    "value": 1,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/134",
+    "metric": "cpu_max"
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/134",
+    "metric": "mem_total",
+    "value": 2147483648,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 34359738368,
+    "timestamp": 1790263317,
+    "id": "qemu/134",
+    "type": "gauge",
+    "metric": "disk_total"
+   },
+   {
+    "value": 0.253040218665748,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/130",
+    "metric": "cpu_current"
+   },
+   {
+    "value": 25887670272,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/130",
+    "metric": "mem_used"
+   },
+   {
+    "type": "derive",
+    "id": "qemu/130",
+    "metric": "disk_read",
+    "value": 810821927424,
+    "timestamp": 1790263317
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 517252980224,
+    "metric": "disk_write",
+    "type": "derive",
+    "id": "qemu/130"
+   },
+   {
+    "value": 646613616567815,
+    "timestamp": 1790263317,
+    "type": "derive",
+    "id": "qemu/130",
+    "metric": "net_in"
+   },
+   {
+    "type": "derive",
+    "id": "qemu/130",
+    "metric": "net_out",
+    "value": 125485762178006,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 7467439,
+    "timestamp": 1790263317,
+    "id": "qemu/130",
+    "type": "gauge",
+    "metric": "uptime"
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/130",
+    "metric": "cpu_max",
+    "value": 4,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 25769803776,
+    "timestamp": 1790263317,
+    "id": "qemu/130",
+    "type": "gauge",
+    "metric": "mem_total"
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 34359738368,
+    "metric": "disk_total",
+    "id": "qemu/130",
+    "type": "gauge"
+   },
+   {
+    "value": 0.264519842485527,
+    "timestamp": 1790263317,
+    "id": "qemu/131",
+    "type": "gauge",
+    "metric": "cpu_current"
+   },
+   {
+    "metric": "mem_used",
+    "type": "gauge",
+    "id": "qemu/131",
+    "timestamp": 1790263317,
+    "value": 26592423936
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 428999135744,
+    "metric": "disk_read",
+    "type": "derive",
+    "id": "qemu/131"
+   },
+   {
+    "id": "qemu/131",
+    "type": "derive",
+    "metric": "disk_write",
+    "value": 376553202176,
+    "timestamp": 1790263317
+   },
+   {
+    "type": "derive",
+    "id": "qemu/131",
+    "metric": "net_in",
+    "value": 16994581506,
+    "timestamp": 1790263317
+   },
+   {
+    "metric": "net_out",
+    "id": "qemu/131",
+    "type": "derive",
+    "timestamp": 1790263317,
+    "value": 20583235343
+   },
+   {
+    "value": 864505,
+    "timestamp": 1790263317,
+    "id": "qemu/131",
+    "type": "gauge",
+    "metric": "uptime"
+   },
+   {
+    "value": 4,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "qemu/131",
+    "metric": "cpu_max"
+   },
+   {
+    "metric": "mem_total",
+    "type": "gauge",
+    "id": "qemu/131",
+    "timestamp": 1790263317,
+    "value": 25769803776
+   },
+   {
+    "type": "gauge",
+    "id": "qemu/131",
+    "metric": "disk_total",
+    "value": 1099511627776,
+    "timestamp": 1790263317
+   },
+   {
+    "metric": "disk_total",
+    "id": "storage/node3/BKP01",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 0
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 0,
+    "metric": "disk_used",
+    "id": "storage/node3/BKP01",
+    "type": "gauge"
+   },
+   {
+    "type": "gauge",
+    "id": "storage/node3/pool3",
+    "metric": "disk_total",
+    "value": 11483534589952,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 3588368509056,
+    "timestamp": 1790263317,
+    "id": "storage/node3/pool3",
+    "type": "gauge",
+    "metric": "disk_used"
+   },
+   {
+    "id": "storage/node3/pool2",
+    "type": "gauge",
+    "metric": "disk_total",
+    "value": 0,
+    "timestamp": 1790263317
+   },
+   {
+    "value": 0,
+    "timestamp": 1790263317,
+    "type": "gauge",
+    "id": "storage/node3/pool2",
+    "metric": "disk_used"
+   },
+   {
+    "metric": "disk_total",
+    "id": "storage/node3/local",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 958843453440
+   },
+   {
+    "id": "storage/node3/local",
+    "type": "gauge",
+    "metric": "disk_used",
+    "value": 13067616256,
+    "timestamp": 1790263317
+   },
+   {
+    "timestamp": 1790263317,
+    "value": 0,
+    "metric": "disk_total",
+    "id": "storage/node3/pool1",
+    "type": "gauge"
+   },
+   {
+    "metric": "disk_used",
+    "id": "storage/node3/pool1",
+    "type": "gauge",
+    "timestamp": 1790263317,
+    "value": 0
+   }
+  ]
+ }
+}

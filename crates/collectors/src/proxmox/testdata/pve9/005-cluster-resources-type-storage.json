@@ -1,0 +1,112 @@
+{
+ "data": [
+  {
+   "storage": "BKP01",
+   "content": "backup",
+   "type": "storage",
+   "plugintype": "pbs",
+   "shared": 1,
+   "maxdisk": 0,
+   "node": "node2",
+   "status": "available",
+   "id": "storage/node2/BKP01",
+   "disk": 0
+  },
+  {
+   "disk": 0,
+   "status": "available",
+   "node": "node1",
+   "id": "storage/node1/BKP01",
+   "content": "backup",
+   "storage": "BKP01",
+   "shared": 1,
+   "maxdisk": 0,
+   "type": "storage",
+   "plugintype": "pbs"
+  },
+  {
+   "disk": 0,
+   "id": "storage/node3/BKP01",
+   "node": "node3",
+   "status": "available",
+   "plugintype": "pbs",
+   "type": "storage",
+   "shared": 1,
+   "maxdisk": 0,
+   "storage": "BKP01",
+   "content": "backup"
+  },
+  {
+   "id": "storage/node2/local",
+   "status": "available",
+   "node": "node2",
+   "disk": 54358441984,
+   "maxdisk": 865671315456,
+   "shared": 0,
+   "type": "storage",
+   "plugintype": "dir",
+   "content": "backup,vztmpl,import,iso",
+   "storage": "local"
+  },
+  {
+   "plugintype": "dir",
+   "type": "storage",
+   "shared": 0,
+   "maxdisk": 470728179712,
+   "storage": "local",
+   "content": "backup,vztmpl,import,iso",
+   "disk": 10422976512,
+   "id": "storage/node1/local",
+   "node": "node1",
+   "status": "available"
+  },
+  {
+   "disk": 13067616256,
+   "id": "storage/node3/local",
+   "status": "available",
+   "node": "node3",
+   "shared": 0,
+   "maxdisk": 958843453440,
+   "type": "storage",
+   "plugintype": "dir",
+   "content": "backup,vztmpl,import,iso",
+   "storage": "local"
+  },
+  {
+   "shared": 0,
+   "maxdisk": 15839839387648,
+   "plugintype": "zfspool",
+   "type": "storage",
+   "content": "rootdir,images",
+   "storage": "pool1",
+   "disk": 6018258491696,
+   "id": "storage/node1/pool1",
+   "status": "available",
+   "node": "node1"
+  },
+  {
+   "content": "rootdir,images",
+   "storage": "pool2",
+   "maxdisk": 14257343768848,
+   "shared": 0,
+   "plugintype": "zfspool",
+   "type": "storage",
+   "status": "available",
+   "node": "node2",
+   "id": "storage/node2/pool2",
+   "disk": 6066271549944
+  },
+  {
+   "disk": 3588368509056,
+   "status": "available",
+   "node": "node3",
+   "id": "storage/node3/pool3",
+   "content": "rootdir,images",
+   "storage": "pool3",
+   "shared": 0,
+   "maxdisk": 11483534589952,
+   "plugintype": "zfspool",
+   "type": "storage"
+  }
+ ]
+}

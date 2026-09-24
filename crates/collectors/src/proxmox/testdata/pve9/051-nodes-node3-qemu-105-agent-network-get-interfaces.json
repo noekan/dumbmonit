@@ -1,0 +1,52 @@
+{
+ "data": {
+  "result": [
+   {
+    "hardware-address": "HARDWARE-ADD-3",
+    "name": "Ethernet",
+    "ip-addresses": [
+     {
+      "ip-address": "IP-ADDRESS-5",
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 24
+     }
+    ],
+    "statistics": {
+     "tx-errs": 0,
+     "rx-bytes": 6554958503,
+     "rx-errs": 0,
+     "tx-bytes": 6483924063,
+     "rx-dropped": 135257,
+     "tx-dropped": 0,
+     "rx-packets": 11133878,
+     "tx-packets": 9348869
+    }
+   },
+   {
+    "name": "Loopback Pseudo-Interface 1",
+    "ip-addresses": [
+     {
+      "ip-address": "IP-ADDRESS-2",
+      "prefix": 128,
+      "ip-address-type": "IP-ADDRESS-T-2"
+     },
+     {
+      "ip-address": "IP-ADDRESS-1",
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 8
+     }
+    ],
+    "statistics": {
+     "tx-packets": 0,
+     "rx-packets": 0,
+     "tx-bytes": 0,
+     "rx-errs": 0,
+     "rx-bytes": 0,
+     "tx-errs": 0,
+     "tx-dropped": 0,
+     "rx-dropped": 0
+    }
+   }
+  ]
+ }
+}

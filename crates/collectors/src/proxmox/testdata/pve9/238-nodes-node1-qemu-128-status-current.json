@@ -1,0 +1,101 @@
+{
+ "data": {
+  "memhost": 8790953984,
+  "disk": 0,
+  "nics": {
+   "tap128i0": {
+    "netin": 1502892929355,
+    "netout": 9278076431246
+   },
+   "tap128i2": {
+    "netout": 32070980,
+    "netin": 28700
+   },
+   "tap128i1": {
+    "netout": 1502969645451,
+    "netin": 9126613910374
+   }
+  },
+  "netin": 10629506868429,
+  "agent": 1,
+  "mem": 8790953984,
+  "running-qemu": "11.0.3",
+  "name": "FW01",
+  "ha": {
+   "managed": 0
+  },
+  "maxmem": 8589934592,
+  "diskwrite": 509768036352,
+  "netout": 10781078147677,
+  "pressurecpufull": 0,
+  "pressureiosome": 0,
+  "tags": "fw",
+  "pressurememoryfull": 0,
+  "uptime": 763604,
+  "maxdisk": 161061273600,
+  "pressurecpusome": 0,
+  "pressureiofull": 0,
+  "status": "running",
+  "cpus": 4,
+  "qmpstatus": "running",
+  "cpu": 0,
+  "balloon": 8589934592,
+  "proxmox-support": {
+   "pbs-dirty-bitmap-migration": true,
+   "pbs-dirty-bitmap": true,
+   "backup-fleecing": true,
+   "pbs-masterkey": true,
+   "backup-access-api": true,
+   "pbs-library-version": "2.0.2 (594183eab9fa275f45dfff5dd15b16f150abd503)",
+   "query-bitmap-info": true,
+   "pbs-dirty-bitmap-savevm": true,
+   "backup-max-workers": true
+  },
+  "ballooninfo": {
+   "max_mem": 8589934592,
+   "actual": 8589934592
+  },
+  "diskread": 74525320704,
+  "running-machine": "RUNNING-MACH-1",
+  "blockstat": {
+   "scsi0": {
+    "failed_unmap_operations": 0,
+    "wr_bytes": 509768036352,
+    "rd_operations": 2699029,
+    "account_failed": true,
+    "unmap_merged": 0,
+    "rd_bytes": 74525320704,
+    "wr_operations": 7091226,
+    "invalid_zone_append_operations": 0,
+    "unmap_total_time_ns": 0,
+    "unmap_operations": 0,
+    "failed_flush_operations": 0,
+    "failed_wr_operations": 0,
+    "failed_rd_operations": 0,
+    "zone_append_total_time_ns": 0,
+    "wr_total_time_ns": 770817699408,
+    "timed_stats": [],
+    "invalid_rd_operations": 0,
+    "rd_total_time_ns": 258712994170,
+    "unmap_bytes": 0,
+    "zone_append_operations": 0,
+    "idle_time_ns": 2235455971,
+    "account_invalid": true,
+    "invalid_flush_operations": 0,
+    "zone_append_bytes": 0,
+    "invalid_wr_operations": 0,
+    "rd_merged": 0,
+    "zone_append_merged": 0,
+    "failed_zone_append_operations": 0,
+    "flush_operations": 930510,
+    "flush_total_time_ns": 4019953118252,
+    "wr_highest_offset": 161060225024,
+    "wr_merged": 0,
+    "invalid_unmap_operations": 0
+   }
+  },
+  "vmid": 128,
+  "pid": 2511422,
+  "pressurememorysome": 0
+ }
+}

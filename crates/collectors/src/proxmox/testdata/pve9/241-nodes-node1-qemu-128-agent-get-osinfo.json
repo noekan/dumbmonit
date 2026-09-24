@@ -1,0 +1,9 @@
+{
+ "data": {
+  "result": {
+   "machine": "MACHINE-2",
+   "kernel-version": "FreeBSD 15.1-RELEASE-p3 stable/26.7-n283949-083dc7025377 SMP",
+   "kernel-release": "15.1-RELEASE-p3"
+  }
+ }
+}

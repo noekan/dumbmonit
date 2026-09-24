@@ -1,0 +1,8 @@
+{
+ "data": {
+  "status": "notfound",
+  "message": "There is no subscription key",
+  "url": "https://www.proxmox.com/en/proxmox-virtual-environment/pricing",
+  "serverid": "SERVERID-1"
+ }
+}

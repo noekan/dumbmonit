@@ -125,10 +125,20 @@ pub struct NodeStatus {
     pub uptime: Option<Num>,
     #[serde(default)]
     pub cpu: Option<Num>,
+    /// Part du temps CPU passée à attendre les disques, en ratio 0..1.
+    ///
+    /// Un nœud dont le processeur est à 15 % mais qui attend 20 % du temps n'est
+    /// pas au repos : il est à genoux sur ses disques, et c'est la seule série
+    /// qui le dise.
+    #[serde(default)]
+    pub wait: Option<Num>,
     #[serde(default)]
     pub loadavg: Vec<Num>,
     #[serde(default)]
     pub cpuinfo: Option<CpuInfo>,
+    /// Déduplication de pages entre invités.
+    #[serde(default)]
+    pub ksm: Option<Ksm>,
     #[serde(default)]
     pub memory: Option<Usage>,
     #[serde(default)]
@@ -139,6 +149,18 @@ pub struct NodeStatus {
     pub pveversion: Option<String>,
     #[serde(default)]
     pub kversion: Option<String>,
+}
+
+/// `ksm` de `GET /nodes/{node}/status` : la mémoire que la déduplication de
+/// pages a rendue au nœud.
+///
+/// Elle fait la différence entre « ce nœud a de la marge » et « ce nœud tient
+/// parce que ses invités se ressemblent » : le jour où l'un d'eux change, la
+/// marge disparaît d'un coup.
+#[derive(Debug, Default, Deserialize)]
+pub struct Ksm {
+    #[serde(default)]
+    pub shared: Option<Num>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -172,6 +194,14 @@ pub struct GuestEntry {
     pub cpus: Option<Num>,
     #[serde(default)]
     pub mem: Option<Num>,
+    /// Mémoire occupée sur l'hôte, surcoût d'émulation compris — ajoutée par
+    /// Proxmox VE 9.
+    ///
+    /// Dans les inventaires (`/cluster/resources`, `/nodes/{n}/qemu`), PVE 9
+    /// renvoie la même valeur dans `mem` : elle dépasse alors régulièrement
+    /// `maxmem`, ce qui interdit d'en tirer un taux de remplissage.
+    #[serde(default)]
+    pub memhost: Option<Num>,
     #[serde(default)]
     pub maxmem: Option<Num>,
     #[serde(default)]
@@ -339,6 +369,10 @@ pub struct HaStatusEntry {
     pub status: Option<String>,
     #[serde(default)]
     pub quorate: Option<Num>,
+    /// `armed` ou `standby`, sur la ligne `fencing` apparue en Proxmox VE 9 :
+    /// dit si le chien de garde est réellement en mesure de couper un nœud.
+    #[serde(rename = "armed-state", default)]
+    pub armed_state: Option<String>,
     /// Identifiant de service : `vm:100` ou `ct:200`.
     #[serde(default)]
     pub sid: Option<String>,
@@ -561,8 +595,18 @@ pub struct AptVersion {
     /// Version installée. Absente si le paquet n'est pas installé.
     #[serde(rename = "OldVersion", default)]
     pub old_version: Option<String>,
+    /// Version candidate, c'est-à-dire celle qu'`apt` installerait.
+    ///
+    /// C'est le seul signal de mise à jour en attente accessible sans
+    /// `Sys.Modify` : `apt/update` demande ce droit d'écriture, que beaucoup
+    /// n'accordent pas, alors que `apt/versions` se contente de `Sys.Audit`.
+    #[serde(rename = "Version", default)]
+    pub candidate_version: Option<String>,
     #[serde(rename = "CurrentState", default)]
     pub current_state: Option<String>,
+    /// Noyau en cours d'exécution, porté par la seule entrée `proxmox-ve`.
+    #[serde(rename = "RunningKernel", default)]
+    pub running_kernel: Option<String>,
 }
 
 impl AptVersion {
@@ -572,6 +616,14 @@ impl AptVersion {
             return None;
         }
         self.old_version.as_deref().filter(|version| !version.is_empty())
+    }
+
+    /// Vrai si une version plus récente que l'installée est disponible.
+    pub fn is_upgradable(&self) -> bool {
+        let Some(installed) = self.installed() else { return false };
+        self.candidate_version
+            .as_deref()
+            .is_some_and(|candidate| !candidate.is_empty() && candidate != installed)
     }
 }
 
@@ -637,11 +689,55 @@ pub struct QemuStatus {
     pub balloon: Option<Num>,
     #[serde(default)]
     pub ballooninfo: Option<BalloonInfo>,
+    /// Mémoire vue de l'invité, en octets.
+    ///
+    /// Contrairement aux inventaires, `status/current` distingue bien `mem` de
+    /// `memhost` : c'est la seule lecture de Proxmox VE 9 dont on puisse tirer
+    /// un taux de remplissage honnête.
+    #[serde(default)]
+    pub mem: Option<Num>,
+    /// Mémoire occupée sur l'hôte, surcoût d'émulation compris.
+    #[serde(default)]
+    pub memhost: Option<Num>,
+    #[serde(default)]
+    pub maxmem: Option<Num>,
+    /// Version de QEMU réellement en cours d'exécution.
+    ///
+    /// Elle reste celle du démarrage de la machine : après une mise à jour de
+    /// l'hyperviseur, elle diverge du paquet installé jusqu'à ce que la machine
+    /// soit arrêtée puis relancée — une migration à chaud ne suffit pas.
+    #[serde(rename = "running-qemu", default)]
+    pub running_qemu: Option<String>,
 }
 
 impl QemuStatus {
     pub fn agent_enabled(&self) -> bool {
         Num::flag(self.agent)
+    }
+
+    /// Taux d'occupation de la mémoire vu de l'invité, en pourcentage.
+    ///
+    /// Deux sources, dans l'ordre de fiabilité : le pilote de ballon, qui
+    /// rapporte ce que le système invité voit, puis `mem`/`maxmem`. La valeur
+    /// est écartée dès qu'elle dépasse 100 % : c'est le signe que `mem` vaut la
+    /// mémoire hôte, surcoût compris, et non celle de l'invité.
+    pub fn memory_percent(&self) -> Option<f64> {
+        let from_balloon = self.ballooninfo.as_ref().and_then(|info| {
+            let total = info.total_mem?.0;
+            let free = info.free_mem?.0;
+            (total > 0.0).then(|| (total - free) / total * 100.0)
+        });
+        let from_status = || {
+            let total = self.maxmem?.0;
+            let used = self.mem?.0;
+            // `mem` égal à `memhost` : Proxmox n'a que la mesure hôte à offrir
+            // pour cette machine, et elle porte le surcoût d'émulation.
+            if self.memhost.is_some_and(|host| host.0 == used) {
+                return None;
+            }
+            (total > 0.0).then_some(used / total * 100.0)
+        };
+        from_balloon.or_else(from_status).filter(|value| *value <= 100.0)
     }
 }
 
@@ -654,6 +750,9 @@ pub struct BalloonInfo {
     /// Mémoire libre vue de l'invité. Absent sans pilote de ballon.
     #[serde(default)]
     pub free_mem: Option<Num>,
+    /// Mémoire totale vue de l'invité. Absent sans pilote de ballon.
+    #[serde(default)]
+    pub total_mem: Option<Num>,
 }
 
 /// `GET /api2/json/nodes/{node}/qemu/{vmid}/agent/get-fsinfo` — la réponse de
@@ -793,11 +892,25 @@ impl SmartReport {
                 return Some(value);
             }
         }
-        self.text
-            .as_deref()?
-            .lines()
-            .find(|line| line.trim_start().starts_with("Temperature:"))
-            .and_then(|line| leading_number(line.split(':').nth(1)?))
+        // Le texte libre de `smartctl` nomme la température différemment selon
+        // le bus : « Temperature: 45 Celsius » pour un NVMe, « Current Drive
+        // Temperature: 27 C » pour un disque SAS. On accepte toute étiquette qui
+        // parle de température, sauf les seuils (« Drive Trip Temperature »,
+        // « Warning Comp. Temperature Time ») qui ne sont pas des mesures.
+        self.text.as_deref()?.lines().find_map(|line| {
+            let (label, value) = line.split_once(':')?;
+            let label = label.trim().to_ascii_lowercase();
+            if !label.contains("temperature") {
+                return None;
+            }
+            if ["trip", "warning", "critical", "threshold", "time"]
+                .iter()
+                .any(|exclu| label.contains(exclu))
+            {
+                return None;
+            }
+            leading_number(value)
+        })
     }
 }
 
@@ -897,6 +1010,9 @@ pub struct ResourceEntry {
     pub maxcpu: Option<Num>,
     #[serde(default)]
     pub mem: Option<Num>,
+    /// Voir [`GuestEntry::memhost`].
+    #[serde(default)]
+    pub memhost: Option<Num>,
     #[serde(default)]
     pub maxmem: Option<Num>,
     #[serde(default)]
@@ -949,6 +1065,7 @@ impl ResourceEntry {
             cpu: self.cpu,
             cpus: self.maxcpu,
             mem: self.mem,
+            memhost: self.memhost,
             maxmem: self.maxmem,
             disk: self.disk,
             maxdisk: self.maxdisk,
@@ -1310,6 +1427,11 @@ impl IncludedVolume {
     /// Un lecteur de CD, une image `cloudinit` ou une entrée qui n'est pas un
     /// volume ne sont jamais sauvegardés, par construction : les compter ferait
     /// crier l'alerte sur chaque machine du parc.
+    ///
+    /// `backup=no` n'en fait volontairement pas partie : c'est exactement ce
+    /// que la règle « un travail de sauvegarde saute un disque » cherche à
+    /// dire. Un disque écarté à la main reste un disque qui ne sera pas là le
+    /// jour de la restauration.
     pub fn exclusion_is_expected(&self) -> bool {
         let reason = self.reason.as_deref().unwrap_or("").to_ascii_lowercase();
         const EXPECTED: [&str; 5] = ["cd-rom", "cdrom", "not a volume", "cloudinit", "cloud-init"];

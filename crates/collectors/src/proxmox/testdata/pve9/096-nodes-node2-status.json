@@ -1,0 +1,57 @@
+{
+ "data": {
+  "cpuinfo": {
+   "mhz": "2911.787",
+   "sockets": 2,
+   "cpus": 48,
+   "cores": 24,
+   "family": "6",
+   "user_hz": 100,
+   "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf pni pclmulqdq dtes64 monitor ds_cpl vmx smx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid dca sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm cpuid_fault epb pti intel_ppin ssbd ibrs ibpb stibp tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid cqm xsaveopt cqm_llc cqm_occup_llc dtherm ida arat pln pts vnmi md_clear flush_l1d",
+   "vendor": "GenuineIntel",
+   "hvm": "1",
+   "model": "Intel(R) Xeon(R) CPU E5-2680 v3 @ 2.50GHz"
+  },
+  "idle": 0,
+  "swap": {
+   "used": 0,
+   "free": 0,
+   "total": 0
+  },
+  "kversion": "Linux 7.0.0-3-pve #1 SMP PREEMPT_DYNAMIC PMX 7.0.0-3 (2026-04-21T22:56Z)",
+  "rootfs": {
+   "total": 865671315456,
+   "avail": 811312873472,
+   "free": 811312873472,
+   "used": 54358441984
+  },
+  "uptime": 12168218,
+  "cpu": 0.0602606504233614,
+  "pveversion": "pve-manager/9.2.10/43df2e01f27a1a19",
+  "ksm": {
+   "shared": 0
+  },
+  "current-kernel": {
+   "version": "#1 SMP PREEMPT_DYNAMIC PMX 7.0.0-3 (2026-04-21T22:56Z)",
+   "sysname": "Linux",
+   "machine": "MACHINE-1",
+   "release": "7.0.0-3-pve"
+  },
+  "boot-info": {
+   "secureboot": 0,
+   "mode": "efi"
+  },
+  "loadavg": [
+   "3.55",
+   "3.84",
+   "4.28"
+  ],
+  "wait": 0.0208696449946282,
+  "memory": {
+   "used": 148254924800,
+   "total": 405600071680,
+   "available": 257345146880,
+   "free": 84733747200
+  }
+ }
+}

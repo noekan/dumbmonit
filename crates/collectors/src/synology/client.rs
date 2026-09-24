@@ -153,12 +153,22 @@ impl DsmClient {
             ("method", method.to_string()),
             ("_sid", session.sid),
         ];
-        if let Some(token) = session.syno_token {
-            query.push(("SynoToken", token));
+        // Le jeton anti-CSRF part par les deux chemins que DSM accepte : le
+        // paramètre `SynoToken` (guide de connexion officiel) et l'en-tête
+        // `X-SYNO-TOKEN` (celui qu'emploie l'interface de DSM). Certaines API —
+        // celles des paquets, Active Backup en tête — répondent 103 « méthode
+        // inconnue » à une requête sans jeton, ce qui se lit comme une différence
+        // de version alors que c'est un défaut d'authentification.
+        let token = session.syno_token;
+        if let Some(token) = &token {
+            query.push(("SynoToken", token.clone()));
         }
         query.extend(extra.iter().map(|(key, value)| (*key, value.clone())));
 
-        let response = self.send_get(&endpoint.path, &query).await.map_err(ApiFailure::Probe)?;
+        let response = self
+            .send_get_with_token(&endpoint.path, &query, token.as_deref())
+            .await
+            .map_err(ApiFailure::Probe)?;
         let body = self.read_body(response, api).await.map_err(ApiFailure::Probe)?;
         parse_envelope(&body, api)
     }
@@ -256,14 +266,21 @@ impl DsmClient {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<reqwest::Response, ProbeError> {
+        self.send_get_with_token(path, query, None).await
+    }
+
+    async fn send_get_with_token(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+        syno_token: Option<&str>,
+    ) -> Result<reqwest::Response, ProbeError> {
         let url = format!("{}/webapi/{path}", self.base_url);
-        self.http
-            .get(&url)
-            .timeout(self.timeout)
-            .query(query)
-            .send()
-            .await
-            .map_err(|error| map_transport(&error, path, self.timeout))
+        let mut request = self.http.get(&url).timeout(self.timeout).query(query);
+        if let Some(token) = syno_token {
+            request = request.header("X-SYNO-TOKEN", token);
+        }
+        request.send().await.map_err(|error| map_transport(&error, path, self.timeout))
     }
 
     async fn read_body(

@@ -1,0 +1,23 @@
+{
+ "data": [
+  {
+   "schedule": "20:00",
+   "mode": "snapshot",
+   "pbs-change-detection-mode": "metadata",
+   "mailto": "MAILTO-1",
+   "id": "backup-c98dc3da-6bed",
+   "mailnotification": "MAILNOTIFICA-1",
+   "fleecing": {
+    "enabled": 0
+   },
+   "notes-template": "{{guestname}}",
+   "type": "vzdump",
+   "storage": "BKP01",
+   "all": 1,
+   "notification-mode": "legacy-sendmail",
+   "next-run": 1790272800,
+   "exclude": "130",
+   "enabled": 1
+  }
+ ]
+}

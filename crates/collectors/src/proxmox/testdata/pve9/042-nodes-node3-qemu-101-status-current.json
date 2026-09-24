@@ -1,0 +1,103 @@
+{
+ "data": {
+  "maxdisk": 549755813888,
+  "ha": {
+   "managed": 0
+  },
+  "ballooninfo": {
+   "mem_swapped_in": 254361571328,
+   "mem_swapped_out": 237010452480,
+   "free_mem": 2950373376,
+   "major_page_faults": 63364201,
+   "last_update": 1790263326,
+   "minor_page_faults": 217896050625,
+   "max_mem": 17179869184,
+   "actual": 17179869184,
+   "total_mem": 16769527808
+  },
+  "status": "running",
+  "shares": 1000,
+  "nics": {
+   "tap101i0": {
+    "netout": 814948136876,
+    "netin": 150164048213
+   }
+  },
+  "disk": 0,
+  "tags": " ",
+  "pressureiofull": 0,
+  "diskwrite": 6668849168384,
+  "mem": 13819154432,
+  "netout": 814948136876,
+  "name": "WEB01",
+  "proxmox-support": {
+   "query-bitmap-info": true,
+   "pbs-dirty-bitmap-migration": true,
+   "backup-max-workers": true,
+   "pbs-masterkey": true,
+   "pbs-library-version": "2.0.2 (594183eab9fa275f45dfff5dd15b16f150abd503)",
+   "backup-fleecing": true,
+   "pbs-dirty-bitmap-savevm": true,
+   "pbs-dirty-bitmap": true,
+   "backup-access-api": true
+  },
+  "pressurecpusome": 0,
+  "netin": 150164048213,
+  "running-qemu": "11.0.0",
+  "agent": 1,
+  "vmid": 101,
+  "pressurememoryfull": 0,
+  "diskread": 17989135768064,
+  "freemem": 2950373376,
+  "pressurecpufull": 0,
+  "qmpstatus": "running",
+  "pressurememorysome": 0,
+  "pressureiosome": 0,
+  "cpu": 0.668291464148267,
+  "pid": 3407,
+  "running-machine": "RUNNING-MACH-1",
+  "maxmem": 17179869184,
+  "cpus": 4,
+  "memhost": 18228625408,
+  "blockstat": {
+   "scsi0": {
+    "unmap_operations": 2944400,
+    "rd_total_time_ns": 152275082251824,
+    "rd_operations": 1040306728,
+    "zone_append_total_time_ns": 0,
+    "failed_unmap_operations": 0,
+    "failed_wr_operations": 0,
+    "unmap_merged": 0,
+    "unmap_total_time_ns": 14180755244,
+    "wr_merged": 0,
+    "timed_stats": [],
+    "invalid_zone_append_operations": 0,
+    "invalid_rd_operations": 0,
+    "invalid_unmap_operations": 0,
+    "zone_append_bytes": 0,
+    "failed_flush_operations": 0,
+    "rd_bytes": 17989135768064,
+    "invalid_wr_operations": 0,
+    "zone_append_merged": 0,
+    "account_invalid": true,
+    "wr_bytes": 6668849168384,
+    "flush_total_time_ns": 52044863845519,
+    "unmap_bytes": 2957668376576,
+    "failed_zone_append_operations": 0,
+    "idle_time_ns": 21886083,
+    "flush_operations": 14545375,
+    "account_failed": true,
+    "failed_rd_operations": 0,
+    "invalid_flush_operations": 0,
+    "wr_total_time_ns": 748312507266018,
+    "wr_operations": 344928751,
+    "wr_highest_offset": 547609378816,
+    "zone_append_operations": 0,
+    "rd_merged": 0
+   }
+  },
+  "uptime": 7467538,
+  "balloon_min": 8589934592,
+  "balloon": 17179869184
+ }
+}

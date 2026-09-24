@@ -4,7 +4,7 @@
 //! L'inventaire `/nodes/{node}/qemu` dit tout d'une machine sauf ce qui se passe
 //! *dedans* : son champ `disk` reste à zéro, PVE ne voyant qu'un volume opaque.
 //! Seul l'agent QEMU, s'il tourne, rapporte le remplissage des systèmes de
-//! fichiers — et son appel demande `VM.Monitor`, que `PVEAuditor` ne donne pas.
+//! fichiers — et son appel demande `VM.GuestAgent.Audit` (`VM.Monitor` avant Proxmox VE 9), que `PVEAuditor` ne donne pas.
 //! Tout ici se dégrade donc en silence : sans agent ou sans droit, la machine
 //! garde sa taille de disque et perd son taux d'occupation, rien d'autre.
 
@@ -42,6 +42,18 @@ pub fn qemu_status_samples(
     }
     if let Some(free) = status.ballooninfo.as_ref().and_then(|info| info.free_mem) {
         push(gauge("guest_memory_guest_free_bytes", free.0, ts_ms));
+    }
+    // Taux de remplissage vu de l'invité. L'inventaire s'en abstient sur
+    // Proxmox VE 9, où sa mesure de mémoire est celle de l'hôte : c'est ici, et
+    // ici seulement, que la série peut être juste.
+    if let Some(percent) = status.memory_percent() {
+        push(gauge("guest_memory_percent", percent, ts_ms));
+    }
+    // La version de QEMU qui fait tourner la machine, figée à son démarrage :
+    // c'est elle qui dit qu'un invité tourne encore sur l'hyperviseur d'avant
+    // la mise à jour et qu'un simple redémarrage le remettrait à niveau.
+    if let Some(version) = status.running_qemu.as_deref().filter(|v| !v.is_empty()) {
+        push(gauge("guest_running_qemu_info", 1.0, ts_ms).with_label("version", version));
     }
 
     samples
@@ -115,10 +127,12 @@ pub fn os_samples(node: &str, guest: &GuestEntry, info: &AgentOsInfo, ts_ms: i64
     let os = &info.result;
     // Sans nom ni version, l'agent a répondu quelque chose d'inexploitable :
     // mieux vaut pas de série qu'une série vide qui occuperait une ligne.
-    if os.name.is_none() && os.pretty_name.is_none() && os.version.is_none() {
-        return Vec::new();
-    }
-
+    //
+    // Le noyau fait exception : un invité FreeBSD du cluster relevé ne renvoie
+    // ni `name` ni `pretty-name` ni `version`, seulement
+    // `kernel-release: "15.1-RELEASE-p3"`. C'est peu, mais c'est exactement ce
+    // que l'utilisateur veut lire — et le jeter laissait la machine sans
+    // système du tout.
     let pretty = os
         .pretty_name
         .clone()
@@ -127,7 +141,11 @@ pub fn os_samples(node: &str, guest: &GuestEntry, info: &AgentOsInfo, ts_ms: i64
             (Some(name), None) => Some(name.clone()),
             _ => None,
         })
+        .or_else(|| os.kernel_release.clone())
         .unwrap_or_default();
+    if pretty.is_empty() {
+        return Vec::new();
+    }
 
     vec![guest_labels(
         gauge("guest_os_info", 1.0, ts_ms)

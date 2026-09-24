@@ -162,7 +162,14 @@ pub struct SystemInfo {
     #[serde(default)]
     pub sys_temp: Option<Num>,
     /// Drapeau de surchauffe levé par DSM.
-    #[serde(default)]
+    ///
+    /// DSM 7.4 nomme ce champ `temperature_warning` ; les DSM plus anciens
+    /// `temperature_warn`. Relevé sur un DS918+ en DSM 7.4.1 : la réponse porte
+    /// `temperature_warning`, `sys_tempwarn` et `systempwarn`, mais jamais
+    /// `temperature_warn` — sans cet alias, le drapeau n'était jamais lu. Un seul
+    /// alias est déclaré : serde refuse une réponse où deux noms d'un même champ
+    /// coexisteraient.
+    #[serde(default, alias = "temperature_warning")]
     pub temperature_warn: Option<Num>,
     /// Mémoire installée, en mébioctets.
     #[serde(default)]
@@ -247,8 +254,37 @@ pub struct StorageInfo {
     pub volumes: Vec<Volume>,
     #[serde(default)]
     pub disks: Vec<Disk>,
+    /// Groupes de stockage (RAID). Déjà présents dans la réponse que l'on demande
+    /// pour les volumes : un groupe dégradé se voit ici avant que le volume posé
+    /// dessus ne change d'état.
+    #[serde(rename = "storagePools", default)]
+    pub storage_pools: Vec<Pool>,
+    /// Caches SSD. Même réponse, même raison : un cache en lecture-écriture
+    /// défaillant met les données en danger sans toucher à l'état du volume.
+    #[serde(rename = "ssdCaches", default)]
+    pub ssd_caches: Vec<Pool>,
     #[serde(default)]
     pub env: Option<StorageEnv>,
+}
+
+/// Un groupe de stockage ou un cache SSD : DSM leur donne la même forme dans
+/// `load_info`, au point que les distinguer par un type n'apporterait rien.
+#[derive(Debug, Default, Deserialize)]
+pub struct Pool {
+    pub id: String,
+    #[serde(default)]
+    pub desc: Option<String>,
+    /// `normal`, `background`, `degrade`, `crashed`…
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Type d'assemblage : `raid_5`, `shr`, `basic`…
+    #[serde(default)]
+    pub device_type: Option<String>,
+    /// Nombre de disques en panne dans le groupe.
+    #[serde(default)]
+    pub disk_failure_number: Option<Num>,
+    #[serde(default)]
+    pub size: Option<VolumeSize>,
 }
 
 /// Bloc `env` de `load_info` : le contexte que le NAS applique à son stockage.
@@ -278,7 +314,10 @@ pub struct Volume {
     pub id: String,
     /// Description saisie par l'utilisateur dans DSM. Souvent vide : ce n'est pas
     /// un nom d'affichage garanti, d'où le repli sur `id`.
-    #[serde(default)]
+    ///
+    /// DSM 7 la nomme `vol_desc` dans `volumes` (relevé sur DSM 7.4.1) et `desc`
+    /// dans `storagePools` ; les DSM plus anciens s'en tenaient à `desc`.
+    #[serde(default, alias = "vol_desc")]
     pub desc: Option<String>,
     /// Point de montage : `/volume1`. C'est lui que l'utilisateur reconnaît quand
     /// la description est vide.
@@ -337,22 +376,77 @@ pub struct Disk {
     #[serde(default)]
     pub size_total: Option<Num>,
     /// Seuil de secteurs réalloués dépassé : c'est le signal de préfaillance le
-    /// plus direct que DSM expose.
+    /// plus direct que DSM expose — jusqu'à DSM 7.1. **DSM 7.4 ne renvoie plus ce
+    /// champ** : voir [`Disk::sb_days_left_critical`].
     #[serde(default)]
     pub exceed_bad_sector_thr: Option<Num>,
+    /// Verdict de DSM 7.4 sur les secteurs défectueux : il estime le nombre de
+    /// jours avant que le disque n'atteigne le seuil, et lève ce drapeau quand il
+    /// n'en reste plus. C'est le successeur d'`exceed_bad_sector_thr`, et sans lui
+    /// la règle « secteurs défectueux » ne se déclencherait plus jamais sur un NAS
+    /// à jour.
+    #[serde(default)]
+    pub sb_days_left_critical: Option<Num>,
     /// Durée de vie résiduelle sous le seuil, pour les SSD.
     #[serde(default)]
     pub below_remain_life_thr: Option<Num>,
+    /// Même question, posée par DSM 7.4 : la durée de vie résiduelle est entrée
+    /// dans la zone rouge.
+    #[serde(default)]
+    pub remain_life_danger: Option<Num>,
     /// Durée de vie résiduelle d'un SSD, en pourcentage ; `-1` quand le disque
     /// n'en déclare pas (tous les disques mécaniques).
     #[serde(default)]
-    pub remain_life: Option<Num>,
+    pub remain_life: Option<RemainLife>,
     /// Compteur `unc` de DSM : les secteurs illisibles (UNC) relevés sur le disque,
     /// celui que DSM confronte à son seuil de secteurs défectueux.
     #[serde(default)]
     pub unc: Option<Num>,
     #[serde(rename = "isSsd", default)]
     pub is_ssd: Option<Num>,
+}
+
+/// Durée de vie résiduelle d'un disque, telle que `load_info` la renvoie.
+///
+/// Deux formes existent, et c'est la seconde qui a fait tomber l'inventaire du
+/// stockage entier sur un vrai NAS : un DSM ancien renvoie un simple pourcentage
+/// (`"remain_life": -1`), DSM 7.2 et suivants un objet
+/// (`"remain_life": {"value": 97, "trustable": true}`, relevé sur DS918+ en
+/// DSM 7.4.1). Comme [`Num`] refuse un objet, la lecture de `load_info` échouait
+/// d'un bloc : plus aucun volume, aucun disque, aucune température.
+///
+/// L'ordre des variantes compte : un objet ne peut pas se lire en [`Num`], donc
+/// serde retombe sur la forme détaillée.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(untagged)]
+pub enum RemainLife {
+    /// Forme ancienne : le pourcentage seul.
+    Plain(Num),
+    /// Forme DSM 7.2+ : la valeur et la confiance que DSM lui accorde.
+    Detailed {
+        #[serde(default)]
+        value: Option<Num>,
+        #[serde(default)]
+        trustable: Option<Num>,
+    },
+}
+
+impl RemainLife {
+    /// Pourcentage exploitable, ou `None`.
+    ///
+    /// `None` couvre les trois cas où publier un point serait mentir : le disque
+    /// ne déclare rien (`-1`, tous les disques mécaniques), DSM juge la valeur non
+    /// fiable (`trustable: false`), ou la valeur sort de l'intervalle 0–100.
+    pub fn percent(self) -> Option<f64> {
+        let (value, trustable) = match self {
+            Self::Plain(value) => (Some(value), None),
+            Self::Detailed { value, trustable } => (value, trustable),
+        };
+        if trustable.is_some_and(|flag| flag.0 == 0.0) {
+            return None;
+        }
+        value.map(|n| n.0).filter(|percent| (0.0..=100.0).contains(percent))
+    }
 }
 
 /// `SYNO.Backup.Task&method=list` : l'inventaire des tâches Hyper Backup.

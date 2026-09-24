@@ -37,6 +37,18 @@ pub fn ha_samples(entries: &[HaStatusEntry], ts_ms: i64) -> Vec<Sample> {
         samples.push(gauge("ha_quorum_ok", if ok { 1.0 } else { 0.0 }, ts_ms));
     }
 
+    // Ligne apparue en Proxmox VE 9 : le chien de garde n'arme qu'une fois des
+    // ressources confiées à la HA. En attendant, il est en `standby` et aucun
+    // nœud ne sera isolé — ce qui est normal, mais bon à savoir avant de
+    // compter dessus.
+    if let Some(fencing) = entries.iter().find(|entry| entry.is("fencing")) {
+        let armed = fencing.armed_state.as_deref() == Some("armed");
+        samples.push(gauge("ha_fencing_armed", if armed { 1.0 } else { 0.0 }, ts_ms).with_label(
+            "state",
+            fencing.armed_state.clone().unwrap_or_else(|| "unknown".to_string()),
+        ));
+    }
+
     if let Some(master) = entries.iter().find(|entry| entry.is("master")) {
         let active = master.status.as_deref() == Some("active");
         samples.push(gauge("ha_master_active", if active { 1.0 } else { 0.0 }, ts_ms));

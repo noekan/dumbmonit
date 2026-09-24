@@ -1,0 +1,8 @@
+{
+ "data": {
+  "type": "text",
+  "wearout": 100,
+  "health": "PASSED",
+  "text": "\nSMART/Health Information (NVMe Log 0x02, NSID 0xffffffff)\nCritical Warning:                   0x00\nTemperature:                        45 Celsius\nAvailable Spare:                    100%\nAvailable Spare Threshold:          10%\nPercentage Used:                    0%\nData Units Read:                    88,958,304 [45.5 TB]\nData Units Written:                 75,691,858 [38.7 TB]\nHost Read Commands:                 8,586,026,498\nHost Write Commands:                2,386,545,034\nController Busy Time:               5,485\nPower Cycles:                       13\nPower On Hours:                     2,425\nUnsafe Shutdowns:                   3\nMedia and Data Integrity Errors:    0\nError Information Log Entries:      0\nWarning  Comp. Temperature Time:    0\nCritical Comp. Temperature Time:    0\n\n"
+ }
+}

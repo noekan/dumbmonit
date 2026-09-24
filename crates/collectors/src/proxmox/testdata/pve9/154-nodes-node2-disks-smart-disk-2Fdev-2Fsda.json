@@ -1,0 +1,7 @@
+{
+ "data": {
+  "type": "text",
+  "text": "\nCurrent Drive Temperature:     27 C\nDrive Trip Temperature:        60 C\n\nAccumulated power on time, hours:minutes 10151:43\nManufactured in week 42 of year 2015\nSpecified cycle count over device lifetime:  50000\nAccumulated start-stop cycles:  32329\nSpecified load-unload count over device lifetime:  600000\nAccumulated load-unload cycles:  35103\nElements in grown defect list: 0\n\n",
+  "health": "OK"
+ }
+}

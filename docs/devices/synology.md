@@ -1,9 +1,9 @@
 # Synology DSM
 
-Synology NAS through the DSM web API: volumes, disk health, temperature, Hyper
-Backup tasks and Active Backup for Business tasks. The first reason to monitor
-a NAS is its disks: a disk that heats up or whose SMART status degrades
-announces a failure long before a volume falls over.
+Synology NAS through the DSM web API: volumes, storage pools, disk health,
+temperature, Hyper Backup tasks and Active Backup for Business tasks. The
+first reason to monitor a NAS is its disks: a disk that heats up or whose
+SMART status degrades announces a failure long before a volume falls over.
 
 ## What it watches
 
@@ -14,7 +14,8 @@ All metrics are prefixed `dumbmonit_synology_`.
 | System | `system_info` (model, DSM version, firmware…), `uptime_seconds`, `temperature_celsius`, `temperature_warning`, `system_crashed`, `system_need_repair`, `storage_health` | `model`, `dsm_version`, `firmware` |
 | CPU and memory | `cpu_usage_percent`, `cpu_user/system/other_percent`, `cpu_cores`, `memory_total/used/available/installed_bytes`, `memory_usage_percent`, `swap_usage_percent` | |
 | Network | `network_rx_bytes_per_second`, `network_tx_bytes_per_second` | `interface` |
-| Volumes | `volume_status`, `volume_total/used/available_bytes`, `volume_used_percent`, `volume_used_warning_percent`, `volume_used_critical_percent`, `volume_full_warning`, `volume_full_critical` | `volume`, `fs_type`, `raid_type` |
+| Volumes | `volume_status`, `volume_total/used/available_bytes`, `volume_used_percent`, `volume_used_warning_percent`, `volume_used_critical_percent` | `volume`, `fs_type`, `raid_type` |
+| Storage pools and SSD caches | `pool_status`, `pool_failed_disks`, `pool_total/used_bytes`, and the same four under `ssd_cache_` | `pool` or `ssd_cache`, `name`, `raid_type` |
 | Disks | `disk_status`, `disk_smart_status`, `disk_temperature_celsius`, `disk_size_bytes`, `disk_bad_sector_exceeded`, `disk_life_below_threshold`, `disk_remaining_life_percent` (SSD only: the life the drive says it has left), `disk_unc_count` (DSM's unreadable-sector counter, the one it checks against its bad-sector threshold), `disk_info` | `disk`, `name`; on `disk_info`: `model`, `serial`, `vendor`, `firmware`, `type`, `ssd` |
 | Hyper Backup | `backup_tasks`, `backup_running`, `backup_last_result`, `backup_last_run_age_seconds`, `backup_last_success_age_seconds`, `backup_next_run_in_seconds` | per task |
 | Collection | `up`, `scrape_errors`, `scrape_duration_seconds` | |
@@ -39,6 +40,23 @@ condemns the whole probe.
     been able to confirm. The rows therefore show what `load_info` gives:
     DSM's bad-sector verdict, its unreadable-sector counter (and its growth),
     and the SSD's remaining life.
+
+!!! note "What changes between DSM versions"
+    The same call does not answer the same fields on every DSM, and DumbMonit
+    reads both forms rather than assuming one:
+
+    * `disk_bad_sector_exceeded` comes from `exceed_bad_sector_thr` up to
+      DSM 7.1 and from `sb_days_left_critical` — DSM's estimate of the days
+      left before the drive reaches its bad-sector threshold — on DSM 7.2 and
+      later, where the first field is gone. Same for `disk_life_below_threshold`
+      and `remain_life_danger`;
+    * `disk_remaining_life_percent` is a plain number on older DSM and an
+      object carrying the value and whether DSM trusts it on DSM 7.2 and later.
+      A value DSM marks untrustworthy is not published;
+    * `volume_used_warning_percent` and `volume_used_critical_percent` repeat
+      the thresholds set in DSM. DSM 7.4 no longer returns them, so on a recent
+      NAS those two series simply do not exist — nothing is invented in their
+      place.
 
 ## The device page
 
@@ -71,6 +89,7 @@ the NAS.
 | Synology disk bad sectors growing | advisory | New unreadable sectors appeared in the last 24 hours (`delta(…disk_unc_count[24h]) > 0`). |
 | Synology SSD wearing out | advisory | An SSD has less than 10 % of its rated life left, for an hour. |
 | Synology volume degraded | warning | A volume is degraded or crashed, for 5 minutes. |
+| Synology storage pool degraded | warning | A storage pool or SSD cache is degraded or crashed, for 5 minutes. A RAID 5 that loses a disk shows here first: DSM keeps the volume on top of it at `normal` while it rebuilds. |
 | Synology volume almost full | advisory | A volume is 90 % full or more, for 15 minutes. |
 | Synology temperature high | advisory | A disk is above 55 °C, or DSM raised its temperature warning, for 15 minutes. |
 | Synology memory high | advisory | Memory usage above 95 % for 15 minutes. |
@@ -78,10 +97,16 @@ the NAS.
 ## Active Backup for Business
 
 Active Backup for Business (ABB) backs up PCs, physical servers, virtual
-machines and file servers to the NAS. If the package is installed, DumbMonit
-reads its tasks on every probe; if it is not, the NAS simply does not
-advertise the API and nothing is asked. The option `abb` turns the whole
+machines and file servers to the NAS. If the package is installed and running,
+DumbMonit reads its tasks on every probe; if it is not, the NAS simply does
+not advertise the API and nothing is asked. The option `abb` turns the whole
 family off.
+
+The same holds for Hyper Backup: DSM lists a package's APIs only while that
+package runs, so a NAS whose Hyper Backup is stopped — or which only receives
+backups through Hyper Backup Vault — publishes no `backup_*` metric and
+reports no error either. DumbMonit asks the NAS which APIs it has before
+calling any of them, so a missing package is silence, never a failed probe.
 
 | Metric | Value | Labels |
 |---|---|---|
@@ -199,6 +224,13 @@ Built-in rules on devices:
     metrics, never a failed probe; an ABB too old to offer the per-device
     overview keeps its task metrics and simply has no device rhythm.
 
+    Version 1 is deliberate. DSM 7.4 advertises these APIs as versions 1 to 2,
+    but only version 1 carries the read methods: asked at version 2 they all
+    answer "the requested method does not exist", which looks like a firmware
+    difference and is not one. The same answer also comes back when the CSRF
+    token is missing, so DumbMonit asks DSM for one at login and sends it on
+    every call.
+
 ## What to prepare on the NAS
 
 The steps below are the ones the notice next to the form shows. The principle:
@@ -221,10 +253,13 @@ need — never the account you log in with.
 4. Two-step verification must stay off for this account: no automated monitor
    can type a one-time code. If Control Panel → Security → Account enforces
    it, restrict the rule to groups this user is not in, or exempt it.
-5. Active Backup for Business, if installed: its tasks are read only by an
-   account allowed to use the package (Active Backup for Business → Settings →
-   Privileges). Otherwise untick DumbMonit's "Watch Active Backup for
-   Business" option to stop asking.
+5. Backup packages are read only while they are installed and running: DSM
+   does not advertise a stopped package's API at all, so Hyper Backup tasks
+   then go quiet instead of failing, and a NAS that only receives backups
+   (Hyper Backup Vault) has no tasks of its own to show. Active Backup for
+   Business additionally answers only an account allowed to use it (Active
+   Backup for Business → Settings → Privileges); otherwise untick DumbMonit's
+   "Watch Active Backup for Business" option to stop asking.
 6. In DumbMonit, enter the NAS address (HTTPS, port 5001 by default), then
    this account's user name and password.
 

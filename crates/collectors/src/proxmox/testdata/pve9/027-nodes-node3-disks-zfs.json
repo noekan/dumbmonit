@@ -1,0 +1,22 @@
+{
+ "data": [
+  {
+   "health": "ONLINE",
+   "dedup": 1,
+   "name": "pool3",
+   "frag": 38,
+   "free": 11055508742144,
+   "size": 15994458210304,
+   "alloc": 4938949468160
+  },
+  {
+   "health": "ONLINE",
+   "dedup": 1,
+   "name": "rpool",
+   "frag": 3,
+   "size": 996432412672,
+   "free": 976640327680,
+   "alloc": 19792084992
+  }
+ ]
+}

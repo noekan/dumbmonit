@@ -1,0 +1,88 @@
+{
+ "data": {
+  "blockstat": {
+   "scsi0": {
+    "failed_rd_operations": 0,
+    "account_failed": true,
+    "flush_operations": 3,
+    "idle_time_ns": 730429744,
+    "failed_zone_append_operations": 0,
+    "unmap_bytes": 807506280448,
+    "flush_total_time_ns": 1166094,
+    "wr_bytes": 376560173056,
+    "account_invalid": true,
+    "zone_append_merged": 0,
+    "rd_merged": 0,
+    "zone_append_operations": 0,
+    "wr_highest_offset": 1096012079104,
+    "wr_operations": 14278592,
+    "invalid_flush_operations": 0,
+    "wr_total_time_ns": 26022055359351,
+    "invalid_zone_append_operations": 0,
+    "timed_stats": [],
+    "wr_merged": 0,
+    "unmap_total_time_ns": 14436197684,
+    "unmap_merged": 0,
+    "failed_wr_operations": 0,
+    "rd_operations": 19959347,
+    "zone_append_total_time_ns": 0,
+    "failed_unmap_operations": 0,
+    "rd_total_time_ns": 5543035600309,
+    "unmap_operations": 2020950,
+    "invalid_wr_operations": 0,
+    "rd_bytes": 429001458688,
+    "failed_flush_operations": 0,
+    "zone_append_bytes": 0,
+    "invalid_unmap_operations": 0,
+    "invalid_rd_operations": 0
+   }
+  },
+  "cpus": 4,
+  "memhost": 26592514048,
+  "uptime": 864516,
+  "qmpstatus": "running",
+  "pressureiosome": 0,
+  "pressurememorysome": 0,
+  "maxmem": 25769803776,
+  "cpu": 0,
+  "pid": 516280,
+  "running-machine": "RUNNING-MACH-3",
+  "pressurecpufull": 0,
+  "vmid": 131,
+  "agent": 1,
+  "running-qemu": "11.0.3",
+  "diskread": 429001458688,
+  "pressurememoryfull": 0,
+  "mem": 26592514048,
+  "diskwrite": 376560173056,
+  "netout": 20583688755,
+  "netin": 16994758927,
+  "name": "MIS01",
+  "pressurecpusome": 0,
+  "proxmox-support": {
+   "pbs-library-version": "2.0.2 (594183eab9fa275f45dfff5dd15b16f150abd503)",
+   "pbs-masterkey": true,
+   "backup-max-workers": true,
+   "pbs-dirty-bitmap-migration": true,
+   "query-bitmap-info": true,
+   "backup-access-api": true,
+   "pbs-dirty-bitmap": true,
+   "pbs-dirty-bitmap-savevm": true,
+   "backup-fleecing": true
+  },
+  "tags": "waas",
+  "disk": 0,
+  "pressureiofull": 0,
+  "nics": {
+   "tap131i0": {
+    "netin": 16994758927,
+    "netout": 20583688755
+   }
+  },
+  "maxdisk": 1099511627776,
+  "ha": {
+   "managed": 0
+  },
+  "status": "running"
+ }
+}

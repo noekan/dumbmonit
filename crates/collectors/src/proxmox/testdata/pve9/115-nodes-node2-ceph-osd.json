@@ -1,0 +1,4 @@
+{
+ "_http_status": 500,
+ "_body": "{\"message\":\"binary not installed: /usr/bin/ceph-mon\\n\",\"data\":null}"
+}

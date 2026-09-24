@@ -1,0 +1,49 @@
+{
+ "data": [
+  {
+   "maxmem": 270076751872,
+   "maxcpu": 64,
+   "status": "online",
+   "mem": 179920941056,
+   "id": "node/node3",
+   "level": "",
+   "uptime": 7467556,
+   "type": "node",
+   "maxdisk": 952455266304,
+   "disk": 6679429120,
+   "node": "node3",
+   "ssl_fingerprint": "SSL_FINGERPR-1",
+   "cpu": 0.153261205564142
+  },
+  {
+   "ssl_fingerprint": "SSL_FINGERPR-2",
+   "cpu": 0.0540562743889916,
+   "node": "node2",
+   "disk": 54358441984,
+   "maxdisk": 865671315456,
+   "type": "node",
+   "uptime": 12168197,
+   "id": "node/node2",
+   "level": "",
+   "mem": 148327579648,
+   "status": "online",
+   "maxcpu": 48,
+   "maxmem": 405600071680
+  },
+  {
+   "level": "",
+   "id": "node/node1",
+   "mem": 209429487616,
+   "maxcpu": 64,
+   "status": "online",
+   "maxmem": 270079578112,
+   "disk": 7851868160,
+   "ssl_fingerprint": "SSL_FINGERPR-3",
+   "cpu": 0.112574850299401,
+   "node": "node1",
+   "uptime": 8842876,
+   "type": "node",
+   "maxdisk": 468157071360
+  }
+ ]
+}

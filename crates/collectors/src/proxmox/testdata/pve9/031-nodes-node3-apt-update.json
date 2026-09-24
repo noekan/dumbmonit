@@ -1,0 +1,4 @@
+{
+ "_http_status": 403,
+ "_body": "{\"message\":\"Permission check failed (/nodes/node3, Sys.Modify)\\n\",\"data\":null}"
+}

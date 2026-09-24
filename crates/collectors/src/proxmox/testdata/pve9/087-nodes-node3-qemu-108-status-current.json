@@ -1,0 +1,25 @@
+{
+ "data": {
+  "maxmem": 4294967296,
+  "cpu": 0,
+  "tags": "fw",
+  "qmpstatus": "stopped",
+  "disk": 0,
+  "netin": 0,
+  "balloon_min": 2147483648,
+  "name": "FW02",
+  "uptime": 0,
+  "memhost": 0,
+  "netout": 0,
+  "mem": 0,
+  "cpus": 4,
+  "status": "stopped",
+  "vmid": 108,
+  "ha": {
+   "managed": 0
+  },
+  "agent": 1,
+  "maxdisk": 34359738368,
+  "shares": 1000
+ }
+}

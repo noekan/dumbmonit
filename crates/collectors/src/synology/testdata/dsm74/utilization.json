@@ -1,0 +1,146 @@
+{
+ "data": {
+  "cpu": {
+   "15min_load": 88,
+   "1min_load": 64,
+   "5min_load": 93,
+   "device": "System",
+   "other_load": 2,
+   "system_load": 1,
+   "user_load": 3
+  },
+  "disk": {
+   "disk": [
+    {
+     "device": "nvme0n1",
+     "display_name": "Cache device 1",
+     "read_access": 0,
+     "read_byte": 0,
+     "type": "internal",
+     "utilization": 0,
+     "write_access": 0,
+     "write_byte": 0
+    },
+    {
+     "device": "sdc",
+     "display_name": "Drive 3",
+     "read_access": 0,
+     "read_byte": 0,
+     "type": "internal",
+     "utilization": 2,
+     "write_access": 4,
+     "write_byte": 41984
+    },
+    {
+     "device": "sdd",
+     "display_name": "Drive 4",
+     "read_access": 0,
+     "read_byte": 0,
+     "type": "internal",
+     "utilization": 2,
+     "write_access": 4,
+     "write_byte": 41984
+    },
+    {
+     "device": "sda",
+     "display_name": "Drive 1",
+     "read_access": 2,
+     "read_byte": 104960,
+     "type": "internal",
+     "utilization": 2,
+     "write_access": 4,
+     "write_byte": 41984
+    },
+    {
+     "device": "sdb",
+     "display_name": "Drive 2",
+     "read_access": 0,
+     "read_byte": 0,
+     "type": "internal",
+     "utilization": 2,
+     "write_access": 4,
+     "write_byte": 41984
+    }
+   ],
+   "total": {
+    "device": "total",
+    "read_access": 2,
+    "read_byte": 104960,
+    "utilization": 1,
+    "write_access": 16,
+    "write_byte": 167936
+   }
+  },
+  "lun": [],
+  "memory": {
+   "avail_real": 282012,
+   "avail_swap": 6332956,
+   "buffer": 17596,
+   "cached": 5838572,
+   "device": "Memory",
+   "memory_size": 8388608,
+   "real_usage": 23,
+   "si_disk": 5,
+   "so_disk": 0,
+   "swap_usage": 8,
+   "total_real": 7989256,
+   "total_swap": 6893484
+  },
+  "network": [
+   {
+    "device": "total",
+    "rx": 6743,
+    "tx": 25080
+   },
+   {
+    "device": "eth0",
+    "rx": 6743,
+    "tx": 25080
+   },
+   {
+    "device": "eth1",
+    "rx": 0,
+    "tx": 0
+   }
+  ],
+  "nfs": [
+   {
+    "device": "nfs",
+    "read_OPS": 0,
+    "read_max_latency": 0,
+    "total_OPS": 0,
+    "total_max_latency": 0,
+    "write_OPS": 0,
+    "write_max_latency": 0
+   }
+  ],
+  "smb": {
+   "smb_cmd": [],
+   "smb_cpu": [],
+   "smb_rwpkt": []
+  },
+  "space": {
+   "total": {
+    "device": "total",
+    "read_access": 0,
+    "read_byte": 0,
+    "utilization": 0,
+    "write_access": 0,
+    "write_byte": 0
+   },
+   "volume": [
+    {
+     "device": "dm-2",
+     "display_name": "volume1",
+     "read_access": 0,
+     "read_byte": 0,
+     "utilization": 0,
+     "write_access": 0,
+     "write_byte": 0
+    }
+   ]
+  },
+  "time": 1790262466
+ },
+ "success": true
+}

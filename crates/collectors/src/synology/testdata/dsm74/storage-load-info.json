@@ -1,0 +1,1138 @@
+{
+ "data": {
+  "detected_pools": [],
+  "disks": [
+   {
+    "action": {
+     "allow_binding": true,
+     "allow_ma_create": true,
+     "cache_rescue_selectable": "alert",
+     "cache_selectable": "alert",
+     "legacy_cache_rescue_selectable": "alert",
+     "legacy_cache_selectable": "alert",
+     "notification": false,
+     "pool_rescue_selectable": "alert",
+     "pool_selectable": "alert",
+     "selectable": true,
+     "show_lifetime_chart": true
+    },
+    "action_status": {
+     "action_name": "idle",
+     "action_progress": ""
+    },
+    "action_status_category": "processing",
+    "action_status_key": "ACTION_STATU-1",
+    "adv_progress": "",
+    "adv_status": "not_support",
+    "allocation_role": "reuse_1",
+    "below_remain_life_mail_notify_thr": false,
+    "below_remain_life_show_thr": false,
+    "below_remain_life_thr": false,
+    "compatibility": "support",
+    "container": {
+     "order": 0,
+     "str": "DS918+",
+     "supportPwrBtnDisable": false,
+     "type": "internal"
+    },
+    "container_id": 0,
+    "device": "/dev/sda",
+    "disable_secera": false,
+    "diskType": "SATA",
+    "disk_code": "",
+    "disk_location": "Main",
+    "drive_status_category": "health",
+    "drive_status_key": "DRIVE_STATUS-1",
+    "erase_time": 1738,
+    "firm": "SN06",
+    "firmware_status": "-",
+    "has_data": true,
+    "has_system": true,
+    "hide_info": [],
+    "i18nNamingInfo": "[\"dsm:volume:volume_disk\",\" \",\"1\"]",
+    "id": "sda",
+    "ihm_testing": false,
+    "in_legacy_space": false,
+    "is4Kn": false,
+    "isSsd": false,
+    "isSynoDrive": false,
+    "isSynoPartition": true,
+    "is_bundle_ssd": false,
+    "is_erasing": false,
+    "longName": "Drive 1",
+    "m2_pool_support": false,
+    "model": "ST20000NM007D-3DJ103",
+    "name": "Drive 1",
+    "num_id": 1,
+    "order": 1,
+    "overview_status": "normal",
+    "pciSlot": -1,
+    "perf_testing": false,
+    "portType": "normal",
+    "remain_life": {
+     "trustable": true,
+     "value": -1
+    },
+    "remain_life_danger": false,
+    "remote_info": {
+     "compatibility": "disabled",
+     "unc": 0
+    },
+    "sb_days_left": 0,
+    "sb_days_left_below_show_thres": false,
+    "sb_days_left_critical": false,
+    "sb_days_left_warning": false,
+    "serial": "SERIAL-2",
+    "size_total": "20000588955648",
+    "slot_id": 1,
+    "smart_progress": "",
+    "smart_status": "normal",
+    "smart_test_limit": 0,
+    "smart_test_support": true,
+    "smart_testing": false,
+    "ssd_unhealth_reason": "none",
+    "status": "normal",
+    "summary_status_category": "health",
+    "summary_status_key": "SUMMARY_STAT-1",
+    "temp": 36,
+    "testing_progress": "",
+    "testing_type": "idle",
+    "tray_status": "join",
+    "ui_serial": "UI_SERIAL-1",
+    "unc": 0,
+    "used_by": "reuse_1",
+    "vendor": "Seagate",
+    "wcache_force_off": false,
+    "wcache_force_on": false,
+    "wdda_support": false
+   },
+   {
+    "action": {
+     "allow_binding": true,
+     "allow_ma_create": true,
+     "cache_rescue_selectable": "alert",
+     "cache_selectable": "alert",
+     "legacy_cache_rescue_selectable": "alert",
+     "legacy_cache_selectable": "alert",
+     "notification": false,
+     "pool_rescue_selectable": "alert",
+     "pool_selectable": "alert",
+     "selectable": true,
+     "show_lifetime_chart": true
+    },
+    "action_status": {
+     "action_name": "idle",
+     "action_progress": ""
+    },
+    "action_status_category": "processing",
+    "action_status_key": "ACTION_STATU-1",
+    "adv_progress": "",
+    "adv_status": "not_support",
+    "allocation_role": "reuse_1",
+    "below_remain_life_mail_notify_thr": false,
+    "below_remain_life_show_thr": false,
+    "below_remain_life_thr": false,
+    "compatibility": "support",
+    "container": {
+     "order": 0,
+     "str": "DS918+",
+     "supportPwrBtnDisable": false,
+     "type": "internal"
+    },
+    "container_id": 0,
+    "device": "/dev/sdb",
+    "disable_secera": false,
+    "diskType": "SATA",
+    "disk_code": "",
+    "disk_location": "Main",
+    "drive_status_category": "health",
+    "drive_status_key": "DRIVE_STATUS-1",
+    "erase_time": 1666,
+    "firm": "SB2B",
+    "firmware_status": "-",
+    "has_data": true,
+    "has_system": true,
+    "hide_info": [],
+    "i18nNamingInfo": "[\"dsm:volume:volume_disk\",\" \",\"2\"]",
+    "id": "sdb",
+    "ihm_testing": false,
+    "in_legacy_space": false,
+    "is4Kn": false,
+    "isSsd": false,
+    "isSynoDrive": false,
+    "isSynoPartition": true,
+    "is_bundle_ssd": false,
+    "is_erasing": false,
+    "longName": "Drive 2",
+    "m2_pool_support": false,
+    "model": "ST20000NM007D-3DJ103",
+    "name": "Drive 2",
+    "num_id": 2,
+    "order": 2,
+    "overview_status": "normal",
+    "pciSlot": -1,
+    "perf_testing": false,
+    "portType": "normal",
+    "remain_life": {
+     "trustable": true,
+     "value": -1
+    },
+    "remain_life_danger": false,
+    "remote_info": {
+     "compatibility": "disabled",
+     "unc": 0
+    },
+    "sb_days_left": 0,
+    "sb_days_left_below_show_thres": false,
+    "sb_days_left_critical": false,
+    "sb_days_left_warning": false,
+    "serial": "SERIAL-3",
+    "size_total": "20000588955648",
+    "slot_id": 2,
+    "smart_progress": "",
+    "smart_status": "normal",
+    "smart_test_limit": 0,
+    "smart_test_support": true,
+    "smart_testing": false,
+    "ssd_unhealth_reason": "none",
+    "status": "normal",
+    "summary_status_category": "health",
+    "summary_status_key": "SUMMARY_STAT-1",
+    "temp": 39,
+    "testing_progress": "",
+    "testing_type": "idle",
+    "tray_status": "join",
+    "ui_serial": "UI_SERIAL-2",
+    "unc": 0,
+    "used_by": "reuse_1",
+    "vendor": "Seagate",
+    "wcache_force_off": false,
+    "wcache_force_on": false,
+    "wdda_support": false
+   },
+   {
+    "action": {
+     "allow_binding": true,
+     "allow_ma_create": true,
+     "cache_rescue_selectable": "alert",
+     "cache_selectable": "alert",
+     "legacy_cache_rescue_selectable": "alert",
+     "legacy_cache_selectable": "alert",
+     "notification": false,
+     "pool_rescue_selectable": "alert",
+     "pool_selectable": "alert",
+     "selectable": true,
+     "show_lifetime_chart": true
+    },
+    "action_status": {
+     "action_name": "idle",
+     "action_progress": ""
+    },
+    "action_status_category": "processing",
+    "action_status_key": "ACTION_STATU-1",
+    "adv_progress": "",
+    "adv_status": "not_support",
+    "allocation_role": "reuse_1",
+    "below_remain_life_mail_notify_thr": false,
+    "below_remain_life_show_thr": false,
+    "below_remain_life_thr": false,
+    "compatibility": "support",
+    "container": {
+     "order": 0,
+     "str": "DS918+",
+     "supportPwrBtnDisable": false,
+     "type": "internal"
+    },
+    "container_id": 0,
+    "device": "/dev/sdc",
+    "disable_secera": false,
+    "diskType": "SATA",
+    "disk_code": "",
+    "disk_location": "Main",
+    "drive_status_category": "health",
+    "drive_status_key": "DRIVE_STATUS-1",
+    "erase_time": 1650,
+    "firm": "SN06",
+    "firmware_status": "-",
+    "has_data": true,
+    "has_system": true,
+    "hide_info": [],
+    "i18nNamingInfo": "[\"dsm:volume:volume_disk\",\" \",\"3\"]",
+    "id": "sdc",
+    "ihm_testing": false,
+    "in_legacy_space": false,
+    "is4Kn": false,
+    "isSsd": false,
+    "isSynoDrive": false,
+    "isSynoPartition": true,
+    "is_bundle_ssd": false,
+    "is_erasing": false,
+    "longName": "Drive 3",
+    "m2_pool_support": false,
+    "model": "ST20000NM007D-3DJ103",
+    "name": "Drive 3",
+    "num_id": 3,
+    "order": 3,
+    "overview_status": "normal",
+    "pciSlot": -1,
+    "perf_testing": false,
+    "portType": "normal",
+    "remain_life": {
+     "trustable": true,
+     "value": -1
+    },
+    "remain_life_danger": false,
+    "remote_info": {
+     "compatibility": "disabled",
+     "unc": 0
+    },
+    "sb_days_left": 0,
+    "sb_days_left_below_show_thres": false,
+    "sb_days_left_critical": false,
+    "sb_days_left_warning": false,
+    "serial": "SERIAL-4",
+    "size_total": "20000588955648",
+    "slot_id": 3,
+    "smart_progress": "",
+    "smart_status": "normal",
+    "smart_test_limit": 0,
+    "smart_test_support": true,
+    "smart_testing": false,
+    "ssd_unhealth_reason": "none",
+    "status": "normal",
+    "summary_status_category": "health",
+    "summary_status_key": "SUMMARY_STAT-1",
+    "temp": 39,
+    "testing_progress": "",
+    "testing_type": "idle",
+    "tray_status": "join",
+    "ui_serial": "UI_SERIAL-3",
+    "unc": 0,
+    "used_by": "reuse_1",
+    "vendor": "Seagate",
+    "wcache_force_off": false,
+    "wcache_force_on": false,
+    "wdda_support": false
+   },
+   {
+    "action": {
+     "allow_binding": true,
+     "allow_ma_create": true,
+     "cache_rescue_selectable": "alert",
+     "cache_selectable": "alert",
+     "legacy_cache_rescue_selectable": "alert",
+     "legacy_cache_selectable": "alert",
+     "notification": false,
+     "pool_rescue_selectable": "alert",
+     "pool_selectable": "alert",
+     "selectable": true,
+     "show_lifetime_chart": true
+    },
+    "action_status": {
+     "action_name": "idle",
+     "action_progress": ""
+    },
+    "action_status_category": "processing",
+    "action_status_key": "ACTION_STATU-1",
+    "adv_progress": "",
+    "adv_status": "not_support",
+    "allocation_role": "reuse_1",
+    "below_remain_life_mail_notify_thr": false,
+    "below_remain_life_show_thr": false,
+    "below_remain_life_thr": false,
+    "compatibility": "support",
+    "container": {
+     "order": 0,
+     "str": "DS918+",
+     "supportPwrBtnDisable": false,
+     "type": "internal"
+    },
+    "container_id": 0,
+    "device": "/dev/sdd",
+    "disable_secera": false,
+    "diskType": "SATA",
+    "disk_code": "",
+    "disk_location": "Main",
+    "drive_status_category": "health",
+    "drive_status_key": "DRIVE_STATUS-1",
+    "erase_time": 1598,
+    "firm": "SN06",
+    "firmware_status": "-",
+    "has_data": true,
+    "has_system": true,
+    "hide_info": [],
+    "i18nNamingInfo": "[\"dsm:volume:volume_disk\",\" \",\"4\"]",
+    "id": "sdd",
+    "ihm_testing": false,
+    "in_legacy_space": false,
+    "is4Kn": false,
+    "isSsd": false,
+    "isSynoDrive": false,
+    "isSynoPartition": true,
+    "is_bundle_ssd": false,
+    "is_erasing": false,
+    "longName": "Drive 4",
+    "m2_pool_support": false,
+    "model": "ST20000NM007D-3DJ103",
+    "name": "Drive 4",
+    "num_id": 4,
+    "order": 4,
+    "overview_status": "normal",
+    "pciSlot": -1,
+    "perf_testing": false,
+    "portType": "normal",
+    "remain_life": {
+     "trustable": true,
+     "value": -1
+    },
+    "remain_life_danger": false,
+    "remote_info": {
+     "compatibility": "disabled",
+     "unc": 0
+    },
+    "sb_days_left": 0,
+    "sb_days_left_below_show_thres": false,
+    "sb_days_left_critical": false,
+    "sb_days_left_warning": false,
+    "serial": "SERIAL-5",
+    "size_total": "20000588955648",
+    "slot_id": 4,
+    "smart_progress": "",
+    "smart_status": "normal",
+    "smart_test_limit": 0,
+    "smart_test_support": true,
+    "smart_testing": false,
+    "ssd_unhealth_reason": "none",
+    "status": "normal",
+    "summary_status_category": "health",
+    "summary_status_key": "SUMMARY_STAT-1",
+    "temp": 38,
+    "testing_progress": "",
+    "testing_type": "idle",
+    "tray_status": "join",
+    "ui_serial": "UI_SERIAL-4",
+    "unc": 0,
+    "used_by": "reuse_1",
+    "vendor": "Seagate",
+    "wcache_force_off": false,
+    "wcache_force_on": false,
+    "wdda_support": false
+   },
+   {
+    "action": {
+     "allow_binding": true,
+     "allow_ma_create": true,
+     "cache_rescue_selectable": "yes",
+     "cache_selectable": "yes",
+     "legacy_cache_rescue_selectable": "yes",
+     "legacy_cache_selectable": "yes",
+     "notification": false,
+     "pool_rescue_selectable": "yes",
+     "pool_selectable": "yes",
+     "selectable": true,
+     "show_lifetime_chart": true
+    },
+    "action_status": {
+     "action_name": "idle",
+     "action_progress": ""
+    },
+    "action_status_category": "processing",
+    "action_status_key": "ACTION_STATU-1",
+    "adv_progress": "",
+    "adv_status": "not_support",
+    "allocation_role": "shared_cache_1",
+    "below_remain_life_mail_notify_thr": false,
+    "below_remain_life_show_thr": false,
+    "below_remain_life_thr": false,
+    "compatibility": "support",
+    "container": {
+     "order": 0,
+     "str": "DS918+",
+     "supportPwrBtnDisable": false,
+     "type": "internal"
+    },
+    "container_id": 2000,
+    "device": "/dev/nvme0n1",
+    "disable_secera": false,
+    "diskType": "M.2 NVMe",
+    "disk_code": "",
+    "disk_location": "Native M.2",
+    "drive_status_category": "health",
+    "drive_status_key": "DRIVE_STATUS-1",
+    "erase_time": 1,
+    "firm": "1B2QEXM7",
+    "firmware_status": "-",
+    "has_data": true,
+    "has_system": false,
+    "hide_info": [],
+    "i18nNamingInfo": "[\"dsm:volume:dedicated_ssd_cache\",\" \",\"1\"]",
+    "id": "nvme0n1",
+    "ihm_testing": false,
+    "in_legacy_space": false,
+    "is4Kn": false,
+    "isSsd": true,
+    "isSynoDrive": false,
+    "isSynoPartition": false,
+    "is_bundle_ssd": false,
+    "is_erasing": false,
+    "longName": "Cache device 1",
+    "m2_pool_support": false,
+    "model": "Samsung SSD 970 EVO Plus 250GB",
+    "name": "Cache device 1",
+    "num_id": 1,
+    "order": 1,
+    "overview_status": "normal",
+    "pciSlot": 0,
+    "perf_testing": false,
+    "portType": "cache",
+    "remain_life": {
+     "trustable": true,
+     "value": 97
+    },
+    "remain_life_danger": false,
+    "remote_info": {
+     "compatibility": "disabled",
+     "unc": 0
+    },
+    "sb_days_left": 0,
+    "sb_days_left_below_show_thres": false,
+    "sb_days_left_critical": false,
+    "sb_days_left_warning": false,
+    "serial": "SERIAL-6",
+    "size_total": "250059350016",
+    "slot_id": 1,
+    "smart_progress": "",
+    "smart_status": "normal",
+    "smart_test_limit": 0,
+    "smart_test_support": false,
+    "smart_testing": false,
+    "ssd_unhealth_reason": "none",
+    "status": "normal",
+    "summary_status_category": "health",
+    "summary_status_key": "SUMMARY_STAT-1",
+    "temp": 36,
+    "testing_progress": "",
+    "testing_type": "idle",
+    "tray_status": "ssd cache",
+    "ui_serial": "UI_SERIAL-5",
+    "unc": -1,
+    "used_by": "shared_cache_1",
+    "vendor": "Samsung",
+    "wcache_force_off": false,
+    "wcache_force_on": false,
+    "wdda_support": false
+   }
+  ],
+  "env": {
+   "batchtask": {
+    "max_task": 64,
+    "remain_task": 64
+   },
+   "bay_number": "4",
+   "cache_max_ssd_num": 6,
+   "data_scrubbing": {
+    "sche_enabled": "1",
+    "sche_pool_order": [
+     "/dev/vg1"
+    ],
+    "sche_status": "done"
+   },
+   "eunits": [],
+   "fs_acting": false,
+   "hideExtraLineCharts": true,
+   "is_space_actioning": false,
+   "limit_fs_bytes_high_end": "219902325555200",
+   "limit_fs_bytes_peta": "1125899906842624",
+   "m2_card_info": [],
+   "max_fs_bytes": "118747255799808",
+   "model_name": "DS918+",
+   "multipathMismatch": false,
+   "multipathStatus": "normal",
+   "multipathSupport": false,
+   "multipathTypeMismatch": false,
+   "showpooltab": true,
+   "space_size_limit": {
+    "allocatable_size": 0,
+    "is_limited": false,
+    "size_limit": 0
+   },
+   "status": {
+    "root_size_byte": 8589869056,
+    "system_crashed": false,
+    "system_need_repair": false,
+    "system_rebuilding": false
+   },
+   "storageMachineInfo": [
+    {
+     "imgCfg": "TOWER_4_Bay-M2X1",
+     "isInternal": true,
+     "isSAS": false,
+     "machineSerial": "MACHINESERIA-1",
+     "machineStatus": "MACHINESTATU-1",
+     "modelName": "DS918+",
+     "nameStr": "HOSTNAME-1",
+     "order": 0,
+     "ports": []
+    }
+   ],
+   "support": {
+    "ebox": true,
+    "raid_cross": true,
+    "sysdef": true
+   },
+   "support_volume_encryption": false,
+   "unique_key": "UNIQUE_KEY-1"
+  },
+  "missing_pools": [],
+  "overview_data": {
+   "incompatible_eunit": [],
+   "pools_to_show": {
+    "detected_pool": [],
+    "storage_pool": []
+   },
+   "sample_level_str": {
+    "attention": "status_level_abnormal",
+    "danger": "status_level_danger",
+    "normal": "status_level_normal"
+   },
+   "space_affect_by_eunit_lost": false,
+   "space_affect_by_location_mismatch": false,
+   "status_level": "status_level_normal"
+  },
+  "ports": [],
+  "sharedCaches": [
+   {
+    "apm_flush_status": "no_need",
+    "can_do": {
+     "delete": true,
+     "migrate": {
+      "to_raid1": 3,
+      "to_raid5": 2
+     },
+     "raid_cross": true
+    },
+    "compatibility": true,
+    "desc": "",
+    "device_type": "basic",
+    "disks": [
+     "nvme0n1"
+    ],
+    "exist_before_update": false,
+    "id": "shared_cache_1",
+    "is_hcl_migrated": false,
+    "is_missing": false,
+    "is_writable": true,
+    "minimal_disk_size": "250054707200",
+    "num_id": 1,
+    "raids": [
+     {
+      "designedDiskCount": 1,
+      "devices": [
+       {
+        "id": "nvme0n1",
+        "slot": 0,
+        "status": "normal"
+       }
+      ],
+      "hasParity": false,
+      "minDevSize": "250054707200",
+      "normalDevCount": 1,
+      "raidCrashedReason": 0,
+      "raidPath": "/dev/md3",
+      "raidStatus": 1,
+      "spares": []
+     }
+    ],
+    "size": {
+     "recyclable": "0",
+     "total": "250051821568",
+     "used": "249120686080"
+    },
+    "space_path": "/dev/shared_cache_vg1",
+    "task": "none"
+   }
+  ],
+  "ssdCaches": [
+   {
+    "SSDPath": "/dev/shared_cache_vg1/alloc_cache_1",
+    "SSDUUID": "SSDUUID-1",
+    "cacheStatus": "",
+    "cache_disks": [],
+    "can_assemble": false,
+    "can_do": {
+     "cancelDelete": false,
+     "delete": true,
+     "migrate": {
+      "to_raid1": 3,
+      "to_raid5": 2
+     },
+     "raid_cross": true
+    },
+    "compatibility": true,
+    "container": "internal",
+    "designedDiskCount": 1,
+    "dev_count": 1,
+    "device_type": "basic",
+    "disk_failure_number": 0,
+    "disks": [
+     "nvme0n1"
+    ],
+    "drive_type": 1,
+    "exist_before_update": false,
+    "hash_mapping": true,
+    "hit_rate": 78,
+    "hit_rate_write": 0,
+    "hit_rates": {
+     "Current": {
+      "data_size": 1,
+      "io_hit": 34726942,
+      "io_need_acceleration": 42413808,
+      "success": true
+     },
+     "Daily": {
+      "data_size": 0,
+      "io_hit": 0,
+      "io_need_acceleration": 0,
+      "success": false
+     },
+     "HalfYearly": {
+      "data_size": 0,
+      "io_hit": 0,
+      "io_need_acceleration": 0,
+      "success": false
+     },
+     "Minutely": {
+      "data_size": 0,
+      "io_hit": 0,
+      "io_need_acceleration": 0,
+      "success": false
+     },
+     "Monthly": {
+      "data_size": 0,
+      "io_hit": 0,
+      "io_need_acceleration": 0,
+      "success": false
+     },
+     "Weekly": {
+      "data_size": 0,
+      "io_hit": 0,
+      "io_need_acceleration": 0,
+      "success": false
+     },
+     "Yearly": {
+      "data_size": 0,
+      "io_hit": 0,
+      "io_need_acceleration": 0,
+      "success": false
+     },
+     "has_history": false
+    },
+    "id": "alloc_cache_1_1",
+    "is_actioning": false,
+    "is_backgroundbuilding": false,
+    "is_hcl_migrated": false,
+    "is_missing": false,
+    "is_scheduled": false,
+    "last_done_time": 0,
+    "limited_disk_number": 24,
+    "loaded": true,
+    "maxDegradeFlush": false,
+    "maximal_disk_size": "0",
+    "memory": "95027200",
+    "metadataCache": false,
+    "metadataCacheOptionShow": false,
+    "minimal_disk_size": "250054707200",
+    "minimal_spare_size": "0",
+    "missing_drives": [],
+    "mode": "read",
+    "mountSpaceId": "volume_1",
+    "next_schedule_time": 0,
+    "notes": [],
+    "num_id": 0,
+    "path": "/volume1",
+    "policy": 0,
+    "pool_path": "",
+    "progress": {
+     "cur_step": 0,
+     "is_resync_speed_limited": false,
+     "percent": "-1",
+     "remaining_time": 0,
+     "step": "none",
+     "total_step": 0
+    },
+    "protectProgress": -1,
+    "raids": [
+     {
+      "designedDiskCount": 1,
+      "devices": [
+       {
+        "id": "nvme0n1",
+        "slot": 0,
+        "status": "normal"
+       }
+      ],
+      "hasParity": false,
+      "minDevSize": "250054707200",
+      "normalDevCount": 1,
+      "raidCrashedReason": 0,
+      "raidPath": "/dev/md3",
+      "raidStatus": 1,
+      "spares": []
+     }
+    ],
+    "recommend_spare_size": "0",
+    "repair_action": "none",
+    "scrubbingStatus": "",
+    "show_assemble_btn": false,
+    "size": {
+     "occupied": "0",
+     "reusable": "247690887168",
+     "total": "249108103168"
+    },
+    "skipSeqIO": true,
+    "space_path": "/dev/shared_cache_vg1/alloc_cache_1",
+    "space_status": {
+     "detail": "cache_normal",
+     "show_attention": false,
+     "show_danger": false,
+     "show_flag_detail": "",
+     "status": "cache_normal",
+     "summary_status": "normal"
+    },
+    "spares": [],
+    "status": "normal",
+    "suggestions": [],
+    "summary_status": "normal",
+    "task": "none",
+    "timebackup": false,
+    "uuid": "UUID-7",
+    "version": 3,
+    "version_status": "vol_latest_version",
+    "vspace_can_do": {
+     "drbd": {
+      "resize": {
+       "can_do": false,
+       "errCode": 53504,
+       "stopService": false
+      }
+     },
+     "flashcache": {
+      "apply": {
+       "can_do": false,
+       "errCode": 768,
+       "stopService": false
+      },
+      "remove": {
+       "can_do": false,
+       "errCode": 768,
+       "stopService": false
+      },
+      "resize": {
+       "can_do": false,
+       "errCode": 768,
+       "stopService": false
+      }
+     },
+     "snapshot": {
+      "resize": {
+       "can_do": false,
+       "errCode": 53504,
+       "stopService": false
+      }
+     }
+    }
+   }
+  ],
+  "storagePools": [
+   {
+    "cacheStatus": "",
+    "cache_disks": [
+     "nvme0n1"
+    ],
+    "can_assemble": false,
+    "can_do": {
+     "delete": true,
+     "disk_replace": true,
+     "expand_by_disk": 1,
+     "migrate": {
+      "to_raid6": 1
+     },
+     "raid_cross": true
+    },
+    "compatibility": true,
+    "container": "internal",
+    "data_scrubbing": {
+     "can_do_manual": true,
+     "can_do_schedule": true,
+     "reason": ""
+    },
+    "desc": "",
+    "device_type": "raid_5",
+    "disk_failure_number": 0,
+    "disks": [
+     "sda",
+     "sdb",
+     "sdc",
+     "sdd"
+    ],
+    "drive_type": 0,
+    "exist_before_update": false,
+    "has_full_child_vol": true,
+    "id": "reuse_1",
+    "is_actioning": false,
+    "is_backgroundbuilding": false,
+    "is_hcl_migrated": false,
+    "is_scheduled": true,
+    "is_writable": true,
+    "last_done_time": 1754325253,
+    "limited_disk_number": 24,
+    "maximal_disk_size": "0",
+    "minimal_disk_size": "19994439122944",
+    "minimal_spare_size": "19994439122944",
+    "missing_drives": [],
+    "next_schedule_time": 1797202800,
+    "notes": [],
+    "num_id": 1,
+    "pool_child": [
+     {
+      "id": "volume_1",
+      "size": {
+       "total": "59968480870400"
+      }
+     }
+    ],
+    "pool_path": "reuse_1",
+    "progress": {
+     "cur_step": 0,
+     "is_resync_speed_limited": false,
+     "percent": "-1",
+     "remaining_time": 0,
+     "step": "none",
+     "total_step": 0
+    },
+    "raidType": "multiple",
+    "raids": [
+     {
+      "designedDiskCount": 4,
+      "devices": [
+       {
+        "id": "sdd",
+        "slot": 2,
+        "status": "normal"
+       },
+       {
+        "id": "sdc",
+        "slot": 1,
+        "status": "normal"
+       },
+       {
+        "id": "sdb",
+        "slot": 3,
+        "status": "normal"
+       },
+       {
+        "id": "sda",
+        "slot": 0,
+        "status": "normal"
+       }
+      ],
+      "hasParity": true,
+      "minDevSize": "19994439122944",
+      "normalDevCount": 4,
+      "raidCrashedReason": 0,
+      "raidPath": "/dev/md2",
+      "raidStatus": 1,
+      "spares": []
+     }
+    ],
+    "recommend_spare_size": "19994439122944",
+    "repair_action": "none",
+    "scrubbingStatus": "schedule_done",
+    "show_assemble_btn": false,
+    "size": {
+     "total": "59968820609024",
+     "used": "59968493453312"
+    },
+    "space_path": "/dev/vg1",
+    "space_status": {
+     "detail": "pool_normal",
+     "show_attention": false,
+     "show_danger": false,
+     "show_flag_detail": "",
+     "status": "pool_normal",
+     "summary_status": "normal"
+    },
+    "spares": [],
+    "status": "normal",
+    "suggestions": [],
+    "summary_status": "normal",
+    "timebackup": false,
+    "uuid": "UUID-8",
+    "vspace_can_do": {
+     "drbd": {
+      "resize": {
+       "can_do": false,
+       "errCode": 53504,
+       "stopService": false
+      }
+     },
+     "flashcache": {
+      "apply": {
+       "can_do": false,
+       "errCode": 768,
+       "stopService": false
+      },
+      "remove": {
+       "can_do": false,
+       "errCode": 768,
+       "stopService": false
+      },
+      "resize": {
+       "can_do": false,
+       "errCode": 768,
+       "stopService": false
+      }
+     },
+     "snapshot": {
+      "resize": {
+       "can_do": false,
+       "errCode": 53504,
+       "stopService": false
+      }
+     }
+    }
+   }
+  ],
+  "volumes": [
+   {
+    "atime_checked": false,
+    "atime_opt": "relatime",
+    "cache": {
+     "id": "alloc_cache_1_1",
+     "status": "normal"
+    },
+    "cacheStatus": "",
+    "cache_advisor_running": false,
+    "cache_disks": [],
+    "can_assemble": false,
+    "can_do": {
+     "delete": true,
+     "raid_cross": true
+    },
+    "container": "internal",
+    "device_type": "raid_5",
+    "disk_failure_number": 0,
+    "disks": [],
+    "drive_type": 0,
+    "fs_type": "btrfs",
+    "id": "volume_1",
+    "is_acting": false,
+    "is_actioning": false,
+    "is_backgroundbuilding": false,
+    "is_encrypted": false,
+    "is_inode_full": false,
+    "is_locked": false,
+    "is_scheduled": false,
+    "is_vault_contain_key": false,
+    "is_writable": true,
+    "last_done_time": 0,
+    "limited_disk_number": 24,
+    "max_fs_size": "1152921504606846976",
+    "metadata_cache_hard_lower_bound_byte": 139638865920,
+    "metadata_cache_option_show": true,
+    "missing_drives": [],
+    "next_schedule_time": 0,
+    "notes": [],
+    "num_id": 1,
+    "pool_path": "reuse_1",
+    "progress": {
+     "cur_step": 0,
+     "is_resync_speed_limited": false,
+     "percent": "-1",
+     "remaining_time": 0,
+     "step": "none",
+     "total_step": 0
+    },
+    "raidType": "multiple",
+    "reduction_info": {
+     "config_alert": "",
+     "config_show_btn": false,
+     "inline_compression_num": 0,
+     "mode": "",
+     "reduction_share_num": 0,
+     "run_btn_state": "hidden",
+     "run_progress": "-1",
+     "saving_status": "not_enabled",
+     "show": false,
+     "status": "none",
+     "total": 0,
+     "used": 0
+    },
+    "repair_action": "none",
+    "scrubbingStatus": "",
+    "show_assemble_btn": false,
+    "size": {
+     "free_inode": "0",
+     "total": "57569741635584",
+     "total_device": "59968480870400",
+     "total_inode": "0",
+     "used": "43572978589696"
+    },
+    "space_status": {
+     "detail": "pool_normal",
+     "show_attention": false,
+     "show_danger": false,
+     "show_flag_detail": "",
+     "status": "fs_normal",
+     "summary_status": "normal"
+    },
+    "ssd_trim": {
+     "support": "not support"
+    },
+    "status": "normal",
+    "suggestions": [],
+    "summary_status": "normal",
+    "timebackup": false,
+    "used_by_gluster": false,
+    "uuid": "UUID-9",
+    "vol_attribute": "generic",
+    "vol_desc": "",
+    "vol_path": "/volume1",
+    "vspace_can_do": {
+     "drbd": {
+      "resize": {
+       "can_do": false,
+       "errCode": 53504,
+       "stopService": false
+      }
+     },
+     "flashcache": {
+      "apply": {
+       "can_do": false,
+       "errCode": 49152,
+       "stopService": false
+      },
+      "remove": {
+       "can_do": true,
+       "errCode": 0,
+       "stopService": true
+      },
+      "resize": {
+       "can_do": true,
+       "errCode": 0,
+       "stopService": false
+      }
+     },
+     "snapshot": {
+      "resize": {
+       "can_do": false,
+       "errCode": 53504,
+       "stopService": false
+      }
+     }
+    }
+   }
+  ]
+ },
+ "success": true
+}

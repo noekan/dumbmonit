@@ -69,6 +69,74 @@ pub fn updates_samples(node: &str, packages: &[AptPackage], ts_ms: i64) -> Vec<S
     ]
 }
 
+/// `GET /nodes/{node}/apt/versions` : ce que la liste des versions dit sans
+/// `Sys.Modify`.
+///
+/// `apt/update` — le seul endpoint qui compte les mises à jour en attente —
+/// exige `Sys.Modify`, un droit d'écriture que beaucoup n'accordent pas à un
+/// jeton de supervision : sur un tel cluster, `node_updates_pending` n'existe
+/// tout simplement pas. `apt/versions`, lui, ne demande que `Sys.Audit`, et
+/// porte déjà la version candidate de chaque paquet Proxmox : de quoi dire
+/// qu'une mise à jour attend, à défaut de la compter sur tout le système.
+///
+/// Même appel, même droit : le noyau en marche y figure aussi, ce qui permet de
+/// dire qu'un noyau plus récent est installé mais pas encore démarré — la seule
+/// façon de savoir qu'un nœud attend son redémarrage.
+pub fn version_samples(node: &str, versions: &[AptVersion], ts_ms: i64) -> Vec<Sample> {
+    let mut samples = Vec::new();
+    let mut push = |sample: Sample| samples.push(sample.with_label("node", node));
+
+    let upgradable = versions.iter().filter(|version| version.is_upgradable()).count();
+    push(gauge("node_pve_packages_upgradable", upgradable as f64, ts_ms));
+
+    let running = versions
+        .iter()
+        .find_map(|version| version.running_kernel.as_deref().filter(|kernel| !kernel.is_empty()));
+    if let Some(running) = running {
+        let newest = versions
+            .iter()
+            .filter_map(installed_kernel)
+            .max_by(|a, b| version_key(a).cmp(&version_key(b)));
+        let pending = newest
+            .filter(|newest| version_key(newest) > version_key(&kernel_version(running)))
+            .unwrap_or("");
+        push(
+            gauge("node_reboot_required", if pending.is_empty() { 0.0 } else { 1.0 }, ts_ms)
+                .with_label("running", running)
+                .with_label("installed", pending),
+        );
+    }
+
+    samples
+}
+
+/// Version du noyau portée par un paquet `proxmox-kernel-…` installé.
+///
+/// Les métapaquets (`proxmox-kernel-7.0`, `proxmox-kernel-helper`) sont écartés :
+/// ils suivent la série, pas l'image réellement présente sur le disque.
+fn installed_kernel(version: &AptVersion) -> Option<&str> {
+    let name = version.package.as_deref()?;
+    version.installed()?;
+    let rest = name.strip_prefix("proxmox-kernel-").or_else(|| name.strip_prefix("pve-kernel-"))?;
+    let rest = rest.strip_suffix("-pve-signed").or_else(|| rest.strip_suffix("-pve"))?;
+    rest.starts_with(|c: char| c.is_ascii_digit()).then_some(rest)
+}
+
+/// Le noyau en marche sans son suffixe de saveur : `7.0.6-2-pve` → `7.0.6-2`.
+fn kernel_version(running: &str) -> String {
+    running.strip_suffix("-pve").unwrap_or(running).to_string()
+}
+
+/// Découpe une version en nombres comparables : `7.0.14-11` passe ainsi devant
+/// `7.0.6-2`, ce qu'un ordre lexicographique ferait faux.
+fn version_key(version: &str) -> Vec<u64> {
+    version
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| part.parse().ok())
+        .collect()
+}
+
 /// Un changement de versions constaté entre deux interrogations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageChange {

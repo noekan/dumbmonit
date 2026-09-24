@@ -1,0 +1,11 @@
+{
+ "data": {
+  "quorum": {
+   "quorate": "1",
+   "node": "node1"
+  },
+  "manager_status": {
+   "node_status": {}
+  }
+ }
+}

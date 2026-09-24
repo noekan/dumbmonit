@@ -59,8 +59,25 @@ Les cibles de type `proxmox` sont alors interrogées par le planificateur.
 | `/nodes/{n}/disks/list`, `/nodes/{n}/disks/smart`, `/nodes/{n}/disks/zfs` | `Sys.Audit` |
 | `/nodes/{n}/apt/versions`, `/nodes/{n}/apt/repositories`, `/nodes/{n}/subscription` | `Sys.Audit` |
 | `/nodes/{n}/qemu/{vmid}/status/current` | `VM.Audit` |
-| `/nodes/{n}/qemu/{vmid}/agent/get-fsinfo` | `VM.Monitor` (facultatif : sans lui, pas d'occupation disque des VM) |
+| `/nodes/{n}/qemu/{vmid}/agent/get-fsinfo` | `VM.GuestAgent.Audit` (avant Proxmox VE 9 : `VM.Monitor`) — facultatif : sans lui, pas d'occupation disque des VM |
 | `/nodes/{n}/apt/update` | `Sys.Modify` sur `/nodes` (facultatif) |
+
+### Absence et panne partagent le code 500
+
+Proxmox ne réserve aucun statut HTTP à « cette fonctionnalité n'est pas là » :
+il répond 500 avec le message de l'outil qu'il n'a pas pu lancer. Un cluster
+sans Ceph rend `binary not installed: /usr/bin/ceph-mon` sur les six endpoints
+Ceph, une VM dont l'agent est arrêté `QEMU guest agent is not running`, un nœud
+sans ZFS `binary not installed: /sbin/zpool`.
+
+`client.rs` reconnaît ces tournures (`ABSENCE_MARKERS`) et les traduit en
+`Ok(None)` : ni erreur de collecte, ni série, ni alerte. Une 500 qui dit autre
+chose reste une indisponibilité — sans quoi un nœud réellement cassé passerait
+inaperçu. Les endpoints dont l'absence est un cas normal passent par
+`get_if_present`.
+
+Les réponses relevées sur un cluster réel servent de jeux d'essai :
+`testdata/pve9/` et `capture.rs`.
 
 ### Modules
 

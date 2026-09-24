@@ -57,7 +57,13 @@ use super::model::{AbbResult, AbbResultList, AbbTask, AbbTaskList, Num};
 pub const API_TASK: &str = "SYNO.ActiveBackup.Task";
 /// Historique des exécutions.
 pub const API_LOG: &str = "SYNO.ActiveBackup.Log";
-/// Toutes les API `SYNO.ActiveBackup.*` n'existent qu'en version 1.
+/// Version demandée à toutes les API `SYNO.ActiveBackup.*`.
+///
+/// Un DSM 7.4 les annonce en 1–2, mais **seule la version 1 porte les méthodes de
+/// lecture** : demandées en 2, elles répondent toutes 103 « méthode inconnue ».
+/// Relevé sur un vrai NAS, et confirmé par le même comportement sur des API sans
+/// rapport (`SYNO.Core.QuickConnect&method=get`, documentée en version 1, répond
+/// 103 quand on l'appelle à son `maxVersion` de 3).
 const VERSION: u32 = 1;
 
 /// Nombre maximal de tâches dont l'historique est interrogé individuellement.
@@ -106,6 +112,20 @@ pub async fn collect(dsm: &DsmClient) -> Result<Vec<TaskState>, ProbeError> {
     ];
     let list: AbbTaskList = dsm.call(API_TASK, VERSION, "list", &params).await?;
     let tasks: Vec<AbbTask> = list.tasks.into_iter().take(MAX_TASKS).collect();
+
+    // Un ABB trop ancien n'annonce pas l'historique : le demander quand même
+    // enverrait une requête vouée à l'échec par tâche, à chaque interrogation.
+    // Le dernier résultat connu de la tâche sert alors de repli, comme lorsque
+    // l'historique répond mais est illisible.
+    if !dsm.supports(API_LOG) {
+        return Ok(tasks
+            .into_iter()
+            .map(|task| {
+                let last_success_s = task.last_result.as_ref().and_then(successful_backup_end);
+                TaskState { task, last_success_s }
+            })
+            .collect());
+    }
 
     let histories = futures::future::join_all(tasks.iter().map(|task| async {
         let params = [
@@ -470,6 +490,18 @@ mod end_to_end_tests {
     const USERNAME: &str = "monitoring";
     const PASSWORD: &str = "s3cret-nas";
     const SID: &str = "sid-de-test";
+    /// Jeton anti-CSRF exigé par les API de paquets, comme sur un vrai DSM.
+    const TOKEN: &str = "jeton";
+
+    /// Réponses d'un vrai NAS (DS918+ / DSM 7.4.1), voir [`crate::synology::capture`].
+    /// Les servir ici plutôt qu'un objet vide fait passer l'interrogation entière
+    /// par la vraie désérialisation, jusqu'aux échantillons.
+    const SYSTEM_INFO: &str = include_str!("testdata/dsm74/system-info.json");
+    const STORAGE: &str = include_str!("testdata/dsm74/storage-load-info.json");
+
+    fn capture(json: &str) -> Value {
+        serde_json::from_str::<Value>(json).unwrap()["data"].clone()
+    }
 
     struct Stub {
         /// Faux DSM avec ou sans le paquet Active Backup.
@@ -502,8 +534,10 @@ mod end_to_end_tests {
             "SYNO.Storage.CGI.Storage": {"path": "entry.cgi", "minVersion": 1, "maxVersion": 1},
         });
         if abb_installed {
+            // Un vrai DSM 7.4 annonce 1–2 : c'est bien la 1 que le collecteur doit
+            // demander, et `entry` refuse toute autre version comme le ferait DSM.
             for api in ["SYNO.ActiveBackup.Task", "SYNO.ActiveBackup.Log"] {
-                apis[api] = json!({"path": "entry.cgi", "minVersion": 1, "maxVersion": 1});
+                apis[api] = json!({"path": "entry.cgi", "minVersion": 1, "maxVersion": 2});
             }
         }
         apis
@@ -564,15 +598,24 @@ mod end_to_end_tests {
                 if params.get("account").is_some_and(|a| a == USERNAME)
                     && params.get("passwd").is_some_and(|p| p == PASSWORD)
                 {
-                    ok(json!({"sid": SID, "synotoken": "jeton"}))
+                    ok(json!({"sid": SID, "synotoken": TOKEN}))
                 } else {
                     fail(400)
                 }
             }
             _ if params.get("_sid").is_none_or(|sid| sid != SID) => fail(119),
-            ("SYNO.Core.System", "info") => ok(json!({"model": "DS920+", "up_time": "1:0:0"})),
+            // Ce que fait un vrai DSM sur une API de paquet : sans jeton anti-CSRF,
+            // ou à une version où la méthode n'existe pas, il répond 103 — le même
+            // code, deux causes, et c'est ce qui égare.
+            _ if api.starts_with("SYNO.ActiveBackup.")
+                && (params.get("SynoToken").is_none_or(|t| t != TOKEN)
+                    || params.get("version").is_none_or(|v| v != "1")) =>
+            {
+                fail(103)
+            }
+            ("SYNO.Core.System", "info") => ok(capture(SYSTEM_INFO)),
             ("SYNO.Core.System.Utilization", "get") => ok(json!({})),
-            ("SYNO.Storage.CGI.Storage", "load_info") => ok(json!({})),
+            ("SYNO.Storage.CGI.Storage", "load_info") => ok(capture(STORAGE)),
             ("SYNO.ActiveBackup.Task", "list") if stub.abb_installed => {
                 assert_eq!(params.get("load_result").map(String::as_str), Some("true"));
                 ok(json!({
@@ -680,6 +723,18 @@ mod end_to_end_tests {
             .find(|s| s.metric == "abb_task_last_status" && s.labels["task"] == "File server share")
             .unwrap();
         assert_eq!(fs.labels["source_type"], "file_server");
+
+        // Le faux NAS sert la vraie réponse d'un DSM 7.4 : l'interrogation doit en
+        // tirer les cinq disques, le groupe et le cache. C'est ce que la version
+        // précédente du modèle ne faisait pas — `load_info` échouait d'un bloc et
+        // seul `scrape_errors` en portait la trace.
+        let disques =
+            samples.iter().filter(|s| s.metric == "synology_disk_temperature_celsius").count();
+        assert_eq!(disques, 5, "les cinq baies du NAS capturé");
+        assert_eq!(scalaire(&samples, "synology_pool_status"), 0.0);
+        assert_eq!(scalaire(&samples, "synology_ssd_cache_status"), 0.0);
+        assert_eq!(scalaire(&samples, "synology_disk_remaining_life_percent"), 97.0);
+        assert_eq!(scalaire(&samples, "synology_temperature_warning"), 0.0);
     }
 
     #[tokio::test]

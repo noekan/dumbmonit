@@ -36,7 +36,7 @@
 //! | `ceph` | `true` | Santé Ceph ; silencieux si Ceph n'est pas installé. |
 //! | `updates` | `true` | Mises à jour en attente ; demande `Sys.Modify` sur `/nodes`, silencieux sinon. |
 //! | `certificates` | `true` | Expiration des certificats de chaque nœud. |
-//! | `guest_agent` | `true` | Détail des VM en marche (ballon, agent) et leurs systèmes de fichiers via l'agent QEMU ; demande `VM.Monitor`, silencieux sinon. |
+//! | `guest_agent` | `true` | Détail des VM en marche (ballon, agent) et leurs systèmes de fichiers via l'agent QEMU ; demande `VM.GuestAgent.Audit` (`VM.Monitor` avant Proxmox VE 9), silencieux sinon. |
 //! | `disks` | `true` | Disques physiques : santé SMART, usure, température. |
 //! | `zfs` | `true` | État et capacité des pools ZFS. |
 //! | `packages` | `true` | Versions des paquets Proxmox, pour signaler un changement entre deux interrogations. |
@@ -53,6 +53,8 @@
 mod apt;
 mod auth;
 mod backup;
+#[cfg(test)]
+mod capture;
 mod ceph;
 mod client;
 mod disks;
@@ -390,7 +392,7 @@ impl Collector for ProxmoxCollector {
                 )
             ),
             collect_backup_jobs(&pve, &options),
-            when(options.ceph, pve.get::<CephStatus>("/cluster/ceph/status", &[])),
+            when(options.ceph, pve.get_if_present::<CephStatus>("/cluster/ceph/status", &[])),
             collect_ceph_detail(&pve, &options, ceph_node.as_deref(), ts_ms),
             self.collect_rrd_export(&pve, &options, target.id, now_s),
             collect_nodes(&pve, &options, &node_list, guests_by_node, &budget, now_s, ts_ms),
@@ -433,11 +435,13 @@ impl Collector for ProxmoxCollector {
             None => {}
         }
 
-        // Ceph absent se manifeste par une erreur (500 « not initialized », 404) :
-        // ce n'est ni une panne ni une faute, juste une fonctionnalité non installée.
+        // Ceph absent se manifeste par une 500 « binary not installed:
+        // /usr/bin/ceph-mon » : ce n'est ni une panne ni une faute, juste une
+        // fonctionnalité non installée, que le client reconnaît comme telle.
         match ceph_status {
-            Some(Ok(status)) => samples.extend(ceph::ceph_samples(&status, ts_ms)),
-            Some(Err(error)) => debug!(target_id = target.id, %error, "pas de Ceph sur ce cluster"),
+            Some(Ok(Some(status))) => samples.extend(ceph::ceph_samples(&status, ts_ms)),
+            Some(Ok(None)) => debug!(target_id = target.id, "pas de Ceph sur ce cluster"),
+            Some(Err(error)) => debug!(target_id = target.id, %error, "état Ceph indisponible"),
             None => {}
         }
 
@@ -632,8 +636,10 @@ async fn collect_backup_jobs(
 /// Le détail de Ceph : OSD, pools, CephFS, drapeaux et sourdines.
 ///
 /// Rien ici ne compte comme erreur : sans Ceph installé, PVE répond 500
-/// « rados_connect failed », et `Datastore.Audit` n'est pas toujours accordé.
-/// Un cluster sans Ceph doit rester parfaitement silencieux.
+/// « binary not installed: /usr/bin/ceph-mon » (ou « rados_connect failed »
+/// quand les paquets sont là mais le cluster jamais initialisé), et
+/// `Datastore.Audit` n'est pas toujours accordé. Un cluster sans Ceph doit
+/// rester parfaitement silencieux.
 async fn collect_ceph_detail(
     pve: &PveClient,
     options: &Options,
@@ -651,32 +657,37 @@ async fn collect_ceph_detail(
         format!("/nodes/{node}/ceph/fs"),
     );
     let (osd, pools, filesystems, flags, mutes) = futures::join!(
-        pve.get::<CephOsdTree>(&osd_path, &[]),
-        pve.get::<Vec<CephPool>>(&pool_path, &[]),
-        pve.get::<Vec<CephFs>>(&fs_path, &[]),
-        pve.get::<Vec<CephFlag>>("/cluster/ceph/flags", &[]),
-        pve.get::<Vec<CephHealthMute>>("/cluster/ceph/health-mute", &[]),
+        pve.get_if_present::<CephOsdTree>(&osd_path, &[]),
+        pve.get_if_present::<Vec<CephPool>>(&pool_path, &[]),
+        pve.get_if_present::<Vec<CephFs>>(&fs_path, &[]),
+        pve.get_if_present::<Vec<CephFlag>>("/cluster/ceph/flags", &[]),
+        pve.get_if_present::<Vec<CephHealthMute>>("/cluster/ceph/health-mute", &[]),
     );
 
     let mut samples = Vec::new();
     match osd {
-        Ok(tree) => samples.extend(ceph::osd_samples(&tree, ts_ms)),
+        Ok(Some(tree)) => samples.extend(ceph::osd_samples(&tree, ts_ms)),
+        Ok(None) => return Vec::new(),
         Err(error) => debug!(node, %error, "arbre des OSD Ceph indisponible"),
     }
     match pools {
-        Ok(list) => samples.extend(ceph::pool_samples(&list, ts_ms)),
+        Ok(Some(list)) => samples.extend(ceph::pool_samples(&list, ts_ms)),
+        Ok(None) => {}
         Err(error) => debug!(node, %error, "pools Ceph indisponibles"),
     }
     match filesystems {
-        Ok(list) => samples.extend(ceph::fs_samples(&list, ts_ms)),
+        Ok(Some(list)) => samples.extend(ceph::fs_samples(&list, ts_ms)),
+        Ok(None) => {}
         Err(error) => debug!(node, %error, "systèmes de fichiers Ceph indisponibles"),
     }
     match flags {
-        Ok(list) => samples.extend(ceph::flag_samples(&list, ts_ms)),
+        Ok(Some(list)) => samples.extend(ceph::flag_samples(&list, ts_ms)),
+        Ok(None) => {}
         Err(error) => debug!(%error, "drapeaux Ceph indisponibles"),
     }
     match mutes {
-        Ok(list) => samples.extend(ceph::health_mute_samples(&list, ts_ms)),
+        Ok(Some(list)) => samples.extend(ceph::health_mute_samples(&list, ts_ms)),
+        Ok(None) => {}
         Err(error) => debug!(%error, "sourdines de santé Ceph indisponibles"),
     }
     samples
@@ -790,26 +801,29 @@ async fn fetch_guest_facts(
                 format!("/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces"),
             );
             let (os, addresses) = futures::join!(
-                pve.get::<AgentOsInfo>(&os_path, &[]),
-                pve.get::<AgentInterfaces>(&net_path, &[]),
+                pve.get_if_present::<AgentOsInfo>(&os_path, &[]),
+                pve.get_if_present::<AgentInterfaces>(&net_path, &[]),
             );
             let mut samples = Vec::new();
             match os {
-                Ok(info) => samples.extend(guest::os_samples(node, &entry, &info, ts_ms)),
+                Ok(Some(info)) => samples.extend(guest::os_samples(node, &entry, &info, ts_ms)),
+                Ok(None) => debug!(node, vmid, "agent QEMU arrêté : pas de système à lire"),
                 Err(error) => debug!(node, vmid, %error, "système de la VM non rapporté"),
             }
             match addresses {
-                Ok(list) => {
+                Ok(Some(list)) => {
                     samples.extend(guest::agent_address_samples(node, &entry, &list, ts_ms))
                 }
+                Ok(None) => debug!(node, vmid, "agent QEMU arrêté : pas d'adresse à lire"),
                 Err(error) => debug!(node, vmid, %error, "adresses de la VM non rapportées"),
             }
             samples
         }
         GuestKind::Lxc => {
             let path = format!("/nodes/{node}/lxc/{vmid}/interfaces");
-            match pve.get::<Vec<LxcInterface>>(&path, &[]).await {
-                Ok(list) => guest::lxc_address_samples(node, &entry, &list, ts_ms),
+            match pve.get_if_present::<Vec<LxcInterface>>(&path, &[]).await {
+                Ok(Some(list)) => guest::lxc_address_samples(node, &entry, &list, ts_ms),
+                Ok(None) => Vec::new(),
                 Err(error) => {
                     debug!(node, vmid, %error, "adresses du conteneur non rapportées");
                     Vec::new()
@@ -1080,21 +1094,10 @@ async fn collect_node(
             )
         ),
         when(options.disks, pve.get_unless::<Vec<DiskEntry>>(&disks_path, &[], &optional)),
-        // `zpool` absent : PVE répond 500. Ce n'est pas une panne du nœud, dont
-        // `/status` vient de répondre.
-        when(
-            options.zfs,
-            pve.get_unless::<Vec<ZfsPool>>(
-                &zfs_path,
-                &[],
-                &[
-                    StatusCode::FORBIDDEN,
-                    StatusCode::NOT_FOUND,
-                    StatusCode::NOT_IMPLEMENTED,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                ],
-            )
-        ),
+        // `zpool` absent : PVE répond 500 « binary not installed: /sbin/zpool ».
+        // Le client le lit comme une absence ; un 500 qui dit autre chose reste
+        // une erreur, sans quoi un nœud réellement cassé passerait inaperçu.
+        when(options.zfs, pve.get_unless::<Vec<ZfsPool>>(&zfs_path, &[], &optional)),
         when(options.packages, pve.get_unless::<Vec<AptVersion>>(&versions_path, &[], &optional)),
         when(
             options.subscription,
@@ -1265,7 +1268,10 @@ async fn collect_node(
     }
 
     match versions {
-        Some(Ok(Some(list))) => outcome.package_versions = Some(list),
+        Some(Ok(Some(list))) => {
+            outcome.samples.extend(apt::version_samples(name, &list, ts_ms));
+            outcome.package_versions = Some(list);
+        }
         Some(Ok(None)) => debug!(node = name, "versions des paquets non listées : droit manquant"),
         Some(Err(error)) => {
             outcome.errors += 1;
@@ -1349,14 +1355,20 @@ async fn collect_smart(
         async move {
             let _permit = semaphore.acquire().await.ok();
             let path = format!("/nodes/{node}/disks/smart");
-            (disk, pve.get::<SmartReport>(&path, &[("disk", disk.devpath.clone())]).await)
+            (
+                disk,
+                pve.get_if_present::<SmartReport>(&path, &[("disk", disk.devpath.clone())]).await,
+            )
         }
     }))
     .await;
 
     for (disk, result) in reports {
         match result {
-            Ok(report) => outcome.samples.extend(disks::smart_samples(node, disk, &report, ts_ms)),
+            Ok(Some(report)) => {
+                outcome.samples.extend(disks::smart_samples(node, disk, &report, ts_ms))
+            }
+            Ok(None) => debug!(node, disk = %disk.devpath, "disque muet sur SMART"),
             Err(error) => {
                 debug!(node, disk = %disk.devpath, %error, "rapport SMART indisponible");
             }
@@ -1367,7 +1379,7 @@ async fn collect_smart(
 /// Détail des machines virtuelles en marche : état courant, puis systèmes de
 /// fichiers pour celles dont l'agent QEMU est activé.
 ///
-/// Tout ici est facultatif et se dégrade sans bruit : `VM.Monitor` manquant
+/// Tout ici est facultatif et se dégrade sans bruit : `VM.GuestAgent.Audit` manquant
 /// (403), agent activé mais pas installé ou pas encore démarré (500 « not
 /// running »), machine qui vient de s'éteindre entre deux appels. Aucun de ces
 /// cas ne compte comme erreur de collecte — la liste des invités a déjà donné
@@ -1386,11 +1398,11 @@ async fn collect_guest_details(
             let _permit = semaphore.acquire().await.ok();
             let vmid = guest.vmid();
             let status_path = format!("/nodes/{node}/qemu/{vmid}/status/current");
-            let status = pve.get::<QemuStatus>(&status_path, &[]).await;
+            let status = pve.get_if_present::<QemuStatus>(&status_path, &[]).await;
             let fsinfo = match &status {
-                Ok(status) if status.agent_enabled() => {
+                Ok(Some(status)) if status.agent_enabled() => {
                     let path = format!("/nodes/{node}/qemu/{vmid}/agent/get-fsinfo");
-                    Some(pve.get::<AgentFsInfo>(&path, &[]).await)
+                    Some(pve.get_if_present::<AgentFsInfo>(&path, &[]).await)
                 }
                 _ => None,
             };
@@ -1401,17 +1413,28 @@ async fn collect_guest_details(
 
     for (guest, status, fsinfo) in details {
         match status {
-            Ok(status) => {
+            Ok(Some(status)) => {
                 outcome.samples.extend(guest::qemu_status_samples(node, guest, &status, ts_ms));
             }
+            Ok(None) => debug!(node, vmid = guest.vmid(), "VM disparue entre deux appels"),
             Err(error) => {
                 debug!(node, vmid = guest.vmid(), %error, "état détaillé de la VM indisponible");
             }
         }
+        // Agent déclaré dans les options de la VM mais arrêté : PVE répond 500
+        // « QEMU guest agent is not running ». C'est une absence, pas une
+        // erreur — mais elle mérite sa série, c'est elle qui explique à
+        // l'utilisateur pourquoi l'occupation disque manque.
         match fsinfo {
-            Some(Ok(info)) => outcome.samples.extend(guest::fs_samples(node, guest, &info, ts_ms)),
+            Some(Ok(Some(info))) => {
+                outcome.samples.extend(guest::fs_samples(node, guest, &info, ts_ms))
+            }
+            Some(Ok(None)) => {
+                debug!(node, vmid = guest.vmid(), "agent QEMU déclaré mais pas démarré");
+                outcome.samples.push(guest::agent_silent_sample(node, guest, ts_ms));
+            }
             Some(Err(error)) => {
-                debug!(node, vmid = guest.vmid(), %error, "agent QEMU muet ou droit VM.Monitor manquant");
+                debug!(node, vmid = guest.vmid(), %error, "agent QEMU muet ou droit VM.GuestAgent.Audit manquant");
                 outcome.samples.push(guest::agent_silent_sample(node, guest, ts_ms));
             }
             None => {}
@@ -1446,16 +1469,17 @@ async fn collect_snapshots(
             // et l'appel part alors sans attendre plutôt que d'être perdu.
             let _permit = semaphore.acquire().await.ok();
             let path = format!("/nodes/{node}/{}/{vmid}/snapshot", guest.kind.as_str());
-            (*vmid, guest, pve.get::<Vec<Snapshot>>(&path, &[]).await)
+            (*vmid, guest, pve.get_if_present::<Vec<Snapshot>>(&path, &[]).await)
         }
     }))
     .await;
 
     for (vmid, guest, result) in listings {
         match result {
-            Ok(list) => outcome
+            Ok(Some(list)) => outcome
                 .samples
                 .extend(snapshots::snapshot_samples(vmid, guest, &list, now_s, ts_ms)),
+            Ok(None) => debug!(node, vmid, "invité disparu avant la liste des instantanés"),
             Err(error) => {
                 outcome.errors += 1;
                 warn!(node, vmid, %error, "liste des instantanés indisponible");

@@ -1,0 +1,57 @@
+{
+ "data": {
+  "boot-info": {
+   "mode": "efi",
+   "secureboot": 0
+  },
+  "loadavg": [
+   "12.54",
+   "13.19",
+   "13.92"
+  ],
+  "uptime": 7467559,
+  "memory": {
+   "used": 179753701376,
+   "total": 270076751872,
+   "available": 90323050496,
+   "free": 20268367872
+  },
+  "cpu": 0,
+  "rootfs": {
+   "avail": 945775837184,
+   "free": 945775837184,
+   "total": 952455266304,
+   "used": 6679429120
+  },
+  "wait": 0,
+  "swap": {
+   "used": 0,
+   "total": 0,
+   "free": 0
+  },
+  "pveversion": "pve-manager/9.2.10/43df2e01f27a1a19",
+  "kversion": "Linux 7.0.6-2-pve #1 SMP PREEMPT_DYNAMIC PMX 7.0.6-2 (2026-05-29T11:08Z)",
+  "current-kernel": {
+   "release": "7.0.6-2-pve",
+   "sysname": "Linux",
+   "machine": "MACHINE-1",
+   "version": "#1 SMP PREEMPT_DYNAMIC PMX 7.0.6-2 (2026-05-29T11:08Z)"
+  },
+  "idle": 0,
+  "ksm": {
+   "shared": 0
+  },
+  "cpuinfo": {
+   "cores": 32,
+   "flags": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 cqm rdt_a rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local clzero irperf xsaveerptr rdpru wbnoinvd amd_ppin arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif v_spec_ctrl umip rdpid overflow_recov succor smca sev sev_es",
+   "model": "AMD EPYC 7532 32-Core Processor",
+   "sockets": 1,
+   "family": "23",
+   "hvm": "1",
+   "mhz": "2400.000",
+   "cpus": 64,
+   "user_hz": 100,
+   "vendor": "AuthenticAMD"
+  }
+ }
+}

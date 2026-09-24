@@ -1,0 +1,762 @@
+{
+ "data": {
+  "children": [
+   {
+    "name": "WEB01",
+    "type": "qemu",
+    "id": 101,
+    "leaf": 0,
+    "children": [
+     {
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "101:scsi0",
+      "name": "pool3:vm-101-disk-0",
+      "included": 1
+     }
+    ]
+   },
+   {
+    "name": "MTB01",
+    "type": "qemu",
+    "id": 105,
+    "leaf": 0,
+    "children": [
+     {
+      "leaf": 1,
+      "id": "105:scsi0",
+      "reason": "backup=yes",
+      "included": 1,
+      "name": "pool3:vm-105-disk-5"
+     },
+     {
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "105:scsi1",
+      "name": "pool3:vm-105-disk-6",
+      "included": 1
+     },
+     {
+      "included": 1,
+      "name": "pool3:vm-105-disk-4",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "105:efidisk0"
+     },
+     {
+      "name": "pool3:vm-105-disk-2",
+      "included": 1,
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "105:tpmstate0"
+     }
+    ]
+   },
+   {
+    "children": [
+     {
+      "name": "pool3:vm-108-disk-0",
+      "included": 1,
+      "leaf": 1,
+      "id": "108:scsi0",
+      "reason": "backup=yes"
+     }
+    ],
+    "leaf": 0,
+    "id": 108,
+    "type": "qemu",
+    "name": "FW02"
+   },
+   {
+    "id": 113,
+    "leaf": 0,
+    "children": [
+     {
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "113:scsi0",
+      "name": "pool3:vm-113-disk-0",
+      "included": 1
+     }
+    ],
+    "type": "qemu",
+    "name": "AIR01"
+   },
+   {
+    "leaf": 0,
+    "id": 122,
+    "children": [
+     {
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "122:scsi0",
+      "name": "pool3:vm-122-disk-1",
+      "included": 1
+     },
+     {
+      "included": 0,
+      "name": "pool3:vm-122-disk-3",
+      "leaf": 1,
+      "reason": "backup=no",
+      "id": "122:scsi1"
+     },
+     {
+      "name": "pool3:vm-122-disk-0",
+      "included": 1,
+      "leaf": 1,
+      "id": "122:efidisk0",
+      "reason": "backup=yes"
+     },
+     {
+      "included": 1,
+      "name": "pool3:vm-122-disk-2",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "122:tpmstate0"
+     }
+    ],
+    "type": "qemu",
+    "name": "AD02"
+   },
+   {
+    "type": "qemu",
+    "name": "LAC01",
+    "children": [
+     {
+      "leaf": 1,
+      "id": "127:scsi0",
+      "reason": "backup=yes",
+      "included": 1,
+      "name": "pool3:vm-127-disk-0"
+     }
+    ],
+    "leaf": 0,
+    "id": 127
+   },
+   {
+    "name": "MIS01",
+    "type": "qemu",
+    "leaf": 0,
+    "id": 131,
+    "children": [
+     {
+      "included": 1,
+      "name": "pool3:vm-131-disk-1",
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "131:scsi0"
+     }
+    ]
+   },
+   {
+    "id": 134,
+    "leaf": 0,
+    "children": [
+     {
+      "name": "pool3:vm-134-disk-1",
+      "included": 1,
+      "id": "134:scsi0",
+      "leaf": 1,
+      "reason": "backup=yes"
+     },
+     {
+      "included": 1,
+      "name": "pool3:vm-134-disk-0",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "134:efidisk0"
+     },
+     {
+      "included": 1,
+      "name": "pool3:vm-134-disk-2",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "134:tpmstate0"
+     }
+    ],
+    "type": "qemu",
+    "name": "LIC02"
+   },
+   {
+    "name": "ECO01",
+    "type": "qemu",
+    "children": [
+     {
+      "included": 1,
+      "name": "pool3:vm-137-disk-2",
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "137:scsi0"
+     },
+     {
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "137:scsi1",
+      "included": 1,
+      "name": "pool3:vm-137-disk-3"
+     },
+     {
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "137:efidisk0",
+      "name": "pool3:vm-137-disk-0",
+      "included": 1
+     },
+     {
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "137:tpmstate0",
+      "included": 1,
+      "name": "pool3:vm-137-disk-1"
+     }
+    ],
+    "id": 137,
+    "leaf": 0
+   },
+   {
+    "name": "MAIL01",
+    "type": "qemu",
+    "leaf": 0,
+    "id": 100,
+    "children": [
+     {
+      "included": 1,
+      "name": "pool1:vm-100-disk-2",
+      "id": "100:virtio0",
+      "leaf": 1,
+      "reason": "backup=yes"
+     },
+     {
+      "name": "pool1:vm-100-disk-3",
+      "included": 1,
+      "id": "100:virtio1",
+      "leaf": 1,
+      "reason": "backup=yes"
+     },
+     {
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "100:efidisk0",
+      "name": "pool1:vm-100-disk-0",
+      "included": 1
+     },
+     {
+      "included": 1,
+      "name": "pool1:vm-100-disk-1",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "100:tpmstate0"
+     }
+    ]
+   },
+   {
+    "type": "qemu",
+    "name": "AVE01",
+    "children": [
+     {
+      "leaf": 1,
+      "id": "104:scsi0",
+      "reason": "backup=yes",
+      "included": 1,
+      "name": "pool1:vm-104-disk-1"
+     },
+     {
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "104:efidisk0",
+      "included": 1,
+      "name": "pool1:vm-104-disk-0"
+     },
+     {
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "104:tpmstate0",
+      "included": 1,
+      "name": "pool1:vm-104-disk-2"
+     }
+    ],
+    "id": 104,
+    "leaf": 0
+   },
+   {
+    "type": "qemu",
+    "name": "ASA01",
+    "children": [
+     {
+      "id": "106:scsi0",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "name": "pool1:vm-106-disk-1",
+      "included": 1
+     },
+     {
+      "name": "pool1:vm-106-disk-3",
+      "included": 1,
+      "leaf": 1,
+      "id": "106:scsi1",
+      "reason": "backup=yes"
+     },
+     {
+      "leaf": 1,
+      "id": "106:efidisk0",
+      "reason": "backup=yes",
+      "name": "pool1:vm-106-disk-0",
+      "included": 1
+     },
+     {
+      "name": "pool1:vm-106-disk-2",
+      "included": 1,
+      "id": "106:tpmstate0",
+      "leaf": 1,
+      "reason": "backup=yes"
+     }
+    ],
+    "id": 106,
+    "leaf": 0
+   },
+   {
+    "children": [
+     {
+      "name": "pool1:vm-109-disk-0",
+      "included": 1,
+      "leaf": 1,
+      "id": "109:ide0",
+      "reason": "backup=yes"
+     }
+    ],
+    "id": 109,
+    "leaf": 0,
+    "name": "SAAS14",
+    "type": "qemu"
+   },
+   {
+    "type": "qemu",
+    "name": "SAAS04",
+    "id": 114,
+    "leaf": 0,
+    "children": [
+     {
+      "name": "pool1:vm-114-disk-0",
+      "included": 1,
+      "leaf": 1,
+      "id": "114:scsi0",
+      "reason": "backup=yes"
+     },
+     {
+      "id": "114:scsi1",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "name": "pool1:vm-114-disk-1",
+      "included": 1
+     }
+    ]
+   },
+   {
+    "name": "FED02",
+    "type": "qemu",
+    "leaf": 0,
+    "id": 115,
+    "children": [
+     {
+      "name": "pool1:vm-115-disk-1",
+      "included": 1,
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "115:scsi0"
+     },
+     {
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "115:scsi1",
+      "name": "pool1:vm-115-disk-3",
+      "included": 1
+     },
+     {
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "115:efidisk0",
+      "included": 1,
+      "name": "pool1:vm-115-disk-0"
+     },
+     {
+      "name": "pool1:vm-115-disk-2",
+      "included": 1,
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "115:tpmstate0"
+     }
+    ]
+   },
+   {
+    "id": 116,
+    "leaf": 0,
+    "children": [
+     {
+      "name": "pool1:vm-116-disk-1",
+      "included": 1,
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "116:scsi0"
+     },
+     {
+      "included": 1,
+      "name": "pool1:vm-116-disk-2",
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "116:scsi1"
+     },
+     {
+      "id": "116:efidisk0",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "name": "pool1:vm-116-disk-0",
+      "included": 1
+     },
+     {
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "116:tpmstate0",
+      "included": 1,
+      "name": "pool1:vm-116-disk-3"
+     }
+    ],
+    "name": "ETR02",
+    "type": "qemu"
+   },
+   {
+    "name": "AD01",
+    "type": "qemu",
+    "children": [
+     {
+      "id": "118:scsi0",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "name": "pool1:vm-118-disk-2",
+      "included": 1
+     },
+     {
+      "id": "118:scsi1",
+      "leaf": 1,
+      "reason": "backup=no",
+      "name": "pool1:vm-118-disk-3",
+      "included": 0
+     },
+     {
+      "leaf": 1,
+      "id": "118:efidisk0",
+      "reason": "backup=yes",
+      "name": "pool1:vm-118-disk-1",
+      "included": 1
+     },
+     {
+      "name": "pool1:vm-118-disk-0",
+      "included": 1,
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "118:tpmstate0"
+     }
+    ],
+    "leaf": 0,
+    "id": 118
+   },
+   {
+    "children": [
+     {
+      "name": "pool1:vm-125-disk-1",
+      "included": 1,
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "125:scsi0"
+     },
+     {
+      "leaf": 1,
+      "id": "125:efidisk0",
+      "reason": "backup=yes",
+      "included": 1,
+      "name": "pool1:vm-125-disk-0"
+     },
+     {
+      "included": 1,
+      "name": "pool1:vm-125-disk-2",
+      "id": "125:tpmstate0",
+      "leaf": 1,
+      "reason": "backup=yes"
+     }
+    ],
+    "leaf": 0,
+    "id": 125,
+    "type": "qemu",
+    "name": "SAAS15"
+   },
+   {
+    "children": [
+     {
+      "included": 1,
+      "name": "pool1:vm-128-disk-0",
+      "id": "128:scsi0",
+      "leaf": 1,
+      "reason": "backup=yes"
+     }
+    ],
+    "id": 128,
+    "leaf": 0,
+    "name": "FW01",
+    "type": "qemu"
+   },
+   {
+    "children": [
+     {
+      "included": 1,
+      "name": "pool1:vm-129-disk-1",
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "129:scsi0"
+     },
+     {
+      "included": 1,
+      "name": "pool1:vm-129-disk-3",
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "129:scsi1"
+     },
+     {
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "129:efidisk0",
+      "name": "pool1:vm-129-disk-0",
+      "included": 1
+     },
+     {
+      "included": 1,
+      "name": "pool1:vm-129-disk-2",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "129:tpmstate0"
+     }
+    ],
+    "id": 129,
+    "leaf": 0,
+    "name": "NOV02",
+    "type": "qemu"
+   },
+   {
+    "type": "qemu",
+    "name": "AIR01n",
+    "id": 135,
+    "leaf": 0,
+    "children": [
+     {
+      "name": "pool1:vm-135-disk-3",
+      "included": 1,
+      "leaf": 1,
+      "id": "135:scsi0",
+      "reason": "backup=yes"
+     },
+     {
+      "name": "pool1:vm-135-disk-2",
+      "included": 1,
+      "leaf": 1,
+      "id": "135:scsi1",
+      "reason": "backup=yes"
+     },
+     {
+      "name": "pool1:vm-135-disk-0",
+      "included": 1,
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "135:efidisk0"
+     },
+     {
+      "included": 1,
+      "name": "pool1:vm-135-disk-1",
+      "leaf": 1,
+      "id": "135:tpmstate0",
+      "reason": "backup=yes"
+     }
+    ]
+   },
+   {
+    "children": [
+     {
+      "id": "102:virtio0",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "included": 1,
+      "name": "pool2:vm-102-disk-2"
+     },
+     {
+      "name": "pool2:vm-102-disk-0",
+      "included": 1,
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "102:efidisk0"
+     },
+     {
+      "included": 1,
+      "name": "pool2:vm-102-disk-1",
+      "leaf": 1,
+      "id": "102:tpmstate0",
+      "reason": "backup=yes"
+     }
+    ],
+    "leaf": 0,
+    "id": 102,
+    "name": "SEG01",
+    "type": "qemu"
+   },
+   {
+    "children": [
+     {
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "103:virtio0",
+      "name": "pool2:vm-103-disk-2",
+      "included": 1
+     },
+     {
+      "name": "pool2:vm-103-disk-3",
+      "included": 1,
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "103:virtio1"
+     },
+     {
+      "id": "103:efidisk0",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "name": "pool2:vm-103-disk-0",
+      "included": 1
+     },
+     {
+      "name": "pool2:vm-103-disk-1",
+      "included": 1,
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "103:tpmstate0"
+     }
+    ],
+    "leaf": 0,
+    "id": 103,
+    "name": "ARCH01",
+    "type": "qemu"
+   },
+   {
+    "type": "qemu",
+    "name": "LOG01",
+    "id": 107,
+    "leaf": 0,
+    "children": [
+     {
+      "included": 1,
+      "name": "pool2:vm-107-disk-1",
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "107:scsi0"
+     },
+     {
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "107:scsi1",
+      "name": "pool2:vm-107-disk-2",
+      "included": 1
+     },
+     {
+      "included": 1,
+      "name": "pool2:vm-107-disk-0",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "107:efidisk0"
+     },
+     {
+      "included": 1,
+      "name": "pool2:vm-107-disk-3",
+      "id": "107:tpmstate0",
+      "leaf": 1,
+      "reason": "backup=yes"
+     }
+    ]
+   },
+   {
+    "name": "SAAS01",
+    "type": "qemu",
+    "children": [
+     {
+      "id": "110:ide0",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "included": 1,
+      "name": "pool2:vm-110-disk-0"
+     }
+    ],
+    "id": 110,
+    "leaf": 0
+   },
+   {
+    "name": "3RO01",
+    "type": "qemu",
+    "children": [
+     {
+      "included": 1,
+      "name": "pool2:vm-126-disk-0",
+      "id": "126:sata0",
+      "leaf": 1,
+      "reason": "backup=yes"
+     },
+     {
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "126:sata1",
+      "included": 1,
+      "name": "pool2:vm-126-disk-1"
+     }
+    ],
+    "id": 126,
+    "leaf": 0
+   },
+   {
+    "name": "LIC01",
+    "type": "qemu",
+    "children": [
+     {
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "133:scsi0",
+      "name": "pool2:vm-133-disk-1",
+      "included": 1
+     },
+     {
+      "reason": "backup=yes",
+      "leaf": 1,
+      "id": "133:efidisk0",
+      "name": "pool2:vm-133-disk-0",
+      "included": 1
+     },
+     {
+      "included": 1,
+      "name": "pool2:vm-133-disk-2",
+      "id": "133:tpmstate0",
+      "leaf": 1,
+      "reason": "backup=yes"
+     }
+    ],
+    "leaf": 0,
+    "id": 133
+   },
+   {
+    "type": "qemu",
+    "name": "CNT01",
+    "leaf": 0,
+    "id": 139,
+    "children": [
+     {
+      "included": 1,
+      "name": "pool2:vm-139-disk-0",
+      "leaf": 1,
+      "reason": "backup=yes",
+      "id": "139:scsi0"
+     }
+    ]
+   }
+  ]
+ }
+}

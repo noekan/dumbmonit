@@ -126,10 +126,21 @@ pub fn node_samples(node: &str, status: &NodeStatus, ts_ms: i64) -> Vec<Sample> 
     if let Some(cpu) = status.cpu {
         push(gauge("node_cpu_percent", cpu.0 * 100.0, ts_ms));
     }
+    // L'attente disque est comptée à part de `cpu` : un nœud à 10 % de
+    // processeur mais 30 % d'attente n'a pas de marge, il a un disque saturé.
+    if let Some(wait) = status.wait {
+        push(gauge("node_cpu_iowait_percent", wait.0 * 100.0, ts_ms));
+    }
     if let Some(info) = &status.cpuinfo
         && let Some(cpus) = info.cpus
     {
         push(gauge("node_cpu_count", cpus.0, ts_ms));
+    }
+    // Mémoire rendue par la déduplication de pages : elle explique qu'un nœud
+    // héberge plus que sa mémoire physique, et disparaît dès que les invités
+    // cessent de se ressembler.
+    if let Some(shared) = status.ksm.as_ref().and_then(|ksm| ksm.shared) {
+        push(gauge("node_ksm_shared_bytes", shared.0, ts_ms));
     }
     for (index, metric) in ["node_load1", "node_load5", "node_load15"].into_iter().enumerate() {
         if let Some(load) = status.loadavg.get(index) {
@@ -240,7 +251,17 @@ pub fn guest_samples(
         if let Some(mem) = guest.mem {
             push(gauge("guest_memory_used_bytes", mem.0, ts_ms));
         }
-        if let Some(value) = percent(guest.mem, guest.maxmem) {
+        if let Some(host) = guest.memhost {
+            push(gauge("guest_memory_host_bytes", host.0, ts_ms));
+        }
+        // Proxmox VE 9 renvoie dans `mem`, sur les inventaires, la mémoire
+        // occupée sur l'hôte : elle dépasse `maxmem` du surcoût d'émulation, et
+        // le pourcentage qu'on en tirerait resterait au-dessus de 100 % en
+        // permanence — l'alerte « mémoire presque pleine » crierait sur tout le
+        // parc, indéfiniment. Le taux honnête vient alors de `status/current`
+        // (`guest::qemu_status_samples`), qui distingue les deux mesures.
+        let host_side = guest.memhost.zip(guest.mem).is_some_and(|(host, mem)| host.0 == mem.0);
+        if let Some(value) = percent(guest.mem, guest.maxmem).filter(|_| !host_side) {
             push(gauge("guest_memory_percent", value, ts_ms));
         }
         // `disk` n'a de sens qu'en LXC : pour QEMU, PVE ne voit qu'un volume
@@ -294,6 +315,13 @@ pub fn storage_samples(node: &str, storages: &[StorageEntry], ts_ms: i64) -> Vec
         // Un stockage inactif renvoie des tailles nulles : les publier ferait
         // chuter les graphes de capacité à zéro le temps de l'indisponibilité.
         if !storage.is_active() {
+            continue;
+        }
+        // Même raison, autre cause : un datastore PBS monté sur un cluster PVE
+        // est actif mais annonce `total: 0` — PVE ne lit pas sa capacité. Trois
+        // jauges à zéro octet valent moins que rien : elles se dessinent, et on
+        // y lit une cible de sauvegarde vide.
+        if storage.total.is_some_and(|total| total.0 <= 0.0) {
             continue;
         }
         if let Some(total) = storage.total {

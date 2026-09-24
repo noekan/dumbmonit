@@ -1,0 +1,97 @@
+{
+ "data": [
+  {
+   "iface": "eno1",
+   "method": "manual",
+   "active": 1,
+   "altnames": [
+    "enp68s0f0",
+    "enx7cc255c0077c"
+   ],
+   "method6": "manual",
+   "exists": 1,
+   "type": "eth",
+   "families": [
+    "inet"
+   ],
+   "priority": 3
+  },
+  {
+   "cidr": "IP-2/24",
+   "active": 1,
+   "autostart": 1,
+   "comments": "mgmt\n",
+   "netmask": "24",
+   "priority": 11,
+   "gateway": "IP-4",
+   "families": [
+    "inet"
+   ],
+   "type": "vlan",
+   "address": "ADDRESS-3",
+   "method6": "manual",
+   "exists": null,
+   "method": "static",
+   "iface": "vmbr50.254",
+   "vlan-raw-device": "vmbr50",
+   "vlan-id": "254"
+  },
+  {
+   "method": "manual",
+   "iface": "enxbe3af2b6059f",
+   "type": "eth",
+   "families": [
+    "inet"
+   ],
+   "exists": 1,
+   "method6": "manual",
+   "priority": 5
+  },
+  {
+   "families": [
+    "inet"
+   ],
+   "type": "eth",
+   "method6": "manual",
+   "exists": 1,
+   "altnames": [
+    "enxece7a7182cdc"
+   ],
+   "priority": 6,
+   "active": 1,
+   "method": "manual",
+   "iface": "enp193s0f0",
+   "comments": "WAN\n"
+  },
+  {
+   "priority": 7,
+   "method6": "manual",
+   "exists": 1,
+   "altnames": [
+    "enxece7a7182cdd"
+   ],
+   "families": [
+    "inet"
+   ],
+   "type": "eth",
+   "iface": "enp193s0f1",
+   "method": "manual",
+   "active": 1
+  },
+  {
+   "method": "manual",
+   "iface": "eno2",
+   "type": "eth",
+   "families": [
+    "inet"
+   ],
+   "altnames": [
+    "enp68s0f1",
+    "enx7cc255c0077d"
+   ],
+   "exists": 1,
+   "method6": "manual",
+   "priority": 4
+  }
+ ]
+}

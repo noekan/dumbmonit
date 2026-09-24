@@ -1,0 +1,87 @@
+{
+ "data": {
+  "nics": {
+   "tap130i0": {
+    "netout": 125486083276949,
+    "netin": 646614146909593
+   }
+  },
+  "status": "running",
+  "ha": {
+   "managed": 0
+  },
+  "maxdisk": 34359738368,
+  "netin": 646614146909593,
+  "pressurecpusome": 0,
+  "proxmox-support": {
+   "pbs-dirty-bitmap": true,
+   "backup-access-api": true,
+   "pbs-dirty-bitmap-savevm": true,
+   "backup-fleecing": true,
+   "pbs-masterkey": true,
+   "pbs-library-version": "2.0.2 (594183eab9fa275f45dfff5dd15b16f150abd503)",
+   "backup-max-workers": true,
+   "pbs-dirty-bitmap-migration": true,
+   "query-bitmap-info": true
+  },
+  "name": "BKP01",
+  "netout": 125486083276949,
+  "mem": 25885843456,
+  "diskwrite": 517253062144,
+  "pressureiofull": 0,
+  "disk": 0,
+  "pressurecpufull": 0,
+  "diskread": 810821935616,
+  "pressurememoryfull": 0,
+  "vmid": 130,
+  "agent": 1,
+  "running-qemu": "11.0.0",
+  "uptime": 7467454,
+  "blockstat": {
+   "scsi0": {
+    "invalid_unmap_operations": 0,
+    "zone_append_bytes": 0,
+    "failed_flush_operations": 0,
+    "rd_bytes": 810821935616,
+    "invalid_rd_operations": 0,
+    "invalid_wr_operations": 0,
+    "failed_unmap_operations": 0,
+    "rd_operations": 72767420,
+    "zone_append_total_time_ns": 0,
+    "failed_wr_operations": 0,
+    "unmap_merged": 0,
+    "unmap_operations": 128424,
+    "rd_total_time_ns": 6708907616882,
+    "timed_stats": [],
+    "invalid_zone_append_operations": 0,
+    "unmap_total_time_ns": 794622345,
+    "wr_merged": 0,
+    "wr_operations": 68457707,
+    "wr_highest_offset": 30226235392,
+    "invalid_flush_operations": 0,
+    "wr_total_time_ns": 9721518049988,
+    "rd_merged": 0,
+    "zone_append_operations": 0,
+    "wr_bytes": 517253062144,
+    "flush_total_time_ns": 4892968127629,
+    "zone_append_merged": 0,
+    "account_invalid": true,
+    "idle_time_ns": 2575069525,
+    "flush_operations": 1177028,
+    "account_failed": true,
+    "failed_rd_operations": 0,
+    "failed_zone_append_operations": 0,
+    "unmap_bytes": 227828178944
+   }
+  },
+  "memhost": 25885843456,
+  "cpus": 4,
+  "maxmem": 25769803776,
+  "pid": 4726,
+  "running-machine": "RUNNING-MACH-1",
+  "cpu": 0.0879057882053381,
+  "pressurememorysome": 0,
+  "pressureiosome": 0,
+  "qmpstatus": "running"
+ }
+}

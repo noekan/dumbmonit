@@ -1,0 +1,25 @@
+{
+ "data": [
+  {
+   "name": "node3",
+   "quorum_votes": "1",
+   "ring0_addr": "RING0_ADDR-1",
+   "nodeid": "2",
+   "node": "node3"
+  },
+  {
+   "quorum_votes": "1",
+   "name": "node2",
+   "ring0_addr": "RING0_ADDR-2",
+   "nodeid": "1",
+   "node": "node2"
+  },
+  {
+   "nodeid": "4",
+   "node": "node1",
+   "ring0_addr": "RING0_ADDR-3",
+   "name": "node1",
+   "quorum_votes": "1"
+  }
+ ]
+}

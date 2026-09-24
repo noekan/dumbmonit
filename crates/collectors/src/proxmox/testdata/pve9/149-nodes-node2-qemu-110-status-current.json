@@ -1,0 +1,101 @@
+{
+ "data": {
+  "blockstat": {
+   "ide0": {
+    "invalid_zone_append_operations": 0,
+    "failed_zone_append_operations": 0,
+    "idle_time_ns": 1166967823,
+    "invalid_rd_operations": 0,
+    "account_invalid": true,
+    "failed_rd_operations": 0,
+    "rd_total_time_ns": 8245587744682,
+    "rd_operations": 7580182,
+    "timed_stats": [],
+    "flush_total_time_ns": 68855709,
+    "flush_operations": 6,
+    "unmap_bytes": 185397559296,
+    "zone_append_bytes": 0,
+    "zone_append_merged": 0,
+    "wr_merged": 0,
+    "zone_append_total_time_ns": 0,
+    "wr_bytes": 358849019904,
+    "invalid_flush_operations": 0,
+    "wr_highest_offset": 47876841472,
+    "failed_unmap_operations": 0,
+    "failed_flush_operations": 0,
+    "rd_merged": 0,
+    "rd_bytes": 169324192768,
+    "invalid_wr_operations": 0,
+    "unmap_merged": 0,
+    "zone_append_operations": 0,
+    "failed_wr_operations": 0,
+    "account_failed": true,
+    "wr_operations": 18597631,
+    "wr_total_time_ns": 585425442355030,
+    "unmap_total_time_ns": 20404199876,
+    "unmap_operations": 718948,
+    "invalid_unmap_operations": 0
+   }
+  },
+  "memhost": 8912474112,
+  "uptime": 12168132,
+  "pressureiosome": 0.03,
+  "maxdisk": 59055800320,
+  "qmpstatus": "running",
+  "proxmox-support": {
+   "pbs-dirty-bitmap-migration": true,
+   "pbs-masterkey": true,
+   "pbs-dirty-bitmap": true,
+   "backup-fleecing": true,
+   "query-bitmap-info": true,
+   "backup-access-api": true,
+   "pbs-library-version": "2.0.2 (594183eab9fa275f45dfff5dd15b16f150abd503)",
+   "backup-max-workers": true,
+   "pbs-dirty-bitmap-savevm": true
+  },
+  "balloon": 8589934592,
+  "agent": 1,
+  "pressureiofull": 0.03,
+  "maxmem": 8589934592,
+  "pressurememorysome": 0,
+  "netout": 36318729381,
+  "cpus": 4,
+  "pressurememoryfull": 0,
+  "running-qemu": "10.1.2",
+  "name": "SAAS01",
+  "pressurecpusome": 0,
+  "cpu": 0.0383866168499042,
+  "status": "running",
+  "pressurecpufull": 0,
+  "running-machine": "RUNNING-MACH-7",
+  "ballooninfo": {
+   "actual": 8589934592,
+   "max_mem": 8589934592,
+   "total_mem": 8589389824,
+   "major_page_faults": 3954297,
+   "mem_swapped_in": 182809128960,
+   "mem_swapped_out": 26099339264,
+   "last_update": 1790263360,
+   "minor_page_faults": 779750764,
+   "free_mem": 5880049664
+  },
+  "netin": 27651067703,
+  "tags": "saas",
+  "disk": 0,
+  "vmid": 110,
+  "pid": 5422,
+  "mem": 2709340160,
+  "ha": {
+   "managed": 0
+  },
+  "diskread": 169324192768,
+  "nics": {
+   "tap110i0": {
+    "netin": 27651067703,
+    "netout": 36318729381
+   }
+  },
+  "freemem": 5880049664,
+  "diskwrite": 358849019904
+ }
+}

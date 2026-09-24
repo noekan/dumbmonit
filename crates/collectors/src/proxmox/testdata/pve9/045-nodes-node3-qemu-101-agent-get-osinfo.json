@@ -1,0 +1,14 @@
+{
+ "data": {
+  "result": {
+   "version": "12 (bookworm)",
+   "kernel-version": "#1 SMP PREEMPT_DYNAMIC Debian 6.1.174-1 (2026-05-26)",
+   "pretty-name": "Debian GNU/Linux 12 (bookworm)",
+   "version-id": "12",
+   "machine": "MACHINE-1",
+   "kernel-release": "6.1.0-49-amd64",
+   "id": "debian",
+   "name": "Debian GNU/Linux"
+  }
+ }
+}

@@ -57,6 +57,9 @@
 mod abb;
 mod auth;
 mod backup;
+/// Relecture des réponses d'un vrai NAS, conservées dans `testdata/`.
+#[cfg(test)]
+mod capture;
 mod client;
 pub mod devices;
 mod error;
@@ -278,6 +281,8 @@ impl Collector for SynologyCollector {
             "inventaire du stockage",
             storage.map(|storage| {
                 let mut samples = metrics::volume_samples(&storage.volumes, ts_ms);
+                samples.extend(metrics::pool_samples(&storage.storage_pools, "pool", ts_ms));
+                samples.extend(metrics::pool_samples(&storage.ssd_caches, "ssd_cache", ts_ms));
                 samples.extend(metrics::disk_samples(&storage.disks, ts_ms));
                 if let Some(env) = &storage.env {
                     samples.extend(metrics::env_samples(env, ts_ms));

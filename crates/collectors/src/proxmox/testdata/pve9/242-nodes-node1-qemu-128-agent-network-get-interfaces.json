@@ -1,0 +1,544 @@
+{
+ "data": {
+  "result": [
+   {
+    "ip-addresses": [
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "ip-address": "IP-ADDRESS-68",
+      "prefix": 27
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 32,
+      "ip-address": "IP-ADDRESS-69"
+     },
+     {
+      "ip-address": "IP-ADDRESS-70",
+      "prefix": 32,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "prefix": 32,
+      "ip-address": "IP-ADDRESS-71",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "ip-address": "IP-ADDRESS-72",
+      "prefix": 32
+     },
+     {
+      "prefix": 32,
+      "ip-address": "IP-ADDRESS-73",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address": "IP-ADDRESS-74",
+      "prefix": 32,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "ip-address": "IP-ADDRESS-75",
+      "prefix": 32
+     },
+     {
+      "ip-address": "IP-ADDRESS-76",
+      "prefix": 32,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "prefix": 32,
+      "ip-address": "IP-ADDRESS-77",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address": "IP-ADDRESS-78",
+      "prefix": 32,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 32,
+      "ip-address": "IP-ADDRESS-79"
+     },
+     {
+      "ip-address": "IP-ADDRESS-80",
+      "prefix": 32,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address": "IP-ADDRESS-81",
+      "prefix": 32,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 32,
+      "ip-address": "IP-ADDRESS-82"
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 32,
+      "ip-address": "IP-ADDRESS-83"
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "ip-address": "IP-ADDRESS-84",
+      "prefix": 32
+     }
+    ],
+    "name": "vtnet0",
+    "hardware-address": "HARDWARE-ADD-37"
+   },
+   {
+    "hardware-address": "HARDWARE-ADD-38",
+    "name": "vtnet1"
+   },
+   {
+    "ip-addresses": [
+     {
+      "ip-address": "IP-ADDRESS-85",
+      "prefix": 30,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ],
+    "hardware-address": "HARDWARE-ADD-39",
+    "name": "vtnet2"
+   },
+   {
+    "ip-addresses": [
+     {
+      "prefix": 128,
+      "ip-address": "IP-ADDRESS-2",
+      "ip-address-type": "IP-ADDRESS-T-2"
+     },
+     {
+      "prefix": 64,
+      "ip-address": "IP-ADDRESS-86",
+      "ip-address-type": "IP-ADDRESS-T-2"
+     },
+     {
+      "prefix": 8,
+      "ip-address": "IP-ADDRESS-1",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ],
+    "name": "lo0",
+    "hardware-address": "HARDWARE-ADD-1"
+   },
+   {
+    "hardware-address": "HARDWARE-ADD-1",
+    "name": "enc0"
+   },
+   {
+    "hardware-address": "HARDWARE-ADD-1",
+    "name": "pflog0"
+   },
+   {
+    "name": "pfsync0",
+    "hardware-address": "HARDWARE-ADD-1"
+   },
+   {
+    "ip-addresses": [
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-87"
+     },
+     {
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-88",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ],
+    "name": "vlan0.6",
+    "hardware-address": "HARDWARE-ADD-38"
+   },
+   {
+    "hardware-address": "HARDWARE-ADD-38",
+    "name": "vlan0.7",
+    "ip-addresses": [
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-89"
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-90"
+     }
+    ]
+   },
+   {
+    "ip-addresses": [
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-91"
+     },
+     {
+      "ip-address": "IP-ADDRESS-92",
+      "prefix": 24,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ],
+    "hardware-address": "HARDWARE-ADD-38",
+    "name": "vlan0.8"
+   },
+   {
+    "ip-addresses": [
+     {
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-93",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address": "IP-ADDRESS-94",
+      "prefix": 24,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ],
+    "hardware-address": "HARDWARE-ADD-38",
+    "name": "vlan0.9"
+   },
+   {
+    "name": "wg0",
+    "hardware-address": "HARDWARE-ADD-1",
+    "ip-addresses": [
+     {
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-95",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ]
+   },
+   {
+    "name": "vlan0.10",
+    "hardware-address": "HARDWARE-ADD-38",
+    "ip-addresses": [
+     {
+      "ip-address": "IP-ADDRESS-96",
+      "prefix": 24,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-97",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ]
+   },
+   {
+    "ip-addresses": [
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "ip-address": "IP-ADDRESS-98",
+      "prefix": 24
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "ip-address": "IP-ADDRESS-99",
+      "prefix": 24
+     }
+    ],
+    "name": "vlan0.11",
+    "hardware-address": "HARDWARE-ADD-38"
+   },
+   {
+    "ip-addresses": [
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-100"
+     }
+    ],
+    "name": "ovpns3",
+    "hardware-address": "HARDWARE-ADD-1"
+   },
+   {
+    "hardware-address": "HARDWARE-ADD-38",
+    "name": "vlan0.12",
+    "ip-addresses": [
+     {
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-101",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-102"
+     }
+    ]
+   },
+   {
+    "name": "vlan0.13",
+    "hardware-address": "HARDWARE-ADD-38",
+    "ip-addresses": [
+     {
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-103",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address": "IP-ADDRESS-104",
+      "prefix": 24,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ]
+   },
+   {
+    "ip-addresses": [
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-105"
+     }
+    ],
+    "hardware-address": "HARDWARE-ADD-1",
+    "name": "ovpns7"
+   },
+   {
+    "hardware-address": "HARDWARE-ADD-38",
+    "name": "vlan0.14",
+    "ip-addresses": [
+     {
+      "ip-address": "IP-ADDRESS-106",
+      "prefix": 24,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "ip-address": "IP-ADDRESS-107",
+      "prefix": 24
+     }
+    ]
+   },
+   {
+    "ip-addresses": [
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-108"
+     }
+    ],
+    "name": "ovpns8",
+    "hardware-address": "HARDWARE-ADD-1"
+   },
+   {
+    "ip-addresses": [
+     {
+      "ip-address": "IP-ADDRESS-109",
+      "prefix": 24,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-110"
+     }
+    ],
+    "hardware-address": "HARDWARE-ADD-38",
+    "name": "vlan0.15"
+   },
+   {
+    "ip-addresses": [
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "ip-address": "IP-ADDRESS-111",
+      "prefix": 24
+     }
+    ],
+    "name": "ovpns9",
+    "hardware-address": "HARDWARE-ADD-1"
+   },
+   {
+    "name": "ovpns10",
+    "hardware-address": "HARDWARE-ADD-1",
+    "ip-addresses": [
+     {
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-112",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ]
+   },
+   {
+    "ip-addresses": [
+     {
+      "ip-address": "IP-ADDRESS-113",
+      "prefix": 24,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-114"
+     }
+    ],
+    "hardware-address": "HARDWARE-ADD-38",
+    "name": "vlan0.150"
+   },
+   {
+    "hardware-address": "HARDWARE-ADD-1",
+    "name": "ovpns4",
+    "ip-addresses": [
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "ip-address": "IP-ADDRESS-115",
+      "prefix": 24
+     }
+    ]
+   },
+   {
+    "name": "vlan0.201",
+    "hardware-address": "HARDWARE-ADD-38",
+    "ip-addresses": [
+     {
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-116",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-117",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ]
+   },
+   {
+    "hardware-address": "HARDWARE-ADD-1",
+    "name": "ovpns2",
+    "ip-addresses": [
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "ip-address": "IP-ADDRESS-118",
+      "prefix": 24
+     }
+    ]
+   },
+   {
+    "hardware-address": "HARDWARE-ADD-1",
+    "name": "ovpns5",
+    "ip-addresses": [
+     {
+      "ip-address": "IP-ADDRESS-119",
+      "prefix": 24,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ]
+   },
+   {
+    "name": "vlan0.202",
+    "hardware-address": "HARDWARE-ADD-38",
+    "ip-addresses": [
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "ip-address": "IP-ADDRESS-120",
+      "prefix": 24
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-121"
+     }
+    ]
+   },
+   {
+    "ip-addresses": [
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-122"
+     }
+    ],
+    "hardware-address": "HARDWARE-ADD-1",
+    "name": "ovpns6"
+   },
+   {
+    "ip-addresses": [
+     {
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-123",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "ip-address": "IP-ADDRESS-124",
+      "prefix": 24
+     }
+    ],
+    "name": "vlan0.206",
+    "hardware-address": "HARDWARE-ADD-38"
+   },
+   {
+    "ip-addresses": [
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "ip-address": "IP-ADDRESS-125",
+      "prefix": 24
+     },
+     {
+      "ip-address-type": "IP-ADDRESS-T-1",
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-126"
+     }
+    ],
+    "name": "vlan0.209",
+    "hardware-address": "HARDWARE-ADD-38"
+   },
+   {
+    "hardware-address": "HARDWARE-ADD-38",
+    "name": "vlan0.254",
+    "ip-addresses": [
+     {
+      "ip-address": "IP-ADDRESS-127",
+      "prefix": 24,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     },
+     {
+      "ip-address": "IP-ADDRESS-128",
+      "prefix": 24,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ]
+   },
+   {
+    "ip-addresses": [
+     {
+      "ip-address": "IP-ADDRESS-129",
+      "prefix": 24,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ],
+    "hardware-address": "HARDWARE-ADD-1",
+    "name": "ovpns11"
+   },
+   {
+    "ip-addresses": [
+     {
+      "prefix": 24,
+      "ip-address": "IP-ADDRESS-130",
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ],
+    "name": "ovpns12",
+    "hardware-address": "HARDWARE-ADD-1"
+   },
+   {
+    "name": "vlan0.17",
+    "hardware-address": "HARDWARE-ADD-38",
+    "ip-addresses": [
+     {
+      "ip-address": "IP-ADDRESS-131",
+      "prefix": 24,
+      "ip-address-type": "IP-ADDRESS-T-1"
+     }
+    ]
+   }
+  ]
+ }
+}

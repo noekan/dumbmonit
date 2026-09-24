@@ -7,6 +7,32 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Synology DSM 7.4, checked against a real NAS.** A read-only capture of a
+  production DiskStation is now a test fixture, and it exposed a silent break:
+  on DSM 7.2 and later a disk's remaining life arrives as an object rather than
+  a number, which made the whole storage inventory unreadable — no volumes, no
+  disks, no temperatures, no SMART, on every up-to-date NAS. Two more renamed
+  fields were just as quiet: the overheating flag (`temperature_warning`) and
+  DSM's bad-sector verdict (`sb_days_left_critical`), without which two of the
+  built-in disk rules could never fire. All of them are now read in both their
+  old and new forms. New series from the same call, which was already paying
+  for them: `pool_status`, `pool_failed_disks`, `pool_total/used_bytes` and the
+  same four for SSD caches, with a **Synology storage pool degraded** rule — a
+  RAID 5 that loses a disk shows there first, because DSM keeps the volume on
+  top of it at "normal" while it rebuilds.
+
+- **Proxmox VE 9, checked against a real cluster.** The collector was replayed
+  against a capture of a three-node production cluster, and that capture is now
+  a test fixture: every response is parsed by the real code, so a field Proxmox
+  renames shows up as a failing test rather than an empty panel. New series,
+  all from calls already made: `node_cpu_iowait_percent` (time a node spends
+  waiting on its disks), `node_ksm_shared_bytes` (memory reclaimed by page
+  deduplication), `node_pve_packages_upgradable` and `node_reboot_required` (a
+  newer kernel installed but not yet booted — both readable without the
+  `Sys.Modify` privilege that `apt/update` demands), `ha_fencing_armed`
+  (Proxmox VE 9 says whether the watchdog will actually fence),
+  `guest_memory_host_bytes` and `guest_running_qemu_info` (the QEMU a VM was
+  started with, which a live migration does not refresh).
 - **Maintenance windows that survive the clock change.** A window can now
   recur **monthly** — on days of the month ("the 1st and the 15th") or on a
   weekday of the month ("the first Sunday", "the last Friday") — with a start
@@ -219,6 +245,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Proxmox: a cluster without Ceph, or a VM whose guest agent is stopped, is no
+  longer reported as a failure.** Proxmox answers HTTP 500 for "this feature is
+  not installed", the same code it uses for a broken node; the collector now
+  tells the two apart from the message and stays silent on absence.
+- **Proxmox: VM memory no longer reads above 100%.** Proxmox VE 9 reports, in
+  the cluster inventory, the memory a VM takes on the host — overhead included,
+  so above its allocation. The "memory almost full" alert would have fired on
+  almost every VM of a PVE 9 cluster. The percentage now comes from the guest's
+  own view; the host figure is published separately as `guest_memory_host_bytes`.
+- **Proxmox: SAS and SATA disks now report their temperature.** Their SMART
+  report words it differently from an NVMe, and the line was being skipped.
+- **Proxmox: a Proxmox Backup Server datastore no longer shows as an empty
+  storage.** PVE reports no capacity for it; three zero-byte gauges read as a
+  backup target with nothing in it.
 - The server accepted a command report of any size from an agent. It is now cut
   to the last 4 KB like the agent's own cap, with
   `[truncated by the server, beginning dropped]` at the front so the report says

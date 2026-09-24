@@ -1,0 +1,42 @@
+{
+ "data": [
+  {
+   "quorate": 1,
+   "id": "cluster",
+   "nodes": 3,
+   "version": 17,
+   "type": "cluster",
+   "name": "homelab"
+  },
+  {
+   "name": "node3",
+   "id": "node/node3",
+   "nodeid": 2,
+   "level": "",
+   "ip": "IP-1",
+   "type": "node",
+   "online": 1,
+   "local": 0
+  },
+  {
+   "name": "node1",
+   "ip": "IP-2",
+   "level": "",
+   "nodeid": 4,
+   "id": "node/node1",
+   "local": 1,
+   "type": "node",
+   "online": 1
+  },
+  {
+   "name": "node2",
+   "ip": "IP-3",
+   "level": "",
+   "nodeid": 1,
+   "id": "node/node2",
+   "local": 0,
+   "type": "node",
+   "online": 1
+  }
+ ]
+}

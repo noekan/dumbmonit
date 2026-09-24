@@ -1806,6 +1806,26 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "dumbmonit_synology_volume_status",
             )
         },
+        // Un groupe de stockage se dégrade avant le volume posé dessus : sur un
+        // RAID 5 qui perd un disque, DSM laisse le volume en « normal » tant que
+        // la reconstruction tient. Sans cette règle, la perte de redondance ne se
+        // voit qu'au second disque — c'est-à-dire trop tard.
+        Rule {
+            description: "This storage pool is degraded or crashed: a disk failed and the \
+                          redundancy is gone or rebuilding."
+                .to_string(),
+            operator: Operator::Ge,
+            threshold: 2.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "synology_pool_degraded",
+                "Synology storage pool degraded",
+                RuleKind::Threshold,
+                "dumbmonit_synology_pool_status or dumbmonit_synology_ssd_cache_status",
+            )
+        },
         Rule {
             description: "Volume 90% full or more.".to_string(),
             operator: Operator::Ge,
@@ -2100,6 +2120,8 @@ mod tests {
             "dumbmonit_synology_disk_unc_count",
             "dumbmonit_synology_disk_remaining_life_percent",
             "dumbmonit_synology_volume_status",
+            "dumbmonit_synology_pool_status",
+            "dumbmonit_synology_ssd_cache_status",
             "dumbmonit_synology_volume_used_percent",
             "dumbmonit_synology_disk_temperature_celsius",
             "dumbmonit_synology_temperature_warning",

@@ -8,7 +8,8 @@
 use dumbmonit_proto::{MetricKind, Sample};
 
 use super::model::{
-    CpuUsage, Disk, MemoryUsage, Num, StorageEnv, StorageInfo, SystemInfo, Utilization, Volume,
+    CpuUsage, Disk, MemoryUsage, Num, Pool, RemainLife, StorageEnv, StorageInfo, SystemInfo,
+    Utilization, Volume,
 };
 
 /// Préfixe commun à toutes les métriques de l'intégration.
@@ -316,6 +317,52 @@ pub fn volume_samples(volumes: &[Volume], ts_ms: i64) -> Vec<Sample> {
     samples
 }
 
+/// Groupes de stockage et caches SSD de `load_info`.
+///
+/// Le même tableau sert aux deux, `famille` distinguant la métrique publiée. Ils
+/// arrivent dans la réponse déjà demandée pour les volumes : les lire ne coûte
+/// pas un appel de plus, et un groupe dégradé se voit là avant que le volume posé
+/// dessus ne change d'état — sur un RAID 5 qui perd un disque, le volume reste
+/// `normal` tant que la reconstruction tient.
+pub fn pool_samples(pools: &[Pool], famille: &str, ts_ms: i64) -> Vec<Sample> {
+    let mut samples = Vec::new();
+
+    for pool in pools {
+        let name = match clean(&pool.desc) {
+            libelle if libelle.is_empty() => pool.id.clone(),
+            libelle => libelle,
+        };
+        let raid_type = clean(&pool.device_type);
+        let mut push = |sample: Sample| {
+            samples.push(
+                sample
+                    .with_label(famille.to_string(), pool.id.clone())
+                    .with_label("name", name.clone())
+                    .with_label("raid_type", raid_type.clone()),
+            );
+        };
+
+        let status = pool.status.clone().unwrap_or_else(|| "unknown".to_string());
+        push(
+            gauge(&format!("{famille}_status"), severity(&status), ts_ms)
+                .with_label("status", status),
+        );
+        if let Some(failed) = pool.disk_failure_number {
+            push(gauge(&format!("{famille}_failed_disks"), failed.0, ts_ms));
+        }
+
+        let Some(size) = &pool.size else { continue };
+        if let Some(total) = size.total {
+            push(gauge(&format!("{famille}_total_bytes"), total.0, ts_ms));
+        }
+        if let Some(used) = size.used {
+            push(gauge(&format!("{famille}_used_bytes"), used.0, ts_ms));
+        }
+    }
+
+    samples
+}
+
 /// Disques de `SYNO.Storage.CGI.Storage&method=load_info`.
 ///
 /// C'est la partie la plus utile de l'intégration : un disque qui chauffe ou dont
@@ -362,16 +409,25 @@ pub fn disk_samples(disks: &[Disk], ts_ms: i64) -> Vec<Sample> {
         // Ces deux drapeaux sont les signaux de préfaillance les plus directs que
         // DSM expose : ils sont publiés même à zéro, pour que leur passage à 1 soit
         // visible dans une règle d'alerte.
-        if disk.exceed_bad_sector_thr.is_some() {
-            push(gauge("disk_bad_sector_exceeded", flag_value(disk.exceed_bad_sector_thr), ts_ms));
-        }
-        if disk.below_remain_life_thr.is_some() {
-            push(gauge("disk_life_below_threshold", flag_value(disk.below_remain_life_thr), ts_ms));
+        //
+        // Chacun se lit de deux champs : DSM 7.4 a retiré `exceed_bad_sector_thr`
+        // et `remain_life` scalaire au profit de `sb_days_left_critical` et
+        // `remain_life_danger`. La série garde son nom — c'est la même question
+        // posée au NAS — et le point n'existe que si le NAS répond à l'une des
+        // deux formes.
+        for (metric, drapeaux) in [
+            ("disk_bad_sector_exceeded", [disk.exceed_bad_sector_thr, disk.sb_days_left_critical]),
+            ("disk_life_below_threshold", [disk.below_remain_life_thr, disk.remain_life_danger]),
+        ] {
+            if drapeaux.iter().any(Option::is_some) {
+                let leve = drapeaux.iter().any(|drapeau| Num::flag(*drapeau));
+                push(gauge(metric, if leve { 1.0 } else { 0.0 }, ts_ms));
+            }
         }
         // L'usure d'un SSD : DSM donne `-1` pour un disque mécanique, qui n'a
         // pas de durée de vie déclarée — pas de point plutôt qu'un -1 % absurde.
-        if let Some(life) = disk.remain_life.filter(|n| (0.0..=100.0).contains(&n.0)) {
-            push(gauge("disk_remaining_life_percent", life.0, ts_ms));
+        if let Some(life) = disk.remain_life.and_then(RemainLife::percent) {
+            push(gauge("disk_remaining_life_percent", life, ts_ms));
         }
         // Publié même à zéro : c'est sa croissance qu'une règle surveille.
         if let Some(unc) = disk.unc.filter(|n| n.0 >= 0.0) {
@@ -440,6 +496,16 @@ pub fn storage_health_sample(storage: &StorageInfo, ts_ms: i64) -> Sample {
                 severity(disk.smart_status.as_deref().unwrap_or("unknown")),
             ]
         }))
+        // Les groupes comptent aussi : un RAID 5 qui perd un disque laisse le
+        // volume en `normal` tant que la reconstruction tient, et le verdict
+        // d'ensemble mentirait s'il ne regardait que les volumes.
+        .chain(
+            storage
+                .storage_pools
+                .iter()
+                .chain(storage.ssd_caches.iter())
+                .map(|pool| severity(pool.status.as_deref().unwrap_or("unknown"))),
+        )
         .fold(systeme, f64::max);
 
     gauge("storage_health", pire, ts_ms)

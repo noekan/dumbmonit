@@ -82,7 +82,7 @@ fn now_secs() -> u64 {
 }
 
 /// Enrôle et active le second facteur de l'admin ; rend le secret et les codes.
-async fn enable_totp(app: &TestApp, cookie: &str) -> (Vec<u8>, Vec<String>) {
+async fn enable_totp(app: &TestApp, cookie: &str) -> (Vec<u8>, Vec<String>, String) {
     let refused =
         app.post("/api/auth/totp/enroll", json!({ "password": "pas-le-bon" }), Some(cookie)).await;
     assert_eq!(refused.status, StatusCode::UNAUTHORIZED, "{}", refused.body);
@@ -110,6 +110,7 @@ async fn enable_totp(app: &TestApp, cookie: &str) -> (Vec<u8>, Vec<String>) {
     );
 
     let code = totp::code_at(&secret, now_secs());
+    let consomme = code.clone();
     let verified = app.post("/api/auth/totp/verify", json!({ "code": code }), Some(cookie)).await;
     assert_eq!(verified.status, StatusCode::OK, "{}", verified.body);
     let codes: Vec<String> = verified.body["recovery_codes"]
@@ -124,14 +125,33 @@ async fn enable_totp(app: &TestApp, cookie: &str) -> (Vec<u8>, Vec<String>) {
     assert_eq!(status.body["enabled"], json!(true));
     assert_eq!(status.body["recovery_codes_left"], json!(8));
     assert_eq!(app.get("/api/auth/me", Some(cookie)).await.body["totp_enabled"], json!(true));
-    (secret, codes)
+    (secret, codes, consomme)
+}
+
+/// Un code que la fenêtre d'horloge accepte et qui n'a pas déjà servi.
+///
+/// Le pas courant, le suivant et le précédent sont tous les trois valides ;
+/// on prend le premier qui diffère du code consommé. Recalculer « le pas
+/// suivant » à l'aveugle rendait le test dépendant de l'instant où il tombe :
+/// à cheval sur une frontière de trente secondes, le code prétendument rejoué
+/// n'était plus celui qui avait servi.
+fn code_inutilise(secret: &[u8], consomme: &str) -> String {
+    let now = now_secs();
+    for delta in [30, 0, u64::MAX] {
+        let at = if delta == u64::MAX { now.saturating_sub(30) } else { now + delta };
+        let code = totp::code_at(secret, at);
+        if code != consomme {
+            return code;
+        }
+    }
+    unreachable!("trois pas distincts ne peuvent pas donner trois fois le même code")
 }
 
 #[tokio::test]
 async fn two_factor_makes_the_login_a_two_step_dance() {
     let app = TestApp::configured().await;
     let cookie = app.admin_cookie().await;
-    let (secret, codes) = enable_totp(&app, &cookie).await;
+    let (secret, codes, consomme) = enable_totp(&app, &cookie).await;
 
     // Le mot de passe seul n'ouvre plus de session : il ouvre une attente.
     let first = app.login_as("admin", PASSWORD).await;
@@ -153,13 +173,13 @@ async fn two_factor_makes_the_login_a_two_step_dance() {
         .await;
     assert_eq!(unknown.status, StatusCode::UNAUTHORIZED);
 
-    // Le code qui a activé le second facteur a déjà servi : celui du pas
-    // suivant, que la fenêtre d'horloge accepte, ouvre la session.
-    let used = totp::code_at(&secret, now_secs());
-    let reused =
-        app.post("/api/auth/login/totp", json!({ "pending": pending, "code": used }), None).await;
+    // Le code qui a activé le second facteur a déjà servi : un autre code de
+    // la fenêtre, lui, ouvre la session.
+    let reused = app
+        .post("/api/auth/login/totp", json!({ "pending": pending, "code": consomme.clone() }), None)
+        .await;
     assert_eq!(reused.status, StatusCode::UNAUTHORIZED, "{}", reused.body);
-    let code = totp::code_at(&secret, now_secs() + 30);
+    let code = code_inutilise(&secret, &consomme);
     let second =
         app.post("/api/auth/login/totp", json!({ "pending": pending, "code": code }), None).await;
     assert_eq!(second.status, StatusCode::NO_CONTENT, "{}", second.body);
@@ -222,7 +242,7 @@ async fn two_factor_makes_the_login_a_two_step_dance() {
 async fn too_many_wrong_codes_cancel_the_pending_login() {
     let app = TestApp::configured().await;
     let cookie = app.admin_cookie().await;
-    let (secret, _) = enable_totp(&app, &cookie).await;
+    let (secret, _, _) = enable_totp(&app, &cookie).await;
 
     let pending =
         app.login_as("admin", PASSWORD).await.body["pending"].as_str().unwrap().to_string();

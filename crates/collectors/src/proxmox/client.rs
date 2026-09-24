@@ -32,12 +32,15 @@ pub struct PveClient {
 /// `ProbeError`, sauf pour décider qu'un 403 ou un 501 est un cas prévu.
 struct Failure {
     status: Option<StatusCode>,
+    /// Le serveur a répondu « cette fonctionnalité n'est pas là » plutôt que
+    /// « je suis en panne » — voir [`absence_marker`].
+    absent: bool,
     error: ProbeError,
 }
 
 impl From<ProbeError> for Failure {
     fn from(error: ProbeError) -> Self {
-        Self { status: None, error }
+        Self { status: None, absent: false, error }
     }
 }
 
@@ -67,6 +70,10 @@ impl PveClient {
     /// l'installation (404 ou 501 sur la réplication d'une machine isolée). Dans
     /// les deux cas, il n'y a rien à compter comme erreur ni à journaliser au-delà
     /// du niveau `debug`.
+    ///
+    /// Les 500 qui décrivent une absence (voir [`absence_marker`]) donnent
+    /// toujours `Ok(None)`, sans avoir à les énumérer : Proxmox ne réserve pas
+    /// de statut à « pas installé ».
     pub async fn get_unless<T: DeserializeOwned>(
         &self,
         path: &str,
@@ -75,11 +82,26 @@ impl PveClient {
     ) -> Result<Option<T>, ProbeError> {
         match self.fetch(path, query).await {
             Ok(data) => Ok(Some(data)),
-            Err(failure) if failure.status.is_some_and(|status| expected.contains(&status)) => {
+            Err(failure)
+                if failure.absent
+                    || failure.status.is_some_and(|status| expected.contains(&status)) =>
+            {
                 Ok(None)
             }
             Err(failure) => Err(failure.error),
         }
+    }
+
+    /// Comme [`get`](Self::get), pour un endpoint dont l'absence est un cas
+    /// normal : Ceph non installé, agent QEMU arrêté, invité disparu entre deux
+    /// appels. `Ok(None)` veut dire « pas là », et seule une vraie panne reste
+    /// une erreur.
+    pub async fn get_if_present<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<Option<T>, ProbeError> {
+        self.get_unless(path, query, &[]).await
     }
 
     async fn fetch<T: DeserializeOwned>(
@@ -100,7 +122,11 @@ impl PveClient {
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(Failure { status: Some(status), error: status_error(status, &body, path) });
+            return Err(Failure {
+                status: Some(status),
+                absent: absence_marker(status, &body).is_some(),
+                error: status_error(status, &body, path),
+            });
         }
 
         let body =
@@ -278,8 +304,46 @@ fn cause_chain(error: &reqwest::Error) -> String {
     message
 }
 
+/// Tournures par lesquelles Proxmox dit « cette fonctionnalité n'est pas là ».
+///
+/// L'API ne réserve aucun statut à l'absence : elle répond 500 avec le message
+/// de l'outil qu'elle n'a pas pu lancer. Un cluster sans Ceph rend
+/// `binary not installed: /usr/bin/ceph-mon`, une VM dont l'agent est arrêté
+/// `QEMU guest agent is not running`, un nœud sans ZFS
+/// `binary not installed: /sbin/zpool`. Les reconnaître est la seule façon de
+/// distinguer « pas installé » de « en panne », qui partagent le même code.
+///
+/// Comparées en minuscules, sur le corps entier : le message utile est parfois
+/// noyé dans une enveloppe JSON ou une page HTML.
+const ABSENCE_MARKERS: [&str; 9] = [
+    // Ceph, ZFS, LVM… : l'exécutable n'est pas sur le disque.
+    "binary not installed",
+    "is not installed",
+    "command not found",
+    // Ceph installé mais jamais initialisé.
+    "rados_connect failed",
+    "not initialized",
+    // Agent QEMU : absent du système invité, arrêté, ou muet.
+    "guest agent is not running",
+    "agent is not enabled",
+    "qga command",
+    "qmp command",
+];
+
+/// Le motif d'absence trouvé dans le corps d'une réponse en échec.
+///
+/// Réservé aux 5xx : un 404 ou un 403 se lit déjà à son statut, et le corps
+/// d'une réponse réussie ne veut rien dire ici.
+pub(super) fn absence_marker(status: StatusCode, body: &str) -> Option<&'static str> {
+    if !status.is_server_error() {
+        return None;
+    }
+    let body = body.to_ascii_lowercase();
+    ABSENCE_MARKERS.into_iter().find(|marker| body.contains(marker))
+}
+
 /// Traduit un code de statut HTTP en `ProbeError`.
-fn status_error(status: StatusCode, body: &str, path: &str) -> ProbeError {
+pub(super) fn status_error(status: StatusCode, body: &str, path: &str) -> ProbeError {
     match status {
         StatusCode::UNAUTHORIZED => ProbeError::Auth(
             "Proxmox refused authentication: invalid or revoked token, or wrong \
@@ -290,6 +354,12 @@ fn status_error(status: StatusCode, body: &str, path: &str) -> ProbeError {
             "Insufficient permissions on {path}: grant at least the PVEAuditor role \
              on \"/\" to the user or token"
         )),
+        // Une 500 qui dit « pas installé » ou « pas démarré » décrit une
+        // fonctionnalité absente, pas une panne : elle ne doit jamais réveiller
+        // personne, même si l'appelant la traite comme une erreur ordinaire.
+        s if absence_marker(s, body).is_some() => {
+            ProbeError::Protocol(format!("{path}: {} {}", s.as_u16(), summarize(body)))
+        }
         // La 5xx recouvre les codes 59x du proxy Proxmox, qui signalent un nœud du
         // cluster qui ne répond pas — donc bien une indisponibilité.
         s if s.is_server_error() => {
@@ -361,6 +431,88 @@ mod tests {
     #[test]
     fn le_corps_de_formulaire_preserve_les_caracteres_non_reserves() {
         assert_eq!(form_urlencoded(&[("a", "Az0-_.~")]), "a=Az0-_.~");
+    }
+
+    /// Corps relevés sur un cluster Proxmox VE 9.2 sans Ceph : les six endpoints
+    /// Ceph répondent 500 avec ce message, dans un ordre de clés variable.
+    const CEPH_ABSENT: [&str; 2] = [
+        r#"{"data":null,"message":"binary not installed: /usr/bin/ceph-mon\n"}"#,
+        r#"{"message":"binary not installed: /usr/bin/ceph-mon\n","data":null}"#,
+    ];
+
+    /// Corps relevé sur une VM dont l'agent QEMU est déclaré mais arrêté.
+    const AGENT_ABSENT: [&str; 2] = [
+        r#"{"message":"QEMU guest agent is not running\n","data":null}"#,
+        r#"{"data":null,"message":"QEMU guest agent is not running\n"}"#,
+    ];
+
+    /// Corps relevé sur les trois nœuds pour `apt/update`, faute de `Sys.Modify`.
+    const APT_REFUSE: &str =
+        r#"{"message":"Permission check failed (/nodes/node3, Sys.Modify)\n","data":null}"#;
+
+    #[test]
+    fn un_cluster_sans_ceph_est_une_absence_et_pas_une_panne() {
+        for body in CEPH_ABSENT {
+            assert_eq!(
+                absence_marker(StatusCode::INTERNAL_SERVER_ERROR, body),
+                Some("binary not installed"),
+                "{body}"
+            );
+            let error =
+                status_error(StatusCode::INTERNAL_SERVER_ERROR, body, "/cluster/ceph/status");
+            assert!(!error.means_down(), "Ceph absent ne doit réveiller personne : {error}");
+        }
+    }
+
+    #[test]
+    fn un_agent_qemu_arrete_est_une_absence_et_pas_une_panne() {
+        for body in AGENT_ABSENT {
+            assert_eq!(
+                absence_marker(StatusCode::INTERNAL_SERVER_ERROR, body),
+                Some("guest agent is not running"),
+                "{body}"
+            );
+            let error = status_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                body,
+                "/nodes/node2/qemu/107/agent/get-osinfo",
+            );
+            assert!(!error.means_down(), "{error}");
+        }
+    }
+
+    #[test]
+    fn un_noeud_sans_zfs_est_une_absence() {
+        let body = r#"{"data":null,"message":"binary not installed: /sbin/zpool\n"}"#;
+        assert!(absence_marker(StatusCode::INTERNAL_SERVER_ERROR, body).is_some());
+    }
+
+    #[test]
+    fn une_vraie_panne_reste_une_panne() {
+        // Le proxy Proxmox devant un nœud qui ne répond plus, et une erreur
+        // interne sans explication : les deux doivent rester « hors ligne ».
+        for (status, body) in [(596, "Connection refused"), (500, "internal error")] {
+            let error =
+                status_error(StatusCode::from_u16(status).unwrap(), body, "/nodes/node3/status");
+            assert!(error.means_down(), "{status} {body}");
+        }
+    }
+
+    #[test]
+    fn labsence_ne_se_lit_que_sur_une_5xx() {
+        // Le même texte sur un 404 reste un 404 : le statut suffit déjà à le dire.
+        assert_eq!(absence_marker(StatusCode::NOT_FOUND, "binary not installed"), None);
+        assert_eq!(absence_marker(StatusCode::FORBIDDEN, "binary not installed"), None);
+    }
+
+    #[test]
+    fn un_403_sur_apt_update_reste_un_droit_manquant() {
+        // `Sys.Modify` non accordé : ni absence, ni panne — un statut connu, que
+        // `get_unless` transforme en `Ok(None)`.
+        assert_eq!(absence_marker(StatusCode::FORBIDDEN, APT_REFUSE), None);
+        let error = status_error(StatusCode::FORBIDDEN, APT_REFUSE, "/nodes/node3/apt/update");
+        assert!(matches!(error, ProbeError::Auth(_)));
+        assert!(!error.means_down());
     }
 
     #[test]

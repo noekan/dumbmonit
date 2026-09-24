@@ -1,0 +1,4 @@
+{
+ "_http_status": 500,
+ "_body": "{\"message\":\"QEMU guest agent is not running\\n\",\"data\":null}"
+}

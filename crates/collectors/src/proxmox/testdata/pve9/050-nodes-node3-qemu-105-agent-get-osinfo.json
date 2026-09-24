@@ -1,0 +1,16 @@
+{
+ "data": {
+  "result": {
+   "kernel-release": "26100",
+   "id": "mswindows",
+   "name": "Microsoft Windows",
+   "kernel-version": "10.0",
+   "pretty-name": "Windows Server 2025 Standard",
+   "version": "Microsoft Windows Server 2025",
+   "version-id": "2025",
+   "machine": "MACHINE-1",
+   "variant-id": "server",
+   "variant": "server"
+  }
+ }
+}

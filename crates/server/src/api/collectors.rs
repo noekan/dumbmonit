@@ -761,7 +761,7 @@ const PROXMOX_OPTIONS: &[OptionView] = &[
     boolean(
         "guest_agent",
         "Ask the QEMU guest agent",
-        "For each running VM: balloon memory and, when the guest agent is enabled, the disk usage seen from inside (needs VM.Monitor). Silently skipped when the agent is absent.",
+        "For each running VM: balloon memory and, when the guest agent is enabled, the disk usage seen from inside (needs VM.GuestAgent.Audit, or VM.Monitor before Proxmox VE 9). Silently skipped when the agent is absent.",
         true,
     ),
     boolean(
@@ -1155,12 +1155,12 @@ fn describe(kind: &'static str) -> CollectorView {
                 title: "Create a read-only user and token in Proxmox VE",
                 steps: &[
                     "Open a shell on any node (in the web UI: select the node, then Shell; or SSH) and create a user reserved for monitoring. It needs no password: the token is what logs in.\npveum user add dumbmonit@pve --comment \"DumbMonit monitoring\"",
-                    "Create a role with only the privileges the collector uses: Sys.Audit (nodes, cluster, HA, disks and SMART, ZFS, certificates, package versions, subscription), Datastore.Audit (storages and backup archives), VM.Audit (VMs, containers, snapshots) and VM.Monitor (disk usage inside VMs, through the QEMU guest agent). None of them can change anything.\npveum role add DumbMonit --privs \"Datastore.Audit Sys.Audit VM.Audit VM.Monitor\"",
+                    "Create a role with only the privileges the collector uses: Sys.Audit (nodes, cluster, HA, disks and SMART, ZFS, certificates, package versions, subscription), Datastore.Audit (storages and backup archives), VM.Audit (VMs, containers, snapshots) and VM.GuestAgent.Audit (what the QEMU guest agent reads inside a VM: disk usage, operating system, IP addresses). None of them can change anything.\npveum role add DumbMonit --privs \"Datastore.Audit Sys.Audit VM.Audit VM.GuestAgent.Audit\"",
                     "Give the user that role on the whole cluster.\npveum aclmod / -user dumbmonit@pve -role DumbMonit",
                     "Create the user's API token. Privilege separation is off, so the token simply inherits the user's rights.\npveum user token add dumbmonit@pve monitor --privsep 0",
                     "The command prints a table with full-tokenid and value. Copy full-tokenid into DumbMonit's Token ID field and value (the UUID) into its Secret field. The secret is shown once: if it is lost, remove the token and create a new one.\ndumbmonit@pve!monitor",
                     "Optional, to count pending updates and pending security fixes: Proxmox guards that list with Sys.Modify. Grant it on /nodes only; without it the collector skips the list silently.\npveum role add DumbMonitUpdates --privs Sys.Modify\npveum aclmod /nodes -user dumbmonit@pve -role DumbMonitUpdates",
-                    "Optional, on Proxmox VE 8 and later, to read the operating system and IP addresses of each VM from inside it: that pair of guest-agent calls moved to its own privilege. Add it to the role; on Proxmox VE 7 the privilege does not exist and VM.Monitor already covers it.\npveum role modify DumbMonit --privs \"Datastore.Audit Sys.Audit VM.Audit VM.Monitor VM.GuestAgent.Audit\"",
+                    "On an older Proxmox, VM.GuestAgent.Audit may not exist yet and the command above is refused with invalid privilege: the guest-agent calls are then covered by VM.Monitor, which Proxmox VE 9 removed in turn. Use whichever your version knows.\npveum role add DumbMonit --privs \"Datastore.Audit Sys.Audit VM.Audit VM.Monitor\"",
                     "Prefer the web UI? The same steps live under Datacenter → Permissions: Users, Roles, Add → User Permission, then API Tokens with \"Privilege Separation\" unticked.",
                     "In DumbMonit, enter the address of any node (port 8006 by default).",
                 ],
@@ -1244,7 +1244,7 @@ fn describe(kind: &'static str) -> CollectorView {
         "synology" => CollectorView {
             kind,
             label: "Synology DSM",
-            summary: "Synology NAS: volumes, disk health, temperature, Hyper Backup and Active Backup for Business.",
+            summary: "Synology NAS: volumes, storage pools, disk health, temperature, Hyper Backup and Active Backup for Business.",
             examples: &["DiskStation", "RackStation"],
             credential_types: &["username_password"],
             credentials: &[SYNOLOGY_LOGIN],
@@ -1257,7 +1257,7 @@ fn describe(kind: &'static str) -> CollectorView {
                     "Join groups: tick administrators. DSM only answers the storage, volume and disk SMART calls to that group; without it the NAS shows as alive but says nothing about its disks. The next two steps take back everything else.",
                     "Assign shared folder permissions: No access on every shared folder. Assign application permissions: Deny everything except DSM, plus Active Backup for Business if you want its tasks read. Skip the quota and speed limit pages.",
                     "Two-step verification must stay off for this account: no automated monitor can type a one-time code. If Control Panel → Security → Account enforces it, restrict the rule to groups this user is not in, or exempt it.",
-                    "Active Backup for Business, if installed: its tasks are read only by an account allowed to use the package (Active Backup for Business → Settings → Privileges). Otherwise untick DumbMonit's \"Watch Active Backup for Business\" option to stop asking.",
+                    "Backup packages are read only while they are installed and running: DSM does not advertise a stopped package's API at all, so Hyper Backup tasks then go quiet instead of failing, and a NAS that only receives backups (Hyper Backup Vault) has no tasks of its own to show. Active Backup for Business additionally answers only an account allowed to use it (Active Backup for Business → Settings → Privileges); otherwise untick DumbMonit's \"Watch Active Backup for Business\" option to stop asking.",
                     "In DumbMonit, enter the NAS address (HTTPS, port 5001 by default), then this account's user name and password.",
                 ],
                 warning: "The administrators group is required by DSM's storage API, not by DumbMonit. That is why this account gets no shared folder, no application and a password used nowhere else: it can read the NAS, not touch your files.",
