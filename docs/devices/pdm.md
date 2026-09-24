@@ -4,6 +4,13 @@ The console that federates several Proxmox VE clusters and Proxmox Backup
 Server instances: which instances it reaches, the whole estate at a glance,
 the tasks that failed anywhere, and the console's own health.
 
+!!! warning "Tested against a test instance only"
+
+    This integration was built and verified against a Proxmox Datacenter Manager 1.1 installed for
+    the purpose, not against a production one. Every call is a read, and the
+    shapes come from a real datacenter manager, but nobody has yet run it for weeks on a
+    live datacenter manager. Tell us what breaks.
+
 ## One device for the estate, or one device per cluster?
 
 A Datacenter Manager device is not a replacement for [Proxmox VE](proxmox.md)

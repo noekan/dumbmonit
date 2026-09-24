@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.1.0-alpha.5 — 2026-09-25
+
 ### Added
 
 - **Synology DSM 7.4, checked against a real NAS.** A read-only capture of a

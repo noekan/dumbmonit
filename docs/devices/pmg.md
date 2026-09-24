@@ -4,6 +4,13 @@ Mail gateway: Postfix queues and the age of the oldest waiting message, the
 mail counted and filtered today, quarantine sizes, the age of the antivirus and
 antispam signature databases, services, certificates and cluster state.
 
+!!! warning "Tested against a test instance only"
+
+    This integration was built and verified against a Proxmox Mail Gateway 9 installed for
+    the purpose, not against a production one. Every call is a read, and the
+    shapes come from a real mail gateway, but nobody has yet run it for weeks on a
+    live mail gateway. Tell us what breaks.
+
 ## The device page
 
 Beyond the generic charts, a Proxmox Mail Gateway device shows three panels,
