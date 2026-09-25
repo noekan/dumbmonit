@@ -71,20 +71,50 @@ back for a paid edition.
   bounces, greylisting), quarantine sizes, and the age of the antivirus and
   antispam signature databases: the silent failure where the gateway keeps
   filtering with last week's rules. Counts only, never message content.
+- **OPNsense** — the open source firewall in front of the house: every gateway
+  with its round-trip time and packet loss, so the backup WAN that took over
+  three weeks ago stops being a surprise; the pf state table against its limit,
+  interface counters and the public address of the moment, VPN tunnels up or
+  down, DHCP leases, the resolver, CARP (including the maintenance mode everyone
+  forgets to switch off) and pending updates. Read-only, through an API key.
+- **Server hardware (Redfish)** — what the management controller (Supermicro,
+  iDRAC, iLO, XClarity, ASRock Rack) knows about the server it sits in: fans,
+  temperatures against the thresholds the hardware declares itself, power
+  supplies and their redundancy, drives and their predicted failures, memory and
+  processor health, and the event log counted by severity. An empty slot is
+  never a failure. Read-only account, basic authentication by default.
+- **TrueNAS** — the ZFS pool that lost a disk and still serves its data (the
+  failure nobody notices until the second disk), with the disk named; scrubs and
+  resilvers, pool and dataset usage against quotas, snapshots and replication
+  tasks, disk temperature and SMART self-tests, and the alerts TrueNAS raises
+  itself. Nothing is ever started: no scrub, no test, no update check.
 - **Synology DSM** — volumes, disks and SMART health, temperature, load and
   services, through the NAS web API; **Active Backup for Business** tasks, their
   last result and the age of the last success.
-- **Linux and Windows agent** — CPU, memory, disks, network, services and uptime
-  for machines that do not speak SNMP. One-line install, binaries served by the
-  server (Linux x86_64 / aarch64, Windows x86_64).
+- **Linux, macOS, FreeBSD and Windows agent** — CPU, memory, disks, network,
+  services and uptime for machines that do not speak SNMP, plus **temperatures
+  and fans**, **disk health (SMART)** and **ZFS pools** where the machine
+  exposes them. One-line install, which registers the agent with systemd,
+  OpenRC, launchd or rc.d. Binaries served by the server (Linux x86_64 /
+  aarch64, FreeBSD x86_64, Windows x86_64); the macOS binaries are attached to
+  each release, Apple's SDK not being redistributable.
 - **Docker, through the agent** — container state, health, restarts, image age
   and available updates; opt-in per container: restart when down, update
   automatically (pull, recreate, health check, rollback) inside a maintenance
   window, prune the old image. **Plakar** backups: age and result of the last
   snapshot per kloset.
 - **Service monitors**, Uptime Kuma style — HTTP(S) (status code, keyword, JSON
-  path, certificate), TCP port, DNS resolution, ping and TLS certificate expiry,
-  each with its history bar, response time and availability percentage.
+  path, certificate), TCP port, DNS resolution (asserting the record type, the
+  expected values, and the ones that must never come back), ping and TLS
+  certificate expiry, each with its history bar, response time and availability
+  percentage.
+- **Application monitors** that begin a real session instead of knocking on a
+  port — **SMTP** (greeting, EHLO, STARTTLS, AUTH: does your relay still accept
+  you?), **PostgreSQL** and **MySQL/MariaDB** (connect, authenticate, run a
+  query, with connection time and query time apart — the "up but slow" signal),
+  **MQTT** (connect, subscribe, optionally read a retained message) and
+  **WebSocket** (the upgrade handshake, which fails where a plain `GET` still
+  answers 200). A refused password is reported as such, never as an outage.
 - **Heartbeats** (dead man's switch) — a cron job, backup script or Home
   Assistant automation calls a secret URL each time it runs; if it stops
   calling, you are told. Uptime Kuma push-compatible (`?status=down&msg=`).
@@ -126,8 +156,10 @@ back for a paid edition.
 - Every device is a 1U faceplate: LED, name, kind, address, last seen, sparkline;
   children stack under their parent and dim when it is unreachable.
 - Mobile works for reading state, silencing an alert and scheduling maintenance.
-- **Public status pages** (`/s/<slug>`) — groups of monitors, incidents, RSS
-  feed and a status badge, Uptime Kuma / Kener style.
+- **Public status pages** (`/s/<slug>`) — groups of monitors with a 90-day
+  daily history and 30/90-day uptime, incidents and maintenance, your logo and
+  accent, email subscribers (double opt-in) and RSS, status, uptime and
+  response-time badges for a README, and a compact embed for an intranet page.
 - **Accounts** — admin and viewer roles, an optional **TOTP second factor**
   with recovery codes, an audit log of sign-ins and account changes, plus
   **OIDC / SSO** (Authentik, Authelia, Keycloak, Pocket ID…) with
@@ -194,8 +226,14 @@ token filled in:
 curl -sSL http://server:8080/install.sh | sh -s -- --token=dmon_xxx --url=http://server:8080
 ```
 
-The agent registers itself as a device. A PowerShell script is served at
+The same command installs the agent on Linux, macOS and FreeBSD: it detects the
+system and registers the service with systemd, OpenRC, launchd or rc.d. On
+macOS, download the binary from the
+[releases page](https://github.com/noekan/dumbmonit/releases/latest) and add
+`--bin=./dumbmonit-agent-macos-aarch64`. A PowerShell script is served at
 `/install.ps1` for Windows.
+
+The agent registers itself as a device.
 
 The agent is also published as an image, `ghcr.io/noekan/dumbmonit-agent`
 (same tags as the server), for Docker hosts and **remote sites**: with
@@ -272,7 +310,7 @@ and state.
 
 ```
 crates/proto     shared types: Sample, Target, Credential, trait Collector (+ ProbeError)
-crates/collectors  snmp (profiles/*.yaml), proxmox, pbs, pdm, pmg, synology, uptime — shared by the server and the relay agent
+crates/collectors  snmp (profiles/*.yaml), proxmox, pbs, pdm, pmg, synology, opnsense, truenas, redfish, uptime — shared by the server and the relay agent
 crates/server    the binary
   api/           axum routes; spa.rs serves the embedded web UI
   auth/          accounts and roles, HttpOnly session cookie, TOTP, OIDC, API tokens, rate limit
@@ -283,7 +321,7 @@ crates/server    the binary
   alerting/      rules, state machine, suppression by parent, silences, seasonal baseline
   notify/        22 notification channels, described to the UI by notify/catalog.rs
   crypto.rs      AES-256-GCM for credentials/tokens
-crates/agent     Linux/Windows agent + install scripts; relay mode runs the shared collectors remotely
+crates/agent     Linux/macOS/FreeBSD/Windows agent + install scripts; relay mode runs the shared collectors remotely
 web/             SvelteKit (Svelte 5 runes, Tailwind 4, uPlot), static build embedded in the binary
 profiles/        SNMP collection profiles, auto-applied by sysObjectID
 ```

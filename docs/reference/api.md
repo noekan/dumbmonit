@@ -113,9 +113,10 @@ bootstrap) are allowed by a nonce regenerated for each response, so
 cannot be removed: Svelte sets `style=` attributes on elements, which neither
 a nonce nor a hash can cover.
 
-Public status pages under `/s/…` are made to be embedded: they get the same
-policy without `frame-ancestors`. Everything else also carries
-`X-Frame-Options: DENY`.
+Public status pages are made to be embedded: `/s/<slug>` and its compact
+view `/s/<slug>/embed` — and only those two — get the same policy without
+`frame-ancestors`. Everything else, the subscription confirmation and
+unsubscribe pages under `/s/` included, also carries `X-Frame-Options: DENY`.
 
 If you put DumbMonit behind a reverse proxy, do not let it add a second
 `Content-Security-Policy` header: browsers enforce the intersection of all of
@@ -489,6 +490,10 @@ The exact keys per kind come from `/api/notify/kinds` and are documented in
 | `GET` | `/api/status-pages/{id}` | session | One page with its items. |
 | `PUT` | `/api/status-pages/{id}` | admin | Same fields, but a full replacement rather than a patch: `title` is required and every omitted field goes back to its default (slug re-derived from the title, empty description, `published: false`, `theme: auto`, 90 days of uptime). |
 | `DELETE` | `/api/status-pages/{id}` | admin | `204`. The public URL stops answering. |
+| `POST`, `PUT` | `/api/status-pages`, `/api/status-pages/{id}` — look and subscriptions | admin | Also accept `accent` (`default`, `blue`, `teal`, `violet`, `rose`, `amber`), `footer_text` (plain text, 280 characters), `homepage_url` (`http(s)://` or empty) and `subscribe_channel_id` (an `smtp` channel, or `null` to turn email subscription off). Unlike the other fields, these four keep their stored value when omitted from a `PUT`. The page view returns them with `logo_type` (`image/png`, `image/jpeg`, `image/webp` or `null`). |
+| `GET`, `PUT`, `DELETE` | `/api/status-pages/{id}/logo` | session / admin | The page's logo. `PUT` takes `{"data": "<base64 or data: URL>"}`: PNG, JPEG or WebP recognised by content, 256 KiB at most, anything else `400`. `204`. `GET` is the editor's preview (drafts included). |
+| `GET` | `/api/status-pages/{id}/subscribers` | session | Email subscribers: `id`, `page_id`, `email`, `confirmed_at` (`null` while pending), `created_at`. Their tokens never leave the server. |
+| `DELETE` | `/api/status-pages/{id}/subscribers/{subscriber}` | admin | Removes an address. `204`. |
 | `PUT` | `/api/status-pages/{id}/items` | admin | `[{"target_id": 4, "label": "NAS", "group_name": "Storage"}, …]` — the full ordered list of devices shown on the page. |
 | `GET` | `/api/incidents` | session | Every incident with its updates: `incident` (`id`, `page_id`, `title`, `kind`, `status`, `severity`, `starts_at`, `ends_at`, `created_at`, `updated_at`) and `updates`. |
 | `POST` | `/api/incidents` | admin | `{"title", "kind", "status", "severity", "page_id", "starts_at", "ends_at", "body"}` — `body` is the first update. `201`. |
@@ -497,6 +502,12 @@ The exact keys per kind come from `/api/notify/kinds` and are documented in
 | `GET` | `/api/incidents/{id}/updates` | session | The timeline: `id`, `incident_id`, `status`, `body`, `created_at`. |
 | `POST` | `/api/incidents/{id}/updates` | admin | `{"status": "monitoring", "body": "…"}`. Appends an update and moves the incident to `status`. `201`. |
 | `GET` | `/api/public/status/{slug}` | public | The JSON document a published page is built from (also `badge.svg` and `rss` under the same path). See [Status pages](../using/status-pages.md). |
+| `GET` | `/api/public/status/{slug}/uptime.svg`, `/response.svg` | public | Page badges: mean uptime over `?days=` `1`, `7`, `30` (default) or `90` — `400` beyond the page's history — and mean response time. SVG, `Cache-Control: public, max-age=60`. |
+| `GET` | `/api/public/status/{slug}/components/{key}/badge.svg`, `/uptime.svg`, `/response.svg` | public | The same three badges for one service; `key` is the service's `key` in the public document (its label in URL form). `404` for an unknown key. |
+| `GET` | `/api/public/status/{slug}/logo` | public | The page's logo with its image type, cacheable for a day (the document's `logo_url` carries a version). `404` without one. |
+| `POST` | `/api/public/status/{slug}/subscribe` | public | `{"email": "…"}`. Mails a confirmation link through the page's SMTP channel. Always `202` with the same message, whatever the address's state; `400` for an invalid address; `404` when the page offers no email subscription; `429` with `Retry-After` beyond five requests per client and sixty in all per 15 minutes. |
+| `POST` | `/api/public/status/{slug}/confirm?token=…` | public | Confirms a subscription (the link of the confirmation email opens `/s/{slug}/confirm`, whose button posts here). `404` for an unknown or expired token. |
+| `POST` | `/api/public/status/{slug}/unsubscribe?token=…` | public | Removes a subscription; the body is ignored, so it is also the RFC 8058 one-click target of `List-Unsubscribe`. Always `200`. |
 
 ## Agent tokens and ingest
 

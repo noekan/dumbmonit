@@ -17,6 +17,32 @@ use super::value::SnmpValue;
 /// Une colonne de table parcourue, indexée par suffixe d'index.
 type Column = HashMap<String, SnmpValue>;
 
+/// Ce dont la collecte a besoin d'un agent : lire des instances, parcourir des
+/// colonnes. La session UDP l'implémente ; les tests, un enregistrement réel
+/// d'équipement (`fixtures/*.snmprec`), ce qui permet d'éprouver un profil sur
+/// les réponses d'un vrai matériel sans réseau.
+#[allow(async_fn_in_trait)]
+pub(crate) trait Source {
+    async fn get_many(
+        &mut self,
+        oids: &[ObjectId],
+    ) -> Result<Vec<(ObjectId, SnmpValue)>, ProbeError>;
+    async fn walk(&mut self, base: &ObjectId) -> Result<Vec<(ObjectId, SnmpValue)>, ProbeError>;
+}
+
+impl Source for Session {
+    async fn get_many(
+        &mut self,
+        oids: &[ObjectId],
+    ) -> Result<Vec<(ObjectId, SnmpValue)>, ProbeError> {
+        Session::get_many(self, oids).await
+    }
+
+    async fn walk(&mut self, base: &ObjectId) -> Result<Vec<(ObjectId, SnmpValue)>, ProbeError> {
+        Session::walk(self, base).await
+    }
+}
+
 /// Mémorise les colonnes déjà parcourues pendant une interrogation.
 ///
 /// Sans ce cache, un profil IF-MIB parcourrait `ifName` une fois par métrique — onze
@@ -30,7 +56,7 @@ struct WalkCache {
 impl WalkCache {
     async fn column(
         &mut self,
-        session: &mut Session,
+        session: &mut impl Source,
         base: &ObjectId,
     ) -> Result<&Column, ProbeError> {
         if !self.columns.contains_key(base) {
@@ -54,7 +80,7 @@ impl WalkCache {
 /// Seule une erreur qui condamne toute la session — délai dépassé, authentification
 /// refusée — remonte.
 pub async fn collect(
-    session: &mut Session,
+    session: &mut impl Source,
     metrics: &[ResolvedMetric],
     now_ms: i64,
 ) -> Result<Vec<Sample>, ProbeError> {
@@ -82,7 +108,7 @@ pub async fn collect(
 
 /// Lit les métriques scalaires, en groupant les OID dans le moins de requêtes possible.
 async fn collect_scalars(
-    session: &mut Session,
+    session: &mut impl Source,
     metrics: &[&ResolvedMetric],
     now_ms: i64,
 ) -> Result<Vec<Sample>, ProbeError> {
@@ -133,7 +159,7 @@ async fn collect_scalars(
 /// Lit une métrique tabulaire : parcours de la colonne, résolution des étiquettes
 /// indexées, filtrage de cardinalité.
 async fn collect_table(
-    session: &mut Session,
+    session: &mut impl Source,
     cache: &mut WalkCache,
     resolved: &ResolvedMetric,
     now_ms: i64,

@@ -797,7 +797,8 @@ async fn restore_status_pages(
     let mut report = SectionReport::new("status_pages");
     for page in &bundle.status_pages {
         let existing = sqlx::query(
-            "SELECT id, title, description, published, theme, show_uptime_days
+            "SELECT id, title, description, published, theme, show_uptime_days,
+                 accent, footer_text, homepage_url
              FROM status_pages WHERE slug = ?",
         )
         .bind(&page.slug)
@@ -812,11 +813,15 @@ async fn restore_status_pages(
                     && row.try_get::<String, _>("description")? == page.description
                     && (row.try_get::<i64, _>("published")? != 0) == page.published
                     && row.try_get::<String, _>("theme")? == page.theme
-                    && row.try_get::<i64, _>("show_uptime_days")? == page.show_uptime_days;
+                    && row.try_get::<i64, _>("show_uptime_days")? == page.show_uptime_days
+                    && row.try_get::<String, _>("accent")? == page.accent
+                    && row.try_get::<String, _>("footer_text")? == page.footer_text
+                    && row.try_get::<String, _>("homepage_url")? == page.homepage_url;
                 if !same {
                     sqlx::query(
                         "UPDATE status_pages SET title = ?, description = ?, published = ?,
-                             theme = ?, show_uptime_days = ?,
+                             theme = ?, show_uptime_days = ?, accent = ?, footer_text = ?,
+                             homepage_url = ?,
                              updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                          WHERE id = ?",
                     )
@@ -825,6 +830,9 @@ async fn restore_status_pages(
                     .bind(i64::from(page.published))
                     .bind(&page.theme)
                     .bind(page.show_uptime_days)
+                    .bind(&page.accent)
+                    .bind(&page.footer_text)
+                    .bind(&page.homepage_url)
                     .bind(id)
                     .execute(&mut **tx)
                     .await
@@ -835,8 +843,9 @@ async fn restore_status_pages(
             None => {
                 let row = sqlx::query(
                     "INSERT INTO status_pages
-                         (slug, title, description, published, theme, show_uptime_days)
-                     VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+                         (slug, title, description, published, theme, show_uptime_days,
+                          accent, footer_text, homepage_url)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
                 )
                 .bind(&page.slug)
                 .bind(&page.title)
@@ -844,6 +853,9 @@ async fn restore_status_pages(
                 .bind(i64::from(page.published))
                 .bind(&page.theme)
                 .bind(page.show_uptime_days)
+                .bind(&page.accent)
+                .bind(&page.footer_text)
+                .bind(&page.homepage_url)
                 .fetch_one(&mut **tx)
                 .await
                 .context("création de la page de statut")?;

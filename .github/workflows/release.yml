@@ -92,3 +92,68 @@ jobs:
           annotations: ${{ steps.agent-meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # Agent macOS.
+  #
+  # Il ne peut pas sortir de l'image : compiler pour macOS exige le SDK d'Apple,
+  # que sa licence interdit de redistribuer, et aucun conteneur ne peut donc le
+  # construire légalement. Il est donc construit ici, sur un vrai exécuteur
+  # macOS, et attaché à la publication — c'est ce que le serveur indique quand
+  # on lui demande `/download/dumbmonit-agent-macos-…`.
+  #
+  # Les deux architectures sont livrées séparément plutôt qu'en binaire
+  # universel : l'agent se télécharge par un script qui connaît déjà la sienne.
+  # ---------------------------------------------------------------------------
+  macos-agent:
+    name: Build the macOS agent
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      # Même version que l'étape `agent` du Dockerfile : l'agent livré ne doit
+      # pas dépendre de la date de construction, ni de la plateforme.
+      - run: |
+          rustup toolchain install 1.98.0 --profile minimal \
+            --target aarch64-apple-darwin --target x86_64-apple-darwin
+          rustup default 1.98.0
+
+      # Mêmes réglages que le Dockerfile : l'agent se télécharge sur une liaison
+      # parfois lente, la taille prime sur la vitesse de compilation.
+      - name: Build
+        env:
+          CARGO_PROFILE_RELEASE_OPT_LEVEL: s
+          CARGO_PROFILE_RELEASE_LTO: fat
+        run: |
+          set -eu
+          mkdir -p dist
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked -p dumbmonit-agent --target "$target"
+          done
+          cp target/aarch64-apple-darwin/release/dumbmonit-agent dist/dumbmonit-agent-macos-aarch64
+          cp target/x86_64-apple-darwin/release/dumbmonit-agent  dist/dumbmonit-agent-macos-x86_64
+          # Même format que les empreintes servies par le serveur : `sha256sum -c`
+          # et `shasum -a 256 -c` les lisent toutes les deux.
+          cd dist
+          for binary in dumbmonit-agent-macos-*; do
+            shasum -a 256 "$binary" > "$binary.sha256"
+          done
+          ls -l
+
+      # Sur une version publiée : les binaires rejoignent la page de la version,
+      # d'où install.sh --bin=… les attend.
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: dist/*
+
+      # Sur main : gardés comme artefact de la construction, pour que l'agent
+      # macOS de la version de développement reste récupérable.
+      - uses: actions/upload-artifact@v4
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        with:
+          name: dumbmonit-agent-macos
+          path: dist/*
+          retention-days: 30

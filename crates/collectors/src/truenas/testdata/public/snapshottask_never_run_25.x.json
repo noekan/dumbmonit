@@ -1,0 +1,6 @@
+{"dataset": "pool/container-volumes/saneha", "recursive": false,
+ "lifetime_value": 30, "lifetime_unit": "DAY", "enabled": true, "exclude": [],
+ "naming_schema": "auto-%Y-%m-%d_%H-%M", "allow_empty": true,
+ "schedule": {"minute": "0", "hour": "21", "dom": "*", "month": "*", "dow": "*",
+              "begin": "00:00", "end": "23:59"},
+ "id": 1, "state": {"state": "PENDING"}, "vmware_sync": false}

@@ -8,8 +8,16 @@
 export const AGENT_FILES = {
 	linux_x86_64: 'dumbmonit-agent-linux-x86_64',
 	linux_aarch64: 'dumbmonit-agent-linux-aarch64',
+	freebsd_x86_64: 'dumbmonit-agent-freebsd-x86_64',
 	windows_x86_64: 'dumbmonit-agent-windows-x86_64.exe'
 } as const;
+
+/**
+ * The macOS binaries are deliberately absent: Apple's SDK cannot be
+ * redistributed, so the image never ships them and they are attached to each
+ * release instead. Asking the server for one answers with that address; there
+ * is no checksum to show here.
+ */
 
 export interface AgentChecksum {
 	file: string;

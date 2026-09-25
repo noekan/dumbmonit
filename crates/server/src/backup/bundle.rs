@@ -274,6 +274,18 @@ pub struct BundleStatusPage {
     pub show_uptime_days: i64,
     #[serde(default)]
     pub items: Vec<BundleStatusItem>,
+    /// Habillage (depuis la migration 0032) ; le logo, fichier sous `/data`, et
+    /// les abonnés, données personnelles, ne voyagent pas dans une sauvegarde.
+    #[serde(default = "default_accent")]
+    pub accent: String,
+    #[serde(default)]
+    pub footer_text: String,
+    #[serde(default)]
+    pub homepage_url: String,
+}
+
+fn default_accent() -> String {
+    "default".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

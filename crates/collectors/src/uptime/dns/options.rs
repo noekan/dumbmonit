@@ -24,6 +24,10 @@ pub struct Options {
     /// Valeurs devant toutes figurer dans la réponse. Vide signifie « aucune
     /// attente », la sonde se contente alors de vérifier que la résolution aboutit.
     pub expect: Vec<String>,
+    /// Façon de confronter la réponse aux valeurs attendues.
+    pub expect_mode: answer::Mode,
+    /// Valeurs qui ne doivent surtout pas figurer dans la réponse.
+    pub forbid: Vec<String>,
     pub timeout: Duration,
 }
 
@@ -44,6 +48,8 @@ impl Options {
             )?,
             resolver: tags::tag(target, "resolver").map(parse_resolver).transpose()?,
             expect: tags::tag(target, "expect").map(tags::split_list).unwrap_or_default(),
+            expect_mode: answer::Mode::parse(tags::tag(target, "expect_mode").unwrap_or(""))?,
+            forbid: tags::tag(target, "forbid").map(tags::split_list).unwrap_or_default(),
             timeout: tags::parse_timeout(target, "timeout_seconds")?,
         })
     }
@@ -125,6 +131,21 @@ mod tests {
     fn les_valeurs_attendues_forment_une_liste() {
         let options = options("exemple.fr", &[("expect", "203.0.113.10, 203.0.113.11 ,")]).unwrap();
         assert_eq!(options.expect, vec!["203.0.113.10", "203.0.113.11"]);
+    }
+
+    #[test]
+    fn le_mode_de_comparaison_a_un_defaut_et_se_choisit() {
+        assert_eq!(options("exemple.fr", &[]).unwrap().expect_mode, answer::Mode::Contains);
+        let exact = options("exemple.fr", &[("expect_mode", "exact")]).unwrap();
+        assert_eq!(exact.expect_mode, answer::Mode::Exact);
+        assert!(options("exemple.fr", &[("expect_mode", "presque")]).is_err());
+    }
+
+    #[test]
+    fn les_valeurs_interdites_forment_aussi_une_liste() {
+        let lues = options("exemple.fr", &[("forbid", "198.51.100.7, parked.example ")]).unwrap();
+        assert_eq!(lues.forbid, vec!["198.51.100.7", "parked.example"]);
+        assert!(options("exemple.fr", &[]).unwrap().forbid.is_empty());
     }
 
     #[test]

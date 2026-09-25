@@ -7,16 +7,19 @@
 	import { goto } from '$app/navigation';
 	import { page as route } from '$app/state';
 	import { ExternalLink } from 'lucide-svelte';
-	import { getStatusPage, listTargets, type StatusPage, type Target } from '$lib/api';
+	import { getStatusPage, listChannels, listTargets, type Channel, type StatusPage, type Target } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { Button, ErrorNotice, PageHeader, Panel, Plate, Skeleton } from '$lib/ui';
 	import PageForm from '$lib/components/status/PageForm.svelte';
+	import SharePanel from '$lib/components/status/SharePanel.svelte';
+	import SubscribersPanel from '$lib/components/status/SubscribersPanel.svelte';
 
 	const isNew = $derived(route.params.id === 'new');
 	const id = $derived(isNew ? null : Number(route.params.id));
 
 	let current = $state<StatusPage | null>(null);
 	let targets = $state<Target[]>([]);
+	let channels = $state<Channel[]>([]);
 	let loading = $state(true);
 	let error = $state<unknown>(null);
 
@@ -24,12 +27,16 @@
 		loading = true;
 		error = null;
 		try {
-			const [nextTargets, nextPage] = await Promise.all([
+			const [nextTargets, nextPage, nextChannels] = await Promise.all([
 				listTargets(signal),
-				id === null ? Promise.resolve(null) : getStatusPage(id, signal)
+				id === null ? Promise.resolve(null) : getStatusPage(id, signal),
+				// Only needed to pick the subscribers' SMTP channel: a failure
+				// leaves that one setting unchangeable, not the whole page.
+				listChannels(signal).catch(() => [] as Channel[])
 			]);
 			targets = nextTargets;
 			current = nextPage;
+			channels = nextChannels;
 		} catch (cause) {
 			if (cause instanceof DOMException && cause.name === 'AbortError') return;
 			error = cause;
@@ -86,11 +93,17 @@
 		<Skeleton class="h-48 w-full" />
 	</div>
 {:else}
-	<div class="rise-in max-w-3xl">
+	<div class="rise-in grid max-w-3xl gap-4">
 		<Panel>
 			{#key id}
-				<PageForm page={current} {targets} {onsaved} {oncancel} />
+				<PageForm page={current} {targets} {channels} {onsaved} {oncancel} />
 			{/key}
 		</Panel>
+		{#if current}
+			<SharePanel page={current} />
+			{#if current.subscribe_channel_id !== null}
+				<SubscribersPanel page={current} />
+			{/if}
+		{/if}
 	</div>
 {/if}

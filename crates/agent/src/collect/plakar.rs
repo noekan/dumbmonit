@@ -15,7 +15,8 @@
 //! `location` par entrée, référencés par `plakar at @nom`) et son dépôt par
 //! défaut dans `~/.plakar`. L'agent tournant souvent sous root alors que les
 //! sauvegardes appartiennent à un utilisateur, on parcourt le foyer de l'agent,
-//! `/root` et chaque `/home/*`, et l'on passe `-configdir` à Plakar pour qu'il
+//! `/root` et chaque foyer d'utilisateur (`/home/*`, `/Users/*` sous macOS,
+//! `/usr/home/*` sous FreeBSD), et l'on passe `-configdir` à Plakar pour qu'il
 //! résolve `@nom` dans le bon fichier. Seul `location` est lu : les phrases de
 //! passe qui voisinent dans ce fichier ne sont ni conservées ni journalisées.
 //!
@@ -427,9 +428,15 @@ fn normalise_location(location: &str, configdir: &Path) -> String {
     }
 }
 
+/// Répertoires sous lesquels vivent les foyers des utilisateurs, selon le
+/// système : `/home` partout, `/Users` sous macOS, `/usr/home` sous FreeBSD où
+/// `/home` n'est qu'un lien symbolique — que l'on suit, mais qui peut manquer.
+/// Un répertoire absent est simplement ignoré, il n'y a donc rien à conditionner.
+const HOME_ROOTS: &[&str] = &["/home", "/Users", "/usr/home"];
+
 /// Les foyers à fouiller sur cette machine : celui de l'agent d'abord (avec
 /// `$XDG_CONFIG_HOME` et `plakar_home` honorés), puis `/root`, puis chaque
-/// `/home/*` dans l'ordre alphabétique.
+/// foyer d'utilisateur dans l'ordre alphabétique.
 fn homes(config: &PlakarConfig) -> Vec<Home> {
     let mut homes = Vec::new();
     let own_home = config.home.clone().or_else(|| std::env::var("HOME").ok()).map(PathBuf::from);
@@ -444,7 +451,8 @@ fn homes(config: &PlakarConfig) -> Vec<Home> {
         homes.push(own);
     }
     homes.push(Home::at(Path::new("/root")));
-    if let Ok(entries) = std::fs::read_dir("/home") {
+    for root in HOME_ROOTS {
+        let Ok(entries) = std::fs::read_dir(root) else { continue };
         let mut users: Vec<PathBuf> =
             entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
         users.sort();
@@ -759,8 +767,8 @@ async fn run(
 mod tests {
     use super::*;
 
-    const LS: &str = "2026-09-15T17:20:03Z   0507757f    64 KiB        0s /tmp/plakar-lab-src\n\
-                      2026-09-15T17:20:02Z   4185e956    64 KiB        0s /tmp/plakar-lab-src\n\
+    const LS: &str = "2026-09-15T17:20:03Z   0507757f    64 KiB        0s /tmp/plakar-demo-src\n\
+                      2026-09-15T17:20:02Z   4185e956    64 KiB        0s /tmp/plakar-demo-src\n\
                       2026-09-14T02:00:00Z   deadbeef   1.5 GiB       12s /srv/photos\n";
 
     const INFO: &str = "Version: v1.0.0\n\
@@ -779,7 +787,7 @@ mod tests {
         assert_eq!(lines.len(), 3);
         assert_eq!(lines[0].id, "0507757f");
         assert_eq!(lines[0].size_bytes, 65_536);
-        assert_eq!(lines[0].source, "/tmp/plakar-lab-src");
+        assert_eq!(lines[0].source, "/tmp/plakar-demo-src");
         assert_eq!(lines[0].ts.timestamp(), 1_789_492_803);
         assert_eq!(lines[2].size_bytes, 1_610_612_736);
         assert_eq!(lines[2].source, "/srv/photos");
@@ -810,7 +818,7 @@ mod tests {
         let errors = BTreeMap::from([("deadbeef".to_string(), 2)]);
         let sources = group_by_source(&snapshots, &errors);
         assert_eq!(sources.len(), 2);
-        let lab = sources.iter().find(|s| s.source == "/tmp/plakar-lab-src").unwrap();
+        let lab = sources.iter().find(|s| s.source == "/tmp/plakar-demo-src").unwrap();
         assert_eq!(lab.snapshot_count, 2);
         assert_eq!(lab.last_snapshot.timestamp(), 1_789_492_803);
         assert!(lab.last_ok, "no error known: assumed fine");
@@ -1046,7 +1054,7 @@ mod tests {
     #[ignore]
     async fn the_lab_kloset_is_read_for_real() {
         let config =
-            PlakarConfig { klosets: vec!["/tmp/plakar-lab".into()], ..PlakarConfig::default() };
+            PlakarConfig { klosets: vec!["/tmp/plakar-demo".into()], ..PlakarConfig::default() };
         let mut probe = PlakarProbe::new(&config);
         let report = probe.read().await.expect("kloset");
         assert!(report.installed);

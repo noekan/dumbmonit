@@ -21,6 +21,29 @@ pub struct StatusPage {
     pub show_uptime_days: i64,
     pub created_at: String,
     pub updated_at: String,
+    /// Teinte d'accent, parmi le jeu fermé de `api::status_pages`.
+    pub accent: String,
+    pub footer_text: String,
+    pub homepage_url: String,
+    /// Type MIME du logo déposé ; `None` : pas de logo.
+    pub logo_type: Option<String>,
+    /// Canal SMTP des abonnés ; `None` : pas d'abonnement par courriel.
+    pub subscribe_channel_id: Option<i64>,
+    /// Base des liens des courriels, vue par l'administrateur (voir la migration).
+    #[serde(skip)]
+    pub link_origin: String,
+}
+
+/// Colonnes lues d'une page, dans l'ordre de [`StatusPage`].
+macro_rules! select_page {
+    ($tail:literal) => {
+        concat!(
+            "SELECT id, slug, title, description, published, theme, show_uptime_days, ",
+            "created_at, updated_at, accent, footer_text, homepage_url, logo_type, ",
+            "subscribe_channel_id, link_origin FROM status_pages ",
+            $tail
+        )
+    };
 }
 
 /// Champs modifiables d'une page, à la création comme à la mise à jour.
@@ -32,6 +55,11 @@ pub struct StatusPageInput {
     pub published: bool,
     pub theme: String,
     pub show_uptime_days: i64,
+    pub accent: String,
+    pub footer_text: String,
+    pub homepage_url: String,
+    pub subscribe_channel_id: Option<i64>,
+    pub link_origin: String,
 }
 
 /// Un service affiché par une page.
@@ -91,14 +119,14 @@ pub struct IncidentUpdate {
 // --------------------------------------------------------------------------
 
 pub async fn list_pages(pool: &SqlitePool) -> Result<Vec<StatusPage>> {
-    sqlx::query_as("SELECT id, slug, title, description, published, theme, show_uptime_days, created_at, updated_at FROM status_pages ORDER BY title, id")
+    sqlx::query_as(select_page!("ORDER BY title, id"))
         .fetch_all(pool)
         .await
         .context("liste des pages de statut")
 }
 
 pub async fn get_page(pool: &SqlitePool, id: i64) -> Result<Option<StatusPage>> {
-    sqlx::query_as("SELECT id, slug, title, description, published, theme, show_uptime_days, created_at, updated_at FROM status_pages WHERE id = ?")
+    sqlx::query_as(select_page!("WHERE id = ?"))
         .bind(id)
         .fetch_optional(pool)
         .await
@@ -106,7 +134,7 @@ pub async fn get_page(pool: &SqlitePool, id: i64) -> Result<Option<StatusPage>> 
 }
 
 pub async fn get_page_by_slug(pool: &SqlitePool, slug: &str) -> Result<Option<StatusPage>> {
-    sqlx::query_as("SELECT id, slug, title, description, published, theme, show_uptime_days, created_at, updated_at FROM status_pages WHERE slug = ?")
+    sqlx::query_as(select_page!("WHERE slug = ?"))
         .bind(slug)
         .fetch_optional(pool)
         .await
@@ -117,8 +145,9 @@ pub async fn get_page_by_slug(pool: &SqlitePool, slug: &str) -> Result<Option<St
 /// l'appelant de la traduire en conflit.
 pub async fn create_page(pool: &SqlitePool, input: &StatusPageInput) -> Result<i64> {
     let (id,): (i64,) = sqlx::query_as(
-        "INSERT INTO status_pages (slug, title, description, published, theme, show_uptime_days)
-         VALUES (?, ?, ?, ?, ?, ?)
+        "INSERT INTO status_pages (slug, title, description, published, theme, show_uptime_days,
+             accent, footer_text, homepage_url, subscribe_channel_id, link_origin)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          RETURNING id",
     )
     .bind(&input.slug)
@@ -127,6 +156,11 @@ pub async fn create_page(pool: &SqlitePool, input: &StatusPageInput) -> Result<i
     .bind(i64::from(input.published))
     .bind(&input.theme)
     .bind(input.show_uptime_days)
+    .bind(&input.accent)
+    .bind(&input.footer_text)
+    .bind(&input.homepage_url)
+    .bind(input.subscribe_channel_id)
+    .bind(&input.link_origin)
     .fetch_one(pool)
     .await
     .context("création de la page de statut")?;
@@ -137,7 +171,9 @@ pub async fn update_page(pool: &SqlitePool, id: i64, input: &StatusPageInput) ->
     let result = sqlx::query(
         "UPDATE status_pages SET
              slug = ?, title = ?, description = ?, published = ?, theme = ?,
-             show_uptime_days = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+             show_uptime_days = ?, accent = ?, footer_text = ?, homepage_url = ?,
+             subscribe_channel_id = ?, link_origin = ?,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
          WHERE id = ?",
     )
     .bind(&input.slug)
@@ -146,6 +182,11 @@ pub async fn update_page(pool: &SqlitePool, id: i64, input: &StatusPageInput) ->
     .bind(i64::from(input.published))
     .bind(&input.theme)
     .bind(input.show_uptime_days)
+    .bind(&input.accent)
+    .bind(&input.footer_text)
+    .bind(&input.homepage_url)
+    .bind(input.subscribe_channel_id)
+    .bind(&input.link_origin)
     .bind(id)
     .execute(pool)
     .await
@@ -397,4 +438,161 @@ pub async fn add_update(
         .context("changement de statut de l'incident")?;
     tx.commit().await.context("validation du fil de l'incident")?;
     Ok(update)
+}
+
+// --------------------------------------------------------------------------
+// Logo
+// --------------------------------------------------------------------------
+
+/// Enregistre (ou efface, avec `None`) le type du logo et date la page : le
+/// document public porte cette date, qui sert aussi à invalider le cache du logo.
+pub async fn set_logo_type(pool: &SqlitePool, id: i64, logo_type: Option<&str>) -> Result<bool> {
+    let result = sqlx::query(
+        "UPDATE status_pages SET logo_type = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+         WHERE id = ?",
+    )
+    .bind(logo_type)
+    .bind(id)
+    .execute(pool)
+    .await
+    .context("logo de la page de statut")?;
+    Ok(result.rows_affected() > 0)
+}
+
+// --------------------------------------------------------------------------
+// Abonnés
+// --------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct Subscriber {
+    pub id: i64,
+    pub page_id: i64,
+    pub email: String,
+    /// Jamais renvoyé par l'API : il vaut désabonnement.
+    #[serde(skip)]
+    pub token: String,
+    pub confirmed_at: Option<String>,
+    pub created_at: String,
+}
+
+/// Colonnes lues d'un abonné, dans l'ordre de [`Subscriber`].
+macro_rules! select_subscriber {
+    ($tail:literal) => {
+        concat!(
+            "SELECT id, page_id, email, token, confirmed_at, created_at FROM status_subscribers ",
+            $tail
+        )
+    };
+}
+
+pub async fn list_subscribers(pool: &SqlitePool, page_id: i64) -> Result<Vec<Subscriber>> {
+    sqlx::query_as(select_subscriber!("WHERE page_id = ? ORDER BY email"))
+        .bind(page_id)
+        .fetch_all(pool)
+        .await
+        .context("liste des abonnés")
+}
+
+/// Abonnés confirmés d'une page : ceux qui reçoivent les annonces.
+pub async fn confirmed_subscribers(pool: &SqlitePool, page_id: i64) -> Result<Vec<Subscriber>> {
+    sqlx::query_as(select_subscriber!("WHERE page_id = ? AND confirmed_at IS NOT NULL ORDER BY id"))
+        .bind(page_id)
+        .fetch_all(pool)
+        .await
+        .context("abonnés confirmés")
+}
+
+pub async fn count_subscribers(pool: &SqlitePool, page_id: i64) -> Result<i64> {
+    let (count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM status_subscribers WHERE page_id = ?")
+            .bind(page_id)
+            .fetch_one(pool)
+            .await
+            .context("compte des abonnés")?;
+    Ok(count)
+}
+
+pub async fn find_subscriber(
+    pool: &SqlitePool,
+    page_id: i64,
+    email: &str,
+) -> Result<Option<Subscriber>> {
+    sqlx::query_as(select_subscriber!("WHERE page_id = ? AND email = ?"))
+        .bind(page_id)
+        .bind(email)
+        .fetch_optional(pool)
+        .await
+        .context("recherche d'un abonné")
+}
+
+pub async fn subscriber_by_token(
+    pool: &SqlitePool,
+    page_id: i64,
+    token: &str,
+) -> Result<Option<Subscriber>> {
+    sqlx::query_as(select_subscriber!("WHERE page_id = ? AND token = ?"))
+        .bind(page_id)
+        .bind(token)
+        .fetch_optional(pool)
+        .await
+        .context("abonné par jeton")
+}
+
+/// Crée un abonné non confirmé, ou renouvelle le jeton et la date d'une demande
+/// restée sans confirmation.
+pub async fn upsert_pending_subscriber(
+    pool: &SqlitePool,
+    page_id: i64,
+    email: &str,
+    token: &str,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO status_subscribers (page_id, email, token) VALUES (?, ?, ?)
+         ON CONFLICT (page_id, email) DO UPDATE SET
+             token = excluded.token,
+             created_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+         WHERE status_subscribers.confirmed_at IS NULL",
+    )
+    .bind(page_id)
+    .bind(email)
+    .bind(token)
+    .execute(pool)
+    .await
+    .context("enregistrement d'un abonné")?;
+    Ok(())
+}
+
+pub async fn confirm_subscriber(pool: &SqlitePool, id: i64) -> Result<()> {
+    sqlx::query(
+        "UPDATE status_subscribers
+         SET confirmed_at = COALESCE(confirmed_at, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+         WHERE id = ?",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .context("confirmation d'un abonné")?;
+    Ok(())
+}
+
+pub async fn delete_subscriber(pool: &SqlitePool, page_id: i64, id: i64) -> Result<bool> {
+    let result = sqlx::query("DELETE FROM status_subscribers WHERE page_id = ? AND id = ?")
+        .bind(page_id)
+        .bind(id)
+        .execute(pool)
+        .await
+        .context("suppression d'un abonné")?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Oublie les demandes jamais confirmées plus anciennes que `before` : une
+/// adresse saisie par un tiers ne reste pas en base.
+pub async fn purge_unconfirmed(pool: &SqlitePool, before: &str) -> Result<u64> {
+    let result =
+        sqlx::query("DELETE FROM status_subscribers WHERE confirmed_at IS NULL AND created_at < ?")
+            .bind(before)
+            .execute(pool)
+            .await
+            .context("purge des abonnés non confirmés")?;
+    Ok(result.rows_affected())
 }

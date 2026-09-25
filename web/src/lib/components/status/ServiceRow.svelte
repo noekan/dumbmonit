@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * One public service: state plate + name, the daily history bar, then the
-	 * uptime readouts (24 h / 7 d / 90 d) and the latency. Stacks on phones.
+	 * uptime readouts (24 h / 7 d / 30 d / 90 d) and the latency. Stacks on phones.
 	 */
 	import type { PublicStatusItem } from '$lib/api';
 	import { formatPercent } from '$lib/format';
@@ -24,10 +24,12 @@
 		return `${(Math.round(value / 100) / 10).toString()} s`;
 	}
 
+	// 30 and 90 days are the headline figures; 90 only when the page shows them.
 	const readouts = $derived([
 		{ label: '24 h', value: item.uptime_24h },
 		{ label: '7 d', value: item.uptime_7d },
-		{ label: `${days} d`, value: item.uptime_90d }
+		{ label: '30 d', value: item.uptime_30d },
+		...(days >= 90 ? [{ label: '90 d', value: item.uptime_90d }] : [])
 	]);
 </script>
 

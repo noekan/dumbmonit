@@ -27,6 +27,26 @@ below is shipped enabled on every instance.
 | UPS on battery | The UPS is powering the load from battery (`dumbmonit_ups_output_source == 5`). | > 0 | 30 s | Warning (`critical`) | 15 min |
 | UPS battery low | The UPS battery is low or depleted (`dumbmonit_ups_battery_status`, 3 = low, 4 = depleted). | ≥ 3 | 1 min | Warning (`critical`) | 30 min |
 
+### Network ports (SNMP)
+
+| Rule | What | Default threshold | Hold | Severity | Reminder |
+|---|---|---|---|---|---|
+| Port accumulating errors | A network port logged more than fifty errors in the last hour: usually a failing cable, a dirty fibre or a duplex mismatch (`increase_prometheus(dumbmonit_if_errors_in[1h]) + increase_prometheus(dumbmonit_if_errors_out[1h])`; nothing fires during the first hour of a new device, so errors counted before it was added are not reported as new). | > 50 | 15 min | Advisory (`warning`) | 24 h |
+| Port flapping | A network port went down and up again more than twice in thirty minutes (`changes_prometheus(dumbmonit_if_oper_status[30m])`). A port disabled on purpose has no series and never fires. | > 4 | 5 min | Advisory (`warning`) | 1 h |
+
+### Server hardware (Redfish)
+
+Health series are 0 (OK), 1 (Warning) or 2 (Critical). An empty slot (`Absent`) or a disabled one has no series, so a server delivered with one power supply out of two never fires.
+
+| Rule | What | Default threshold | Hold | Severity | Reminder |
+|---|---|---|---|---|---|
+| Server fan failed | The management controller reports a fan as failed (`dumbmonit_redfish_fan_health`). | ≥ 2 | 2 min | Warning (`critical`) | 6 h |
+| Server temperature above critical | A temperature sensor is above the critical threshold the controller itself declares (`dumbmonit_redfish_temperature_celsius >= dumbmonit_redfish_temperature_upper_critical_celsius`). | > 0 | 5 min | Warning (`critical`) | 6 h |
+| Power supply redundancy lost | The power supplies are no longer redundant: one more failure and the server goes down (`dumbmonit_redfish_power_redundancy_health`). | ≥ 1 | 5 min | Advisory (`warning`), escalates after 1 h | 6 h |
+| Power supply failed | The controller reports a power supply as failed (`dumbmonit_redfish_psu_health`). | ≥ 2 | 2 min | Warning (`critical`) | 6 h |
+| Drive failure predicted | A drive reports a predicted failure: replace it while it still works (`dumbmonit_redfish_drive_failure_predicted`). | > 0 | 10 min | Advisory (`warning`) | 24 h |
+| Server health critical | The controller reports the system's own health as Critical (`dumbmonit_redfish_system_health`). | ≥ 2 | 2 min | Warning (`critical`) | 6 h |
+
 ### Uptime monitors and heartbeats
 
 | Rule | What | Default threshold | Hold | Severity | Reminder |
@@ -147,6 +167,41 @@ while Plakar is not detected, so neither rule can fire on a machine without it.
 | Mail gateway cluster degraded | A gateway of the cluster is no longer in sync with the others (`dumbmonit_pmg_cluster_node_insync`): it filters with an out-of-date rule database. A standalone gateway has no series. | < 1 | 15 min | Advisory (`warning`) | 6 h |
 | Mail gateway certificate expiring | A certificate of the mail gateway expires in less than fourteen days (`dumbmonit_pmg_certificate_expires_in_seconds`). | < 14 d | 1 h | Advisory (`warning`) | 24 h |
 | Mail gateway updates pending | More than twenty package updates are pending on the mail gateway (`dumbmonit_pmg_node_updates_pending`). | > 20 | 1 h | Info (`info`) | 7 d |
+
+### OPNsense
+
+| Rule | What | Default threshold | Hold | Severity | Reminder |
+|---|---|---|---|---|---|
+| Internet gateway down | dpinger no longer gets an answer from a gateway (`dumbmonit_opnsense_gateway_up`). On a multi-WAN firewall the traffic has already moved to another link, quietly. `loss` and `delay` are warnings, not failures, and do not fire this rule. | < 1 | 5 min | Warning (`critical`) | 6 h |
+| Gateway losing packets | A gateway is losing more than a fifth of the packets sent to it (`dumbmonit_opnsense_gateway_loss_percent`): the link answers, badly. Clears below 10 %. | > 20 % | 10 min | Advisory (`warning`) | 6 h |
+| Gateway slow | A gateway's round-trip time has stayed above 300 ms (`dumbmonit_opnsense_gateway_delay_seconds`). Three hundred milliseconds leaves a mobile backup link alone. | > 300 ms | 15 min | Info (`info`) | 12 h |
+| Firewall state table filling up | pf is tracking more than 80 % of the connections it is allowed (`dumbmonit_opnsense_pf_states_used_percent`). Past the limit the firewall drops new connections with no other symptom. | > 80 % | 10 min | Advisory (`warning`) | 6 h |
+| Firewall network buffers exhausted | More than 90 % of the FreeBSD network buffers are in use (`dumbmonit_opnsense_mbuf_used_percent`). A firewall that runs out stops forwarding with the CPU still idle. | > 90 % | 10 min | Advisory (`warning`) | 6 h |
+| VPN tunnel down | A configured VPN tunnel has had no session for ten minutes (`dumbmonit_opnsense_vpn_tunnel_up`). A plugin that is not installed, or a connection that is disabled, has no series and cannot fire. | < 1 | 10 min | Advisory (`warning`) | 6 h |
+| Firewall resolver stopped | Unbound has stopped answering (`dumbmonit_opnsense_unbound_running`). The firewall still routes; the machines behind it no longer resolve. Turn this rule off if your firewall resolves with something else. | < 1 | 5 min | Advisory (`warning`) | 6 h |
+| Firewall core service stopped | dpinger, which watches the gateways, or configd, which runs everything else, is stopped (`dumbmonit_opnsense_service_running{service=~"dpinger\|configd"}`). Only those two, because a service switched off on purpose is not a failure. | < 1 | 5 min | Warning (`critical`) | 6 h |
+| Firewall too hot | A sensor reads above 85 °C (`dumbmonit_opnsense_temperature_celsius`): the fanless box in the cupboard is about to start throttling. Clears at 78 °C. | > 85 °C | 10 min | Advisory (`warning`) | 6 h |
+| Firewall left in CARP maintenance mode | CARP has been left in persistent maintenance mode (`dumbmonit_opnsense_carp_maintenance_mode`): this firewall handed its virtual addresses to its partner and will not take them back on its own. | > 0 | 1 h | Info (`info`) | 24 h |
+| Firewall reboot pending | An update is installed but needs a reboot to take effect (`dumbmonit_opnsense_firmware_reboot_required`). | > 0 | 1 h | Info (`info`) | 7 d |
+| Firewall updates pending | The firewall has packages waiting to be updated (`dumbmonit_opnsense_firmware_updates_pending`). It is the most exposed machine on the network. | > 0 | 1 h | Info (`info`) | 7 d |
+
+### TrueNAS
+
+| Rule | What | Default threshold | Hold | Severity | Reminder |
+|---|---|---|---|---|---|
+| NAS pool degraded | ZFS no longer calls a pool healthy (`dumbmonit_truenas_pool_healthy`). A degraded pool still serves its data, which is exactly why nobody notices until the next disk fails. The device page names the disk. | < 1 | 5 min | Warning (`critical`) | 6 h |
+| NAS disk errors | Disks of a pool have reported read, write or checksum errors since the last `zpool clear` (`dumbmonit_truenas_pool_device_errors`, one series per kind). | > 0 | 15 min | Advisory (`warning`) | 24 h |
+| NAS pool almost full | A pool is more than 85 % full (`dumbmonit_truenas_pool_used_percent`). ZFS slows down well before it is full. Clears at 80 %. | > 85 % | 30 min | Advisory (`warning`), escalates after 7 d | 24 h |
+| NAS scrub found errors | The last scrub of a pool found damaged data (`dumbmonit_truenas_pool_last_scrub_errors`). | > 0 | 5 min | Warning (`critical`) | 24 h |
+| NAS scrub overdue | A pool has not completed a scrub in more than 45 days (`dumbmonit_truenas_pool_last_scrub_age_seconds`). Absent after a resilver, which erases the record of the last scrub. | > 45 d | 1 h | Info (`info`) | 7 d |
+| NAS disk failed its SMART test | A SMART self-test in a disk's log failed (`dumbmonit_truenas_disk_smart_failed`). A disk never tested has no series. | > 0 | 5 min | Warning (`critical`) | 24 h |
+| NAS disk too hot | A disk is above 55 °C (`dumbmonit_truenas_disk_temperature_celsius`, read from TrueNAS's cache). Clears at 50 °C. | > 55 °C | 15 min | Advisory (`warning`) | 6 h |
+| NAS dataset near its quota | A dataset has used more than 90 % of its quota (`dumbmonit_truenas_dataset_quota_used_percent`): at 100 % its writes fail while the pool still has room. No quota, no series. | > 90 % | 30 min | Advisory (`warning`) | 24 h |
+| NAS replication failed | An enabled replication task is in error (`dumbmonit_truenas_replication_error`): the copy on the other side is getting older. | > 0 | 10 min | Advisory (`warning`) | 12 h |
+| NAS snapshot task failed | An enabled periodic snapshot task is in error (`dumbmonit_truenas_snapshot_task_error`). | > 0 | 10 min | Advisory (`warning`) | 12 h |
+| NAS snapshots stale | An enabled periodic snapshot task has not run for more than eight days (`dumbmonit_truenas_snapshot_task_last_run_age_seconds`): a task that stops running does not fail, it goes quiet. | > 8 d | 1 h | Advisory (`warning`) | 24 h |
+| TrueNAS alert raised | TrueNAS itself has raised an alert of level ERROR or above (`dumbmonit_truenas_alerts`). Its own sentence is on the device page. | > 0 | 10 min | Advisory (`warning`) | 12 h |
+| NAS service stopped | A service set to start with the NAS is stopped (`dumbmonit_truenas_service_running`). A service switched off on purpose has no series. | < 1 | 10 min | Advisory (`warning`) | 6 h |
 
 ### Synology DSM
 

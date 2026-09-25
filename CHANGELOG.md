@@ -5,6 +5,157 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- **Status pages worth showing to users.** Each service's history bar now
+  tells a day's minutes of downtime on hover and on keyboard focus (one tab
+  stop, arrow keys between days), days without any measurement stay grey, and
+  uptime is given over 30 days and, on a 90-day page, 90 days. **Badges** for
+  a README: uptime (`?days=1|7|30|90`, never beyond the page's history) and
+  response time next to the status badge, for the page and for each service
+  (`/components/<key>/…`), flat colours readable on light and dark READMEs,
+  cached a minute. **Look**: an uploaded logo (PNG, JPEG or WebP, 256 KiB,
+  checked by content, never SVG), an accent from a closed set that stays
+  readable by day and night, a footer text and a link to the organisation's
+  site — no custom CSS or HTML. **Embed**: `/s/<slug>/embed`, a compact view
+  for an iframe (`?theme=`, `?history=0`); it and the page are now the only
+  framable addresses. **Email subscribers** through an SMTP channel you
+  already have: double opt-in, an email per announcement, update and status
+  change, a one-click unsubscribe link and `List-Unsubscribe-Post` in every
+  message, a rate-limited public endpoint, and the list in the editor. The
+  editor's new **Share** panel builds the badge and iframe snippets. A test
+  walks every public route and checks none reveals a device name, address or
+  type.
+
+- **Server hardware over Redfish** (`redfish`): the management controller of a
+  server (Supermicro, Dell iDRAC, HPE iLO, Lenovo XClarity, ASRock Rack,
+  OpenBMC) read through the DMTF standard API with a read-only account. Fans,
+  temperatures with the critical threshold each sensor declares, voltages, power
+  supplies and their redundancy, consumption, drives with predicted failure and
+  remaining SSD life, memory and processor summaries, system and controller
+  health, and the event logs counted by severity (never read). Both generations
+  of the schema — `Thermal`/`Power` and `ThermalSubsystem`/`PowerSubsystem`/
+  `Sensors` — give the same `dumbmonit_redfish_…` series. `Status.State =
+  Absent` or `Disabled` produces no health series, so an empty power supply bay
+  or DIMM slot is never an alert. Six built-in rules: fan failed, temperature
+  above critical, power supply redundancy lost, power supply failed, drive
+  failure predicted, system health critical. Basic authentication by default;
+  `auth = session` reuses one Redfish session and closes the one it replaces.
+
+- **Redfish device page**: a server read over Redfish gets its own panel. It
+  says first whether the server is healthy, in one word, with every component
+  that drives it; then each fan and temperature against the thresholds the
+  controller declares for that sensor (caution and critical temperatures, a
+  fan's minimum, now collected as `temperature_upper_caution_celsius` and
+  `fan_lower_critical_rpm`); whether power redundancy holds and the state of
+  each supply; the drives with predicted failure and life left; memory,
+  processor and controller summaries; and the event-log counts by severity.
+  Redfish, TrueNAS, OPNsense, Mail Gateway and Datacenter Manager now sit with
+  the other devices in the "Add a device" picker instead of under "Other".
+
+- **Zyxel switch** SNMP profile, checked against a real XS1930-10: CPU (one and
+  five minutes), memory and firmware from Zyxel's private branch, plus a new
+  **Ethernet switch** profile (included by it, selectable by hand for any other
+  switch) with per-port frame errors by cause from EtherLike-MIB (FCS,
+  alignment, symbol, late and excessive collisions, MAC errors), the negotiated
+  duplex, broadcast and multicast in 64-bit counters, and LLDP neighbours. The
+  host resources profile gains the Net-SNMP load averages, which are all a
+  Supermicro BMC's own agent offers about its CPU. Two built-in rules for every
+  SNMP device: **Port accumulating errors** and **Port flapping**.
+
+- **OPNsense** device (`opnsense`): the open source firewall that sits in front
+  of most homelabs, read through its API with a key that can only look at
+  status pages. Every gateway with its round-trip time and packet loss — the
+  multi-WAN failover that happened three weeks ago and that nobody noticed is
+  exactly the failure this is for — the pf state table against its configured
+  limit, interface counters and the public address of the moment, WireGuard,
+  OpenVPN and IPsec tunnels up or down, DHCP leases counted per server, the
+  Unbound resolver, services, CARP (including the persistent maintenance mode
+  everyone forgets to switch off), FreeBSD network buffers, temperatures and
+  pending updates. `dumbmonit_opnsense_…` metrics, twelve built-in rules,
+  `GET /api/targets/{id}/opnsense/…` and a documentation page. OPNsense writes
+  `"none"` for a gateway that is fine and `"~"` for one it does not monitor:
+  the first is read as *online*, the second produces one series fewer rather
+  than a zero pretending to be a measurement. The firmware check is never
+  triggered — only its last result is read, so a DumbMonit probe never sends
+  the firewall to the update mirror.
+- **TrueNAS** device (`truenas`): the ZFS pool whose mirror or RAIDZ vdev lost a
+  disk and still serves its data — the failure nobody sees until the second
+  disk goes — with the disk named on the device page; scrubs and resilvers in
+  progress and the result of the last scrub, pool and dataset usage against
+  their quotas, snapshot counts, replication and periodic snapshot tasks with
+  their last run and error, disk temperatures read from TrueNAS's cache (a
+  sleeping disk is never woken), SMART self-test results, the alerts TrueNAS
+  raises itself, and services. `dumbmonit_truenas_…` metrics, thirteen built-in
+  rules, `GET /api/targets/{id}/truenas/…` and a documentation page, which says
+  plainly that TrueNAS's REST API accepts only a full-administrator key.
+
+- **Five more kinds of service monitor**, each one beginning a real session in
+  the service's own protocol rather than checking that a port opens.
+  **SMTP** (`smtp`) runs the greeting, `EHLO`, `STARTTLS` and, if the target
+  carries a credential, `AUTH` — and never sends a message; a refused password
+  is reported as `reason="auth"`, not as an outage. **PostgreSQL**
+  (`postgres`) and **MySQL/MariaDB** (`mysql`) connect, authenticate and run
+  one query (`SELECT 1` by default, which reads no table), timing the
+  connection and the query separately: the "the database is up but no longer
+  answering" signal. Replace the query with one that returns a number and it
+  becomes a chart. **MQTT** (`mqtt`) connects, subscribes to a topic and can
+  wait for a retained message — when the broker dies, the whole house goes
+  quiet without anything reporting an error. **WebSocket** (`websocket`) runs
+  the upgrade handshake and verifies the server's `Sec-WebSocket-Accept`, a
+  failure a plain HTTP check cannot see, and can send a frame and expect one
+  back. All of them go through the same address guard, the same per-probe
+  timeout and the same certificate reading as the existing probes: expiry,
+  issuer and TLS version are recorded for a mail relay or a broker exactly as
+  for a website, and no credential is ever sent over a chain that could not be
+  verified.
+- **The DNS monitor asserts what a zone answers.** Beyond the expected values
+  it already checked, `expect_mode = exact` refuses any record the expectation
+  does not cover — a hijacked zone usually keeps the legitimate address and
+  adds one beside it — and `forbid` names values that must never come back: a
+  former host's address, an expired validation `TXT`, a decommissioned mail
+  server.
+
+- **The agent runs on macOS and FreeBSD.** One installer, four init systems:
+  systemd and OpenRC on Linux, **launchd** on macOS (a daemon in
+  `/Library/LaunchDaemons`, bootstrapped into the system domain) and **rc.d**
+  on FreeBSD (`/usr/local/etc/rc.d/dumbmonit_agent`, supervised by `daemon(8)`
+  and enabled with `service dumbmonit_agent enable`). The script detects the
+  system, picks the right paths and the right binary, and refuses what it
+  cannot install with a sentence rather than a 404. A machine is recognised
+  across renames everywhere: `/etc/machine-id` on Linux, the `IOPlatformUUID`
+  on macOS, `kern.hostuuid` or `/etc/hostid` on FreeBSD — and an identifier
+  made only of zeroes, which FreeBSD writes when the firmware gave it nothing,
+  is rejected rather than shared by a whole fleet. Watched services are named
+  as each system names them: systemd units, launchd labels, rc.d services.
+  The FreeBSD binary (x86_64) is built with the image and served from
+  `/download/…` like the others; the macOS binaries are built on a macOS runner
+  and attached to each release, Apple's SDK not being redistributable — asking
+  the server for one answers with the address to fetch it from.
+- **Temperatures and fans.** The agent reads the probes the machine exposes:
+  `/sys/class/hwmon` on Linux, the SMC on macOS, `dev.cpu.N.temperature` on
+  FreeBSD. Each sensor also publishes the critical threshold **its own
+  hardware declares**, which is what makes the new **Temperature above
+  critical** rule work without anyone choosing a number — 85 °C is an emergency
+  on a disk and an ordinary afternoon on a laptop CPU. Fans (Linux only, rpm)
+  come with them. A reading outside 1–150 °C, or a fan at 0 rpm, is dropped:
+  an empty fan header and a dead fan read the same, and a wrong number costs
+  more than a missing one.
+- **Disk health, through SMART.** When `smartctl` is installed, the agent
+  reports each disk's own verdict (`agent_disk_smart_ok`), its temperature,
+  power-on hours, wear, reallocated and pending sectors, and NVMe media
+  errors — with a **Disk SMART failing** rule, the single most useful warning a
+  homelab can get, since it usually arrives weeks before the failure. Sleeping
+  disks are never woken to be measured (`-n standby`), serial numbers never
+  leave the machine, and without `smartctl` nothing at all is published.
+- **ZFS pools.** State, capacity, fragmentation, per-device error counters,
+  permanently corrupted files, and the last scrub — its age, and whether it
+  found anything. Two rules come with it: **ZFS pool degraded** and **ZFS scrub
+  found errors**, the second being the one that breaks the silence of a pool
+  that is still `ONLINE` while reading back damaged data. Covers FreeBSD,
+  TrueNAS and the many Linux machines on OpenZFS at once, and stays completely
+  silent where there is no `zpool`.
+
 ## 0.1.0-alpha.5 — 2026-09-25
 
 ### Added

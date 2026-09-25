@@ -61,7 +61,7 @@ the `sysctls:` lines are still there, then `docker compose up -d`. See
 - A revoked token stops the agent at its next push; re-run the installer with
   a new token.
 
-See [Linux and Windows agent](devices/agent.md).
+See [Linux, macOS, FreeBSD and Windows agent](devices/agent.md).
 
 ## Changing the port
 

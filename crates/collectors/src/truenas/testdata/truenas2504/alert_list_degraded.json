@@ -1,0 +1,51 @@
+[
+  {
+    "uuid": "22418d4d-4626-4072-9677-5e57031b5a98",
+    "source": "VolumeStatus",
+    "klass": "VolumeStatus",
+    "args": {
+      "volume": "tank",
+      "state": "DEGRADED",
+      "status": "One or more devices has been taken offline by the administrator. Sufficient replicas exist for the pool to continue functioning in a degraded state.",
+      "devices": "<br>The following devices are not healthy:<ul><li>Disk QEMU_HARDDISK DATA0002 is OFFLINE</li></ul>"
+    },
+    "node": "Controller A",
+    "key": "{\"devices\": \"<br>The following devices are not healthy:<ul><li>Disk QEMU_HARDDISK DATA0002 is OFFLINE</li></ul>\", \"state\": \"DEGRADED\", \"status\": \"One or more devices has been taken offline by the administrator. Sufficient replicas exist for the pool to continue functioning in a degraded state.\", \"volume\": \"tank\"}",
+    "datetime": {
+      "$date": 1790291017000
+    },
+    "last_occurrence": {
+      "$date": 1790291017000
+    },
+    "dismissed": false,
+    "mail": null,
+    "text": "Pool %(volume)s state is %(state)s: %(status)s%(devices)s",
+    "id": "22418d4d-4626-4072-9677-5e57031b5a98",
+    "level": "CRITICAL",
+    "formatted": "Pool tank state is DEGRADED: One or more devices has been taken offline by the administrator. Sufficient replicas exist for the pool to continue functioning in a degraded state.<br>The following devices are not healthy:<ul><li>Disk QEMU_HARDDISK DATA0002 is OFFLINE</li></ul>",
+    "one_shot": false
+  },
+  {
+    "uuid": "2235ab45-15d6-4ea2-833d-4722c2f7f99b",
+    "source": "Replication",
+    "klass": "ReplicationSuccess",
+    "args": {
+      "name": "local media copy"
+    },
+    "node": "Controller A",
+    "key": "[1, \"2026-09-24T22:53:54.210663\"]",
+    "datetime": {
+      "$date": 1790290434000
+    },
+    "last_occurrence": {
+      "$date": 1790291017000
+    },
+    "dismissed": false,
+    "mail": null,
+    "text": "Replication \"%(name)s\" succeeded.",
+    "id": "2235ab45-15d6-4ea2-833d-4722c2f7f99b",
+    "level": "INFO",
+    "formatted": "Replication \"local media copy\" succeeded.",
+    "one_shot": false
+  }
+]

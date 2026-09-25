@@ -10,16 +10,19 @@
 import type { Component } from 'svelte';
 import type { Target } from '$lib/api/types';
 import AgentPanel from './agent/AgentPanel.svelte';
+import OpnsensePanel from './opnsense/OpnsensePanel.svelte';
 import PbsPanel from './pbs/PbsPanel.svelte';
 import PdmPanel from './pdm/PdmPanel.svelte';
 import PmgPanel from './pmg/PmgPanel.svelte';
 import ProxmoxPanel from './proxmox/ProxmoxPanel.svelte';
 import PushPanel from './push/PushPanel.svelte';
+import RedfishPanel from './redfish/RedfishPanel.svelte';
 import SynologyPanel from './synology/SynologyPanel.svelte';
+import TruenasPanel from './truenas/TruenasPanel.svelte';
 
 export type KindPanel = Component<{ target: Target }>;
 
-export const kindPanels: Record<string, KindPanel> = { pbs: PbsPanel, pdm: PdmPanel, pmg: PmgPanel, agent: AgentPanel, proxmox: ProxmoxPanel, synology: SynologyPanel, push: PushPanel };
+export const kindPanels: Record<string, KindPanel> = { pbs: PbsPanel, pdm: PdmPanel, pmg: PmgPanel, agent: AgentPanel, proxmox: ProxmoxPanel, synology: SynologyPanel, push: PushPanel, opnsense: OpnsensePanel, truenas: TruenasPanel, redfish: RedfishPanel };
 
 /** The panel for a kind, or `null` when the generic charts are all there is. */
 export function kindPanel(kind: string): KindPanel | null {

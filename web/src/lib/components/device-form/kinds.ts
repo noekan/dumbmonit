@@ -7,17 +7,25 @@
  */
 import type { Icon as LucideIcon } from 'lucide-svelte';
 import {
+	Antenna,
 	Archive,
 	AtSign,
 	Boxes,
+	BrickWall,
+	Cable,
 	Cpu,
+	Database,
 	Globe,
 	HardDrive,
 	HeartPulse,
+	LayoutGrid,
+	Mail,
+	MailCheck,
 	Network,
 	Plug,
 	Radio,
 	Server,
+	ServerCog,
 	ShieldCheck
 } from 'lucide-svelte';
 import type { CollectorInfo } from '$lib/api';
@@ -34,7 +42,17 @@ const KIND_ICON: Record<string, typeof LucideIcon> = {
 	dns: AtSign,
 	ping: Radio,
 	tls: ShieldCheck,
-	push: HeartPulse
+	smtp: Mail,
+	postgres: Database,
+	mysql: Database,
+	mqtt: Antenna,
+	websocket: Cable,
+	push: HeartPulse,
+	pdm: LayoutGrid,
+	pmg: MailCheck,
+	opnsense: BrickWall,
+	truenas: HardDrive,
+	redfish: ServerCog
 };
 
 export function kindIcon(kind: string): typeof LucideIcon {
@@ -42,7 +60,18 @@ export function kindIcon(kind: string): typeof LucideIcon {
 }
 
 /** Kinds that describe a machine the collector polls, in display order. */
-const DEVICE_KINDS = ['snmp', 'proxmox', 'pbs', 'synology', 'agent'];
+const DEVICE_KINDS = [
+	'snmp',
+	'proxmox',
+	'pbs',
+	'pdm',
+	'pmg',
+	'synology',
+	'truenas',
+	'opnsense',
+	'redfish',
+	'agent'
+];
 
 export interface KindGroup {
 	id: 'devices' | 'services' | 'other';

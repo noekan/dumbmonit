@@ -3,7 +3,7 @@
  * settings section so both say the same thing about the same state.
  */
 import type { Tone } from '$lib/ui/Plate.svelte';
-import type { IncidentKind, IncidentStatus, PublicItemState, PublicOverall, PublicStatus } from '$lib/api';
+import type { IncidentKind, IncidentStatus, PublicItemState, PublicOverall, PublicStatus, StatusPageAccent } from '$lib/api';
 
 export const OVERALL: Record<PublicOverall, { label: string; tone: Tone }> = {
 	operational: { label: 'All systems operational', tone: 'signal' },
@@ -81,6 +81,40 @@ export function dayTone(uptime: number | null): 'signal' | 'advisory' | 'warning
 	if (uptime >= 99.5) return 'signal';
 	if (uptime >= 95) return 'advisory';
 	return 'warning';
+}
+
+/** Accents a page can pick, with the word the editor shows. */
+export const ACCENTS: { value: StatusPageAccent; label: string }[] = [
+	{ value: 'default', label: 'Ink (default)' },
+	{ value: 'blue', label: 'Blue' },
+	{ value: 'teal', label: 'Teal' },
+	{ value: 'violet', label: 'Violet' },
+	{ value: 'rose', label: 'Rose' },
+	{ value: 'amber', label: 'Amber' }
+];
+
+/** Class carrying a page's accent tokens (`app.css`); unknown values fall back to the ink. */
+export function accentClass(accent: string | undefined): string {
+	return accent && accent !== 'default' && ACCENTS.some((a) => a.value === accent) ? `sp-accent-${accent}` : '';
+}
+
+/** Host of the organisation's site, for the link text ("example.org"). */
+export function homepageHost(url: string): string {
+	try {
+		return new URL(url).host.replace(/^www\./, '');
+	} catch {
+		return url;
+	}
+}
+
+/** "No downtime", "12 min down", "2 h 05 min down" — for one day of the history bar. */
+export function formatDowntime(minutes: number | null | undefined): string {
+	if (minutes == null || !Number.isFinite(minutes)) return 'downtime unknown';
+	if (minutes <= 0) return 'no downtime';
+	if (minutes < 60) return `${minutes} min down`;
+	const hours = Math.floor(minutes / 60);
+	const rest = minutes % 60;
+	return rest === 0 ? `${hours} h down` : `${hours} h ${String(rest).padStart(2, '0')} min down`;
 }
 
 /** Derives a URL slug from a title, the same way the server does. */

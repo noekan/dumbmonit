@@ -1,0 +1,21 @@
+{
+ "version": "25.04.1",
+ "buildtime": {"$date": 1748248693000},
+ "hostname": "truenas-02",
+ "physmem": 270270275584,
+ "model": "Intel(R) Xeon(R) CPU E5-2680 v2 @ 2.80GHz",
+ "cores": 10,
+ "physical_cores": 10,
+ "loadavg": [0.0107421875, 0.0283203125, 0.04638671875],
+ "uptime": "0:37:39.375496",
+ "uptime_seconds": 2259.375495896,
+ "system_serial": "Not Specified",
+ "system_product": "Standard PC (i440FX + PIIX, 1996)",
+ "system_product_version": "pc-i440fx-9.2",
+ "license": null,
+ "boottime": {"$date": 1748374721000},
+ "datetime": {"$date": 1748376980000},
+ "timezone": "America/Detroit",
+ "system_manufacturer": "QEMU",
+ "ecc_memory": true
+}

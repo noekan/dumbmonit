@@ -1,9 +1,14 @@
 //! État des services nommés dans la configuration.
 //!
-//! Deux mondes, une seule métrique : `systemctl` sur Linux, le gestionnaire de
-//! services sur Windows. L'agent ne remonte jamais d'erreur ici — un service
-//! introuvable est un service à l'arrêt du point de vue de celui qui surveille, et
-//! faire échouer tout un cycle de collecte pour une unité mal orthographiée serait
+//! Quatre mondes, une seule métrique : `systemctl` sur Linux, `launchctl` sur
+//! macOS, `service` sur FreeBSD, le gestionnaire de services sur Windows. Le
+//! nom écrit dans la configuration est celui du système hôte — une unité
+//! (`sshd.service`), une étiquette launchd (`com.apple.sshd`), un service rc.d
+//! (`sshd`) — et l'agent ne le réécrit jamais.
+//!
+//! L'agent ne remonte jamais d'erreur ici — un service introuvable est un
+//! service à l'arrêt du point de vue de celui qui surveille, et faire échouer
+//! tout un cycle de collecte pour une unité mal orthographiée serait
 //! disproportionné.
 
 /// État d'un service, réduit à ce qui se pilote depuis une alerte.
@@ -38,7 +43,7 @@ pub async fn probe(names: &[String]) -> Vec<(String, ServiceState)> {
     platform::probe(names).await
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 mod platform {
     use super::{ServiceState, parse_is_active};
 
@@ -61,6 +66,69 @@ mod platform {
                 names.iter().map(|name| (name.clone(), ServiceState::Unknown)).collect()
             }
         }
+    }
+}
+
+/// macOS : `launchctl list` sans argument imprime tout le domaine en trois
+/// colonnes — une seule invocation, comme sous Linux.
+#[cfg(target_os = "macos")]
+mod platform {
+    use super::{ServiceState, parse_launchctl_list};
+
+    pub async fn probe(names: &[String]) -> Vec<(String, ServiceState)> {
+        let output =
+            tokio::process::Command::new("launchctl").arg("list").kill_on_drop(true).output().await;
+
+        match output {
+            Ok(output) => parse_launchctl_list(&String::from_utf8_lossy(&output.stdout), names),
+            Err(error) => {
+                tracing::debug!(%error, "launchctl unavailable, service states unknown");
+                names.iter().map(|name| (name.clone(), ServiceState::Unknown)).collect()
+            }
+        }
+    }
+}
+
+/// FreeBSD : `service` n'a pas d'équivalent de `systemctl is-active a b c`, il
+/// faut donc une invocation par service. C'est un `sh` par service et par
+/// cycle ; la liste surveillée en compte une poignée, et ne rien remonter du
+/// tout serait pire.
+#[cfg(target_os = "freebsd")]
+mod platform {
+    use super::{ServiceState, parse_service_onestatus};
+
+    pub async fn probe(names: &[String]) -> Vec<(String, ServiceState)> {
+        let mut states = Vec::with_capacity(names.len());
+        for name in names {
+            // `onestatus` plutôt que `status` : il répond même pour un service
+            // que `rc.conf` n'a pas activé, ce qui est justement le cas qu'on
+            // veut voir — un service éteint par mégarde.
+            let output = tokio::process::Command::new("service")
+                .args([name.as_str(), "onestatus"])
+                .kill_on_drop(true)
+                .output()
+                .await;
+            let state = match output {
+                Ok(output) => parse_service_onestatus(&String::from_utf8_lossy(&output.stdout)),
+                Err(error) => {
+                    tracing::debug!(%error, "service(8) unavailable, service states unknown");
+                    ServiceState::Unknown
+                }
+            };
+            states.push((name.clone(), state));
+        }
+        states
+    }
+}
+
+/// Tout autre système d'exploitation de type Unix : rien de fiable à
+/// interroger, et l'on préfère le dire.
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos", target_os = "freebsd"))))]
+mod platform {
+    use super::ServiceState;
+
+    pub async fn probe(names: &[String]) -> Vec<(String, ServiceState)> {
+        names.iter().map(|name| (name.clone(), ServiceState::Unknown)).collect()
     }
 }
 
@@ -106,7 +174,7 @@ mod platform {
 ///
 /// Isolée du lancement de processus pour être vérifiable : c'est le seul endroit
 /// où une évolution de `systemctl` peut nous surprendre.
-#[cfg_attr(not(unix), allow(dead_code))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn parse_is_active(stdout: &str, names: &[String]) -> Vec<(String, ServiceState)> {
     let mut lines = stdout.lines().map(str::trim);
     names
@@ -123,6 +191,59 @@ fn parse_is_active(stdout: &str, names: &[String]) -> Vec<(String, ServiceState)
             (name.clone(), state)
         })
         .collect()
+}
+
+/// Traduit `launchctl list` : trois colonnes séparées par des tabulations,
+/// `PID  Status  Label`, une ligne d'en-tête en tête.
+///
+/// Un PID numérique signifie que le service tourne. À l'arrêt, `launchctl`
+/// écrit `-` et garde le code de sortie du dernier lancement : non nul, le
+/// service a échoué — c'est ce qui distingue un démon planté d'un démon
+/// volontairement arrêté.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn parse_launchctl_list(stdout: &str, names: &[String]) -> Vec<(String, ServiceState)> {
+    let mut seen = std::collections::BTreeMap::new();
+    for line in stdout.lines().skip(1) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 3 {
+            continue;
+        }
+        let label = fields[2];
+        let state = if fields[0].parse::<u32>().is_ok() {
+            ServiceState::Running
+        } else if fields[1].parse::<i64>().is_ok_and(|status| status != 0) {
+            ServiceState::Failed
+        } else {
+            ServiceState::Stopped
+        };
+        seen.insert(label.to_string(), state);
+    }
+    names
+        .iter()
+        .map(|name| {
+            let state = seen.get(name).copied().unwrap_or(ServiceState::Unknown);
+            (name.clone(), state)
+        })
+        .collect()
+}
+
+/// Traduit `service <nom> onestatus` : une phrase, et rien d'autre.
+///
+/// « <nom> is running as pid 1234. » ou « <nom> is not running. ». Tout le
+/// reste est un inconnu — notamment le service dont le script rc.d n'existe
+/// pas, qui fait écrire `service` sur la sortie d'erreur et ne dit rien ici.
+/// C'est un nom mal orthographié, pas un service arrêté, et un faux zéro
+/// vaudrait une fausse alerte toutes les trente secondes.
+#[cfg_attr(not(target_os = "freebsd"), allow(dead_code))]
+fn parse_service_onestatus(stdout: &str) -> ServiceState {
+    let text = stdout.trim();
+    if text.contains("is running") {
+        ServiceState::Running
+    } else if text.contains("is not running") {
+        ServiceState::Stopped
+    } else {
+        ServiceState::Unknown
+    }
 }
 
 #[cfg(test)]
@@ -167,6 +288,43 @@ mod tests {
         assert_eq!(ServiceState::Stopped.as_value(), 0.0);
         assert_eq!(ServiceState::Failed.as_value(), 0.0);
         assert_eq!(ServiceState::Unknown.as_value(), 0.0);
+    }
+
+    #[test]
+    fn launchctl_tells_a_running_daemon_from_a_crashed_one() {
+        let stdout = "PID\tStatus\tLabel\n\
+                      421\t0\tcom.apple.sshd\n\
+                      -\t78\tio.tailscale.ipn.macsys\n\
+                      -\t0\tcom.example.backup\n";
+        let states = parse_launchctl_list(
+            stdout,
+            &names(&["com.apple.sshd", "io.tailscale.ipn.macsys", "com.example.backup", "absent"]),
+        );
+        assert_eq!(states[0].1, ServiceState::Running);
+        assert_eq!(states[1].1, ServiceState::Failed, "code de sortie non nul");
+        assert_eq!(states[2].1, ServiceState::Stopped);
+        assert_eq!(states[3].1, ServiceState::Unknown, "étiquette inconnue de launchd");
+    }
+
+    #[test]
+    fn launchctl_answers_in_the_order_the_configuration_asked() {
+        let stdout = "PID\tStatus\tLabel\n-\t0\tb\n12\t0\ta\n";
+        let states = parse_launchctl_list(stdout, &names(&["a", "b"]));
+        assert_eq!(states[0].0, "a");
+        assert_eq!(states[0].1, ServiceState::Running);
+        assert_eq!(states[1].1, ServiceState::Stopped);
+    }
+
+    #[test]
+    fn freebsd_reads_the_one_sentence_service_prints() {
+        assert_eq!(
+            parse_service_onestatus("sshd is running as pid 1234.\n"),
+            ServiceState::Running
+        );
+        assert_eq!(parse_service_onestatus("nginx is not running.\n"), ServiceState::Stopped);
+        // Nom mal orthographié : `service` n'écrit rien ici. Inconnu, surtout
+        // pas « à l'arrêt ».
+        assert_eq!(parse_service_onestatus(""), ServiceState::Unknown);
     }
 
     #[tokio::test]

@@ -327,6 +327,60 @@ const SYNOLOGY_LOGIN: CredentialView = CredentialView {
     ],
 };
 
+/// Compte du contrôleur de gestion : utilisateur et mot de passe, envoyés en
+/// Basic ou échangés contre une session selon l'option `auth`.
+const REDFISH_LOGIN: CredentialView = CredentialView {
+    kind: "username_password",
+    label: "Management controller account",
+    help: "",
+    fields: &[
+        cred_text(
+            "username",
+            "User name",
+            "The read-only account created on the controller for monitoring.",
+            "dumbmonit",
+        ),
+        cred_secret("password", "Password", "", "", true),
+    ],
+};
+
+/// Clé d'API OPNsense : le fichier téléchargé à la création contient `key=…`
+/// et `secret=…`, et le pare-feu les attend en authentification HTTP « basic ».
+const OPNSENSE_KEY: CredentialView = CredentialView {
+    kind: "username_password",
+    label: "API key and secret",
+    help: "The two lines of the file OPNsense downloads when the key is created.",
+    fields: &[
+        cred_text(
+            "username",
+            "API key",
+            "The \"key\" line of the file OPNsense downloaded when you created the key.",
+            "nJ8kQ2vF...",
+        ),
+        cred_secret(
+            "password",
+            "API secret",
+            "The \"secret\" line of the same file. Stored encrypted, never shown again.",
+            "",
+            true,
+        ),
+    ],
+};
+
+/// Clé d'API TrueNAS, envoyée en `Authorization: Bearer`.
+const TRUENAS_KEY: CredentialView = CredentialView {
+    kind: "api_token",
+    label: "API key",
+    help: "The key TrueNAS shows once when it is created, as \"3-AbCd…\".",
+    fields: &[cred_secret(
+        "token",
+        "API key",
+        "Starts with a number and a dash. Stored encrypted, never shown again.",
+        "3-…",
+        true,
+    )],
+};
+
 const HTTP_TOKEN: CredentialView = CredentialView {
     kind: "api_token",
     label: "Bearer token",
@@ -592,6 +646,20 @@ const DNS_OPTIONS: &[OptionView] = &[
         "93.184.216.34",
         "",
     ),
+    select(
+        "expect_mode",
+        "Comparison",
+        "\"contains\": each expected value must appear somewhere in the answer. \"exact\": the answer must hold those values and nothing else, so a record added beside the right one fails the check.",
+        "contains",
+        &["contains", "exact"],
+    ),
+    text(
+        "forbid",
+        "Forbidden values",
+        "Values that must never appear in the answer, separated by commas: a former host's address, an expired validation record. Checked before the expected ones.",
+        "198.51.100.7",
+        "",
+    ),
     PROBE_TIMEOUT,
 ];
 
@@ -657,6 +725,249 @@ const TLS_OPTIONS: &[OptionView] = &[
     ALLOW_PRIVATE_TARGETS,
     PROBE_TIMEOUT,
 ];
+
+/// Nom annoncé en SNI, commun aux sondes applicatives chiffrées.
+const fn server_name_option(help: &'static str) -> OptionView {
+    text("server_name", "Server name (SNI)", help, "mail.example.com", "")
+}
+
+/// Options lues par `collectors/uptime/smtp/options.rs`.
+const SMTP_OPTIONS: &[OptionView] = &[
+    select(
+        "security",
+        "Encryption",
+        "STARTTLS starts in clear text and upgrades (port 587), TLS encrypts from the first byte (port 465), None never encrypts (port 25) and only suits a relay on your own network.",
+        "starttls",
+        &["starttls", "tls", "none"],
+    ),
+    number(
+        "port",
+        "Port",
+        "Used if the address does not give one. Empty: 587 with STARTTLS, 465 with TLS, 25 without encryption.",
+        "587",
+        "",
+    ),
+    text(
+        "helo_name",
+        "Name announced (EHLO)",
+        "Name the check gives when it introduces itself. A strict relay refuses a name it cannot resolve.",
+        "monit.example.com",
+        "dumbmonit",
+    ),
+    text(
+        "expect_capability",
+        "Expected extension",
+        "Extension the server must advertise in its EHLO answer, for example STARTTLS or AUTH. Empty: no expectation.",
+        "STARTTLS",
+        "",
+    ),
+    server_name_option(
+        "Domain name announced to the server and checked in the certificate. Set it when the address is an IP.",
+    ),
+    insecure_tls(
+        "An unverifiable chain no longer counts as a failure: the expiry date is still recorded.",
+    ),
+    ALLOW_PRIVATE_TARGETS,
+    PROBE_TIMEOUT,
+];
+
+/// Options lues par `collectors/uptime/sql/options.rs`, moteur PostgreSQL.
+const POSTGRES_OPTIONS: &[OptionView] = &[
+    number("port", "Port", "Used if the address does not give one.", "5432", "5432"),
+    text(
+        "database",
+        "Database",
+        "Database opened on connection. The monitoring account must be allowed to connect to it.",
+        "postgres",
+        "postgres",
+    ),
+    text(
+        "query",
+        "Query",
+        "Run on every check. The default reads no table, so the account needs no privilege beyond connecting. A query returning one number turns it into a chart.",
+        "SELECT count(*) FROM jobs WHERE failed",
+        "SELECT 1",
+    ),
+    text(
+        "expect",
+        "Expected value",
+        "Value the first column of the first row must hold. Empty: only the query succeeding is checked.",
+        "1",
+        "",
+    ),
+    select(
+        "sslmode",
+        "Encryption",
+        "\"prefer\" encrypts when the server offers it, \"require\" refuses to connect without it, \"verify-full\" also checks the certificate and the name, \"disable\" never encrypts.",
+        "prefer",
+        &["prefer", "require", "verify-full", "disable"],
+    ),
+    ALLOW_PRIVATE_TARGETS,
+    PROBE_TIMEOUT,
+];
+
+/// Options lues par `collectors/uptime/sql/options.rs`, moteur MySQL/MariaDB.
+const MYSQL_OPTIONS: &[OptionView] = &[
+    number("port", "Port", "Used if the address does not give one.", "3306", "3306"),
+    text(
+        "database",
+        "Database",
+        "Database opened on connection. Empty: none, which is enough for the default query.",
+        "monitoring",
+        "",
+    ),
+    text(
+        "query",
+        "Query",
+        "Run on every check. The default reads no table, so the account needs no privilege beyond connecting. A query returning one number turns it into a chart.",
+        "SELECT count(*) FROM jobs WHERE failed",
+        "SELECT 1",
+    ),
+    text(
+        "expect",
+        "Expected value",
+        "Value the first column of the first row must hold. Empty: only the query succeeding is checked.",
+        "1",
+        "",
+    ),
+    select(
+        "sslmode",
+        "Encryption",
+        "\"prefer\" encrypts when the server offers it, \"require\" refuses to connect without it, \"verify-full\" also checks the certificate and the name, \"disable\" never encrypts.",
+        "prefer",
+        &["prefer", "require", "verify-full", "disable"],
+    ),
+    ALLOW_PRIVATE_TARGETS,
+    PROBE_TIMEOUT,
+];
+
+/// Options lues par `collectors/uptime/mqtt/options.rs`.
+const MQTT_OPTIONS: &[OptionView] = &[
+    boolean(
+        "tls",
+        "Encrypted connection",
+        "Encrypts the session from the first byte, as brokers do on port 8883.",
+        false,
+    ),
+    number(
+        "port",
+        "Port",
+        "Used if the address does not give one. Empty: 1883 in clear text, 8883 encrypted.",
+        "1883",
+        "",
+    ),
+    text(
+        "topic",
+        "Topic",
+        "Topic the check subscribes to. Empty: it only connects, which already tells you the broker is alive and accepts your account.",
+        "home/living-room/temperature",
+        "",
+    ),
+    boolean(
+        "expect_message",
+        "Expect a retained message",
+        "A message must arrive on that topic before the timeout. Only retained messages arrive right away: a topic that is merely published to from time to time will look silent.",
+        false,
+    ),
+    text(
+        "expect",
+        "Expected content",
+        "Text that message must contain. Filling it in implies expecting a message.",
+        "online",
+        "",
+    ),
+    text(
+        "client_id",
+        "Client identifier",
+        "Name announced to the broker. The default derives from the device, so two checks never disconnect each other.",
+        "dumbmonit-3",
+        "",
+    ),
+    server_name_option(
+        "Domain name announced to the broker and checked in the certificate. Set it when the address is an IP.",
+    ),
+    insecure_tls(
+        "An unverifiable chain no longer counts as a failure: the expiry date is still recorded.",
+    ),
+    ALLOW_PRIVATE_TARGETS,
+    PROBE_TIMEOUT,
+];
+
+/// Options lues par `collectors/uptime/websocket/options.rs`.
+const WEBSOCKET_OPTIONS: &[OptionView] = &[
+    text(
+        "path",
+        "Path",
+        "Path of the opening request. Taken from the address when it carries one.",
+        "/api/websocket",
+        "",
+    ),
+    number(
+        "port",
+        "Port",
+        "Used if the address does not give one. Empty: 443 for wss, 80 for ws.",
+        "8123",
+        "",
+    ),
+    text(
+        "send",
+        "Frame to send",
+        "Text frame sent once the connection is open. Empty: nothing is sent.",
+        "{\"type\":\"ping\"}",
+        "",
+    ),
+    text(
+        "expect",
+        "Expected content",
+        "Text a received frame must contain. Empty and with nothing to send, only the opening handshake is checked.",
+        "auth_required",
+        "",
+    ),
+    text(
+        "subprotocol",
+        "Subprotocol",
+        "Value of Sec-WebSocket-Protocol. The check fails if the server picks a different one.",
+        "json",
+        "",
+    ),
+    text(
+        "origin",
+        "Origin",
+        "Value of the Origin header, which some servers require before upgrading.",
+        "https://home.example.com",
+        "",
+    ),
+    server_name_option(
+        "Domain name announced to the server and checked in the certificate. Set it when the address is an IP.",
+    ),
+    insecure_tls(
+        "An unverifiable chain no longer counts as a failure: the expiry date is still recorded.",
+    ),
+    ALLOW_PRIVATE_TARGETS,
+    PROBE_TIMEOUT,
+];
+
+/// Identifiants d'un relais de messagerie ou d'un courtier MQTT.
+const APP_LOGIN: CredentialView = CredentialView {
+    kind: "username_password",
+    label: "Username / password",
+    help: "Sent once the connection is encrypted, never before.",
+    fields: &[
+        cred_text("username", "User name", "", "monitoring"),
+        cred_secret("password", "Password", "Stored encrypted, never shown again.", "", true),
+    ],
+};
+
+/// Identifiants d'un compte de base de données.
+const SQL_LOGIN: CredentialView = CredentialView {
+    kind: "username_password",
+    label: "Username / password",
+    help: "A read-only account created for monitoring, never an application one.",
+    fields: &[
+        cred_text("username", "User name", "", "dumbmonit"),
+        cred_secret("password", "Password", "Stored encrypted, never shown again.", "", true),
+    ],
+};
 
 /// Options lues par `collectors/push/mod.rs` (`Settings::from_target`).
 const PUSH_OPTIONS: &[OptionView] = &[
@@ -1079,6 +1390,180 @@ const PMG_OPTIONS: &[OptionView] = &[
     ),
 ];
 
+/// Options lues par `collectors/redfish/options.rs`.
+const REDFISH_OPTIONS: &[OptionView] = &[
+    number("port", "HTTPS port", "Used if the address does not give a port.", "443", "443"),
+    insecure_tls(
+        "Management controllers ship with a self-signed certificate: enable this if the connection is refused for that reason.",
+    ),
+    number(
+        "request_timeout_seconds",
+        "Timeout per request (seconds)",
+        "Time allowed for each Redfish call, from 1 to 120. A management controller is a small processor: a few seconds per answer is normal.",
+        "8",
+        "8",
+    ),
+    select(
+        "auth",
+        "Authentication",
+        "basic sends the user name and password with every request and leaves nothing open on the controller. session logs in once and reuses the session token; use it only if the controller refuses basic authentication, since controllers have few session slots.",
+        "basic",
+        &["basic", "session"],
+    ),
+    boolean(
+        "storage",
+        "Watch the drives",
+        "Reads the storage controllers and every drive behind them: health, predicted failure, remaining SSD life. One request per drive.",
+        true,
+    ),
+    boolean(
+        "logs",
+        "Count log entries",
+        "Counts the entries of the system event log and of the controller's own log, by severity. The messages themselves are never read.",
+        true,
+    ),
+];
+
+/// Options lues par `collectors/opnsense/options.rs`.
+const OPNSENSE_OPTIONS: &[OptionView] = &[
+    select(
+        "scheme",
+        "Protocol",
+        "HTTPS fits a firewall out of the box. HTTP only if the web interface is served in clear text.",
+        "https",
+        &["https", "http"],
+    ),
+    number("port", "Web interface port", "Used if the address does not give a port.", "443", "443"),
+    insecure_tls(
+        "OPNsense ships with a self-signed certificate by default: enable this if the connection is refused for that reason.",
+    ),
+    number(
+        "request_timeout_seconds",
+        "Timeout per request (seconds)",
+        "Time allowed for each API call, from 1 to 120. Most answer instantly; the firmware status is the slow one.",
+        "15",
+        "15",
+    ),
+    boolean(
+        "gateways",
+        "Watch the gateways",
+        "Reads what dpinger says about each gateway: up or down, round-trip delay and packet loss. On a multi-WAN firewall this is the one thing that fails without anyone noticing.",
+        true,
+    ),
+    boolean(
+        "interfaces",
+        "Watch the interfaces",
+        "Reads each interface's link state, addresses and byte, packet, error and drop counters. The addresses are where the current public address shows up.",
+        true,
+    ),
+    boolean(
+        "firewall",
+        "Watch the state table",
+        "Reads how many connections pf is tracking and the configured limit. A firewall that fills its state table refuses connections with no other symptom.",
+        true,
+    ),
+    boolean(
+        "dhcp",
+        "Count the DHCP leases",
+        "Counts the leases the firewall is handing out, whichever server it runs. Counts only: no address, host name or hardware address is ever read.",
+        true,
+    ),
+    boolean(
+        "vpn",
+        "Watch the VPN tunnels",
+        "Reads WireGuard, OpenVPN and IPsec: which tunnels exist and which ones are up. A plugin that is not installed is skipped in silence.",
+        true,
+    ),
+    boolean(
+        "unbound",
+        "Watch the resolver",
+        "Reads whether Unbound is answering. A firewall that routes but no longer resolves looks healthy to everyone except the machines behind it.",
+        true,
+    ),
+    boolean(
+        "services",
+        "Watch the services",
+        "Reads the list of services the firewall manages and which of them are running.",
+        true,
+    ),
+    boolean(
+        "carp",
+        "Watch CARP",
+        "Reads the virtual addresses of a high-availability pair and whether this firewall holds them. Also reports persistent maintenance mode, which is the state everyone forgets to switch off.",
+        true,
+    ),
+    boolean(
+        "firmware",
+        "Watch for updates",
+        "Reads the result of the firewall's last update check and whether a reboot is pending. The check itself is never triggered: that would send the firewall to the mirror on every measurement.",
+        true,
+    ),
+    boolean(
+        "temperature",
+        "Read the temperature sensors",
+        "Reads the CPU and board sensors the firewall exposes. A machine without sensors reports none, which is not an error.",
+        true,
+    ),
+];
+
+/// Options lues par `collectors/truenas/options.rs`.
+const TRUENAS_OPTIONS: &[OptionView] = &[
+    select(
+        "scheme",
+        "Protocol",
+        "Keep HTTPS: TrueNAS revokes an API key it receives over plain HTTP from another machine. HTTP only behind a reverse proxy on the NAS itself.",
+        "https",
+        &["https", "http"],
+    ),
+    number("port", "Web interface port", "Used if the address does not give a port.", "443", "443"),
+    insecure_tls(
+        "TrueNAS ships with a self-signed certificate by default: enable this if the connection is refused for that reason.",
+    ),
+    number(
+        "request_timeout_seconds",
+        "Timeout per request (seconds)",
+        "Time allowed for each API call, from 1 to 120. The service list probes every daemon and can take a while on a busy NAS.",
+        "20",
+        "20",
+    ),
+    boolean(
+        "datasets",
+        "Watch the datasets",
+        "Reads each dataset's usage against its quota, its snapshot count and when its snapshots last changed. Counts only, from ZFS's own cache: no snapshot is listed.",
+        true,
+    ),
+    boolean(
+        "disks",
+        "Watch the disks",
+        "Reads the disk inventory and the temperatures TrueNAS already has in cache. A sleeping disk is never woken up for a measurement.",
+        true,
+    ),
+    boolean(
+        "smart",
+        "Read the SMART test results",
+        "Reads the last self-test of each disk. No test is ever started. TrueNAS 25.10 no longer offers this call; it is then skipped in silence.",
+        true,
+    ),
+    boolean(
+        "alerts",
+        "Read TrueNAS's own alerts",
+        "Reads the alert list TrueNAS keeps itself — pool state, SMART, capacity, certificates, failed replications. Dismissed alerts are left out.",
+        true,
+    ),
+    boolean(
+        "tasks",
+        "Watch replication and snapshot tasks",
+        "Reads the state of every replication and periodic snapshot task, its last run and the last snapshot it handled.",
+        true,
+    ),
+    boolean(
+        "services",
+        "Watch the services",
+        "Reads the services set to start with the NAS and whether they are running. A service you switched off is not watched.",
+        true,
+    ),
+];
+
 /// Options lues par `collectors/synology/options.rs`.
 const SYNOLOGY_OPTIONS: &[OptionView] = &[
     select(
@@ -1240,6 +1725,81 @@ fn describe(kind: &'static str) -> CollectorView {
                 doc_url: "https://pmg.proxmox.com/pmg-docs/pmg-admin-guide.html#pmgconfig_userman",
             },
             options: PMG_OPTIONS,
+        },
+        "redfish" => CollectorView {
+            kind,
+            label: "Server hardware (Redfish)",
+            summary: "A server's own hardware, read from its management controller (BMC): fans, temperatures against their own thresholds, power supplies and their redundancy, drives, memory, processors and the event log.",
+            examples: &[
+                "Supermicro BMC",
+                "Dell iDRAC",
+                "HPE iLO",
+                "Lenovo XClarity Controller",
+                "ASRock Rack BMC",
+            ],
+            credential_types: &["username_password"],
+            credentials: &[REDFISH_LOGIN],
+            address_hint: "bmc.lan",
+            default_port: 443,
+            setup: Setup {
+                title: "Create a read-only account on the management controller",
+                steps: &[
+                    "Open the web interface of the management controller (BMC), not the operating system of the server. Create a new local user named as follows, with a long password used nowhere else.\ndumbmonit",
+                    "Give it the lowest role that can read, and nothing more. Supermicro: Configuration → Users → Add User, privilege User, and tick Redfish in the account type. Dell iDRAC: iDRAC Settings → Users → Local Users → Add, role Read Only. HPE iLO: Administration → User Administration → New, untick every privilege except Login. Lenovo XClarity Controller: BMC Configuration → User/LDAP → Create, role Read-only. ASRock Rack: Settings → User Management, privilege User.",
+                    "Check from any machine on the management network that the account can read Redfish. The command asks for the password and prints the server's name and health.\ncurl -k -u dumbmonit https://bmc.lan/redfish/v1/Systems",
+                    "In DumbMonit, enter the controller address, for example \"bmc.lan\" or \"10.0.0.50\", then the user name and password of that account.",
+                    "DumbMonit only reads: fans, temperatures, voltages, power supplies, drives, memory and processor summaries, and how many log entries there are by severity. It never powers the server on or off, never changes a setting and never reads the text of the logs.",
+                ],
+                warning: "Do not reuse the factory account of the controller: it can power the server off, mount media and reflash the firmware. Management controllers also ship with a self-signed certificate: if the connection is refused for that reason, tick \"Accept an unverifiable certificate\" in the options. A controller answers slowly and a full read takes several requests: if the device reports timeouts, raise DUMBMONIT_PROBE_TIMEOUT_SECS on the server.",
+                doc_url: "https://www.dmtf.org/standards/redfish",
+            },
+            options: REDFISH_OPTIONS,
+        },
+        "truenas" => CollectorView {
+            kind,
+            label: "TrueNAS",
+            summary: "ZFS storage server: pool health and the disk that failed, scrubs and resilvers, dataset usage against quotas, snapshots and replication, disk temperature and SMART, and the alerts TrueNAS raises itself.",
+            examples: &["TrueNAS SCALE", "TrueNAS Community Edition"],
+            credential_types: &["api_token"],
+            credentials: &[TRUENAS_KEY],
+            address_hint: "nas.lan",
+            default_port: 443,
+            setup: Setup {
+                title: "Create an API key for DumbMonit in TrueNAS",
+                steps: &[
+                    "In the web interface: Credentials → Groups → Add. Name the group as follows and give it the Local Administrator privilege.\ndumbmonit",
+                    "Why Local Administrator and not Read-Only Administrator: TrueNAS wired its read-only roles into its WebSocket API only. Over the REST API DumbMonit uses, a read-only key is refused on every single call. DumbMonit itself only ever reads: it never starts a scrub, a SMART test, an update or a replication.",
+                    "Credentials → Users → Add. Name the account as follows, make dumbmonit its primary group, and leave shell access, sudo and SSH off: none of them is needed.\ndumbmonit",
+                    "Create the key: Credentials → Users → API Keys → Add, pick the dumbmonit user and give the key a name. TrueNAS shows the key only once: copy it. On TrueNAS 24.10 the path is the user menu at the top right → API Keys → Add, and a key belongs to no user.",
+                    "In DumbMonit, enter the NAS address, for example \"nas.lan\", and paste the key. Keep HTTPS: TrueNAS revokes a key it ever receives over plain HTTP from another machine.",
+                ],
+                warning: "This key can change anything on the NAS: TrueNAS offers no read-only key over its REST API. Treat it like the password of an account that can erase your pools, keep it for DumbMonit alone, and revoke it from the same page if it leaks. TrueNAS also ships with a self-signed certificate: if the connection is refused for that reason, tick \"Accept an unverifiable certificate\" in the options.",
+                doc_url: "https://www.truenas.com/docs/scale/25.04/scaletutorials/toptoolbar/managingapikeys/",
+            },
+            options: TRUENAS_OPTIONS,
+        },
+        "opnsense" => CollectorView {
+            kind,
+            label: "OPNsense",
+            summary: "Open source firewall and router: gateway state with latency and packet loss, the pf state table, interfaces, VPN tunnels, DHCP leases, services, CARP and pending updates.",
+            examples: &["OPNsense firewall", "Home router", "Multi-WAN edge"],
+            credential_types: &["username_password"],
+            credentials: &[OPNSENSE_KEY],
+            address_hint: "192.168.1.1",
+            default_port: 443,
+            setup: Setup {
+                title: "Create a read-only API key in OPNsense",
+                steps: &[
+                    "In the web interface: System → Access → Groups → Add. Name the group as follows.\ndumbmonit",
+                    "Tick these privileges in the group, exactly as OPNsense names them: Lobby: Dashboard (system, memory, disks, temperatures, state table), System: Gateways, Status: Interfaces, Status: Services, System: Firmware, Interfaces: Virtual IPs: Status (CARP) and Services: Unbound (MVC). Then one per feature you run: Services: DHCP: Kea(v4) or Services: Dnsmasq DNS/DHCP: Settings for the leases, VPN: WireGuard: Status, Status: OpenVPN, Status: IPsec. A privilege you leave out costs exactly the metrics it carries, nothing else.",
+                    "System → Access → Users → Add. Name the account as follows, let OPNsense generate a scrambled password (this account never logs in: it answers with its key), and make it a member of the dumbmonit group.\ndumbmonit",
+                    "Edit that user again and, under API keys, click +. OPNsense downloads a small text file with two lines, key= and secret=, and shows the secret only this once. Copy the key into DumbMonit's API key field and the secret into its API secret field.",
+                    "In DumbMonit, enter the firewall address, for example \"192.168.1.1\" or \"fw.lan:8443\". The firewall is never asked to check for updates: DumbMonit reads the result of the check OPNsense runs on its own schedule, or that you start from System → Firmware.",
+                ],
+                warning: "Do not reuse the account you log in with: an API key is a password that never expires. OPNsense has no read-only variant of some privileges above: Status: Services also allows starting and stopping a service, System: Firmware also allows starting an update, and the Unbound, Kea and Dnsmasq privileges also cover their settings. DumbMonit only ever reads, but to limit what a leaked key could do, restrict the group's source networks to the address of the DumbMonit host. Never grant All pages. OPNsense also ships with a self-signed certificate: if the connection is refused for that reason, tick \"Accept an unverifiable certificate\" in the options.",
+                doc_url: "https://docs.opnsense.org/development/how-tos/api.html",
+            },
+            options: OPNSENSE_OPTIONS,
         },
         "synology" => CollectorView {
             kind,
@@ -1426,6 +1986,146 @@ fn describe(kind: &'static str) -> CollectorView {
             },
             options: TLS_OPTIONS,
         },
+        "smtp" => CollectorView {
+            kind,
+            label: "Mail relay (SMTP)",
+            summary: "Opens a real session on a mail server: greeting, EHLO, STARTTLS, and the login if you give one.",
+            examples: &[
+                "Your provider's SMTP relay",
+                "A local Postfix or msmtp",
+                "Proxmox Mail Gateway",
+                "The submission port of a mail server",
+            ],
+            credential_types: &["none", "username_password"],
+            credentials: &[NO_AUTH, APP_LOGIN],
+            address_hint: "smtp.example.com",
+            default_port: 587,
+            setup: Setup {
+                title: "Monitor a mail relay",
+                steps: &[
+                    "In the address, write the mail server, and the port if it is not the usual one: \"smtp.example.com\" or \"smtp.example.com:2525\".",
+                    "Pick the encryption your relay uses: STARTTLS for the submission port 587, TLS for port 465, None for a relay on your own network listening on port 25.",
+                    "To check that the relay still accepts your account, fill in the credential: the check then runs AUTH and reports a refused password as such, not as an outage.",
+                    "Nothing is ever sent: the check stops after the greeting, the extensions and the optional login, then hangs up. No message enters the queue.",
+                    "To be warned when an extension disappears, name it in \"Expected extension\": a relay that stops advertising STARTTLS is a relay that would send your mail in clear text.",
+                ],
+                warning: "An accepted session does not prove mail leaves. A relay that accepts everything and queues it forever answers perfectly here: watch the queues themselves for that.",
+                doc_url: "",
+            },
+            options: SMTP_OPTIONS,
+        },
+        "postgres" => CollectorView {
+            kind,
+            label: "PostgreSQL database",
+            summary: "Connects, authenticates and runs one query: the signal for a database that is up but no longer answering.",
+            examples: &[
+                "The database behind Nextcloud or Immich",
+                "A Home Assistant recorder",
+                "An application database",
+                "A TimescaleDB instance",
+            ],
+            credential_types: &["username_password"],
+            credentials: &[SQL_LOGIN],
+            address_hint: "db.home.lan",
+            default_port: 5432,
+            setup: Setup {
+                title: "Monitor a PostgreSQL database",
+                steps: &[
+                    "On the server, create an account for monitoring and give it nothing more than the right to connect: CREATE ROLE dumbmonit LOGIN PASSWORD 'a-long-password';",
+                    "Make sure that account may reach the server from the DumbMonit machine, which usually means one more line in pg_hba.conf followed by a configuration reload.",
+                    "In the address, write the server, and the port if it is not 5432: \"db.home.lan\" or \"db.home.lan:5433\".",
+                    "The default query is SELECT 1, which reads no table: nothing else has to be granted. Connection time and query time are recorded separately.",
+                    "To watch something of your own, replace the query with one that returns a single number, and it becomes a chart: a queue length, a row count, a replication lag.",
+                ],
+                warning: "The check opens a real connection on every poll. On an instance already close to its connection limit, give it a longer interval.",
+                doc_url: "",
+            },
+            options: POSTGRES_OPTIONS,
+        },
+        "mysql" => CollectorView {
+            kind,
+            label: "MySQL or MariaDB database",
+            summary: "Connects, authenticates and runs one query: the signal for a database that is up but no longer answering.",
+            examples: &[
+                "The database behind a WordPress",
+                "A Nextcloud or a Kimai",
+                "An application database",
+                "A MariaDB in Docker",
+            ],
+            credential_types: &["username_password"],
+            credentials: &[SQL_LOGIN],
+            address_hint: "db.home.lan",
+            default_port: 3306,
+            setup: Setup {
+                title: "Monitor a MySQL or MariaDB database",
+                steps: &[
+                    "On the server, create an account for monitoring with no privilege at all: CREATE USER 'dumbmonit'@'%' IDENTIFIED BY 'a-long-password';",
+                    "Check that the account may connect from the DumbMonit machine: a host pattern of localhost would only accept connections made on the server itself.",
+                    "In the address, write the server, and the port if it is not 3306: \"db.home.lan\" or \"db.home.lan:3307\".",
+                    "The default query is SELECT 1, which reads no table: nothing else has to be granted. Connection time and query time are recorded separately.",
+                    "To watch something of your own, replace the query with one that returns a single number, and it becomes a chart: a queue length, a row count, a replication lag.",
+                ],
+                warning: "The check opens a real connection on every poll. On an instance already close to its connection limit, give it a longer interval.",
+                doc_url: "",
+            },
+            options: MYSQL_OPTIONS,
+        },
+        "mqtt" => CollectorView {
+            kind,
+            label: "MQTT broker",
+            summary: "Connects to the broker, subscribes to a topic, and can wait for a retained message.",
+            examples: &[
+                "Mosquitto",
+                "The broker behind Home Assistant",
+                "Zigbee2MQTT",
+                "ESPHome sensors",
+            ],
+            credential_types: &["none", "username_password"],
+            credentials: &[NO_AUTH, APP_LOGIN],
+            address_hint: "broker.home.lan",
+            default_port: 1883,
+            setup: Setup {
+                title: "Monitor an MQTT broker",
+                steps: &[
+                    "In the address, write the broker, and the port if it is not the usual one: \"broker.home.lan\" or \"broker.home.lan:1884\".",
+                    "Tick \"Encrypted connection\" for a broker listening on 8883, and fill in the credential if it requires an account.",
+                    "Connecting is already worth monitoring: a broker that refuses your account, or that has stopped answering, is the reason the whole house went quiet.",
+                    "To go further, name a topic: the check then subscribes to it, and a broker that refuses the subscription tells you the account lost its access rights.",
+                    "Tick \"Expect a retained message\" only for a topic that carries one, typically an availability topic. A topic published to now and then looks silent to a client that has just connected.",
+                ],
+                warning: "The check never publishes anything. It also cannot tell how old a retained message is: MQTT does not date them, so a value frozen three weeks ago still counts as present.",
+                doc_url: "",
+            },
+            options: MQTT_OPTIONS,
+        },
+        "websocket" => CollectorView {
+            kind,
+            label: "WebSocket endpoint",
+            summary: "Runs the upgrade handshake, and can send a frame and wait for one: a different failure from a plain HTTP page.",
+            examples: &[
+                "The Home Assistant API",
+                "A live dashboard",
+                "A log stream",
+                "An endpoint behind a reverse proxy",
+            ],
+            credential_types: &["none", "username_password", "api_token"],
+            credentials: &[NO_AUTH, HTTP_LOGIN, HTTP_TOKEN],
+            address_hint: "wss://home.example.com/api/websocket",
+            default_port: 443,
+            setup: Setup {
+                title: "Monitor a WebSocket endpoint",
+                steps: &[
+                    "In the address, paste the full endpoint: \"wss://home.example.com/api/websocket\". Without a scheme, wss is assumed.",
+                    "The check runs the whole opening handshake and verifies the answer the server computes from the key it was sent: a reverse proxy that has lost the Upgrade header is caught here, where an HTTP check would still see a healthy 200.",
+                    "Nothing else is needed for most endpoints. A status other than 101 is reported with its code, so a 401 from an expired token is not mistaken for an outage.",
+                    "To go further, fill in \"Expected content\" with a fragment of the first frame the server sends by itself, for example the greeting of the Home Assistant API.",
+                    "If the endpoint says nothing until it is spoken to, put a message in \"Frame to send\" and what its answer must contain in \"Expected content\".",
+                ],
+                warning: "The check opens and hangs up within a second. A connection that a firewall or a proxy timeout cuts after thirty seconds looks perfectly healthy here.",
+                doc_url: "",
+            },
+            options: WEBSOCKET_OPTIONS,
+        },
         // Moniteur en poussée : rien n'est interrogé, c'est le travail surveillé
         // qui appelle. L'adresse n'est qu'un libellé : elle doit rester unique
         // parmi les heartbeats, comme toute adresse pour un type donné.
@@ -1500,8 +2200,28 @@ mod tests {
     /// Les types enregistrés dans `main.rs`. Un type ajouté là-bas sans notice ici
     /// s'afficherait sous son nom brut, sans explication ni exemple d'adresse.
     const KINDS_ENREGISTRES: &[&str] = &[
-        "snmp", "proxmox", "pbs", "pdm", "pmg", "synology", "agent", "http", "tcp", "dns", "ping",
-        "tls", "push", "dummy",
+        "snmp",
+        "proxmox",
+        "pbs",
+        "pdm",
+        "pmg",
+        "synology",
+        "opnsense",
+        "truenas",
+        "redfish",
+        "agent",
+        "http",
+        "tcp",
+        "dns",
+        "ping",
+        "tls",
+        "smtp",
+        "postgres",
+        "mysql",
+        "mqtt",
+        "websocket",
+        "push",
+        "dummy",
     ];
 
     #[test]
@@ -1560,7 +2280,10 @@ mod tests {
                 ],
             ),
             ("tcp", &["port", "allow_private_targets", "timeout_seconds"]),
-            ("dns", &["record_type", "resolver", "expect", "timeout_seconds"]),
+            (
+                "dns",
+                &["record_type", "resolver", "expect", "expect_mode", "forbid", "timeout_seconds"],
+            ),
             (
                 "ping",
                 &[
@@ -1574,6 +2297,73 @@ mod tests {
                 ],
             ),
             ("tls", &["server_name", "insecure_tls", "allow_private_targets", "timeout_seconds"]),
+            (
+                "smtp",
+                &[
+                    "security",
+                    "port",
+                    "helo_name",
+                    "expect_capability",
+                    "server_name",
+                    "insecure_tls",
+                    "allow_private_targets",
+                    "timeout_seconds",
+                ],
+            ),
+            (
+                "postgres",
+                &[
+                    "port",
+                    "database",
+                    "query",
+                    "expect",
+                    "sslmode",
+                    "allow_private_targets",
+                    "timeout_seconds",
+                ],
+            ),
+            (
+                "mysql",
+                &[
+                    "port",
+                    "database",
+                    "query",
+                    "expect",
+                    "sslmode",
+                    "allow_private_targets",
+                    "timeout_seconds",
+                ],
+            ),
+            (
+                "mqtt",
+                &[
+                    "tls",
+                    "port",
+                    "topic",
+                    "expect_message",
+                    "expect",
+                    "client_id",
+                    "server_name",
+                    "insecure_tls",
+                    "allow_private_targets",
+                    "timeout_seconds",
+                ],
+            ),
+            (
+                "websocket",
+                &[
+                    "path",
+                    "port",
+                    "send",
+                    "expect",
+                    "subprotocol",
+                    "origin",
+                    "server_name",
+                    "insecure_tls",
+                    "allow_private_targets",
+                    "timeout_seconds",
+                ],
+            ),
             (
                 "proxmox",
                 &[
@@ -1662,7 +2452,45 @@ mod tests {
                 ],
             ),
             ("synology", &["scheme", "port", "insecure_tls", "request_timeout_seconds", "abb"]),
+            (
+                "truenas",
+                &[
+                    "scheme",
+                    "port",
+                    "insecure_tls",
+                    "request_timeout_seconds",
+                    "datasets",
+                    "disks",
+                    "smart",
+                    "alerts",
+                    "tasks",
+                    "services",
+                ],
+            ),
+            (
+                "opnsense",
+                &[
+                    "scheme",
+                    "port",
+                    "insecure_tls",
+                    "request_timeout_seconds",
+                    "gateways",
+                    "interfaces",
+                    "firewall",
+                    "dhcp",
+                    "vpn",
+                    "unbound",
+                    "services",
+                    "carp",
+                    "firmware",
+                    "temperature",
+                ],
+            ),
             ("push", &["expected_interval", "grace"]),
+            (
+                "redfish",
+                &["port", "insecure_tls", "request_timeout_seconds", "auth", "storage", "logs"],
+            ),
         ];
         for (kind, cles) in attendues {
             let obtenues: Vec<&str> = describe(kind).options.iter().map(|o| o.key).collect();
@@ -1740,6 +2568,9 @@ mod tests {
         assert_eq!(defaut("pmg", "attachment_quarantine"), "false");
         assert_eq!(defaut("synology", "request_timeout_seconds"), "15");
         assert_eq!(defaut("synology", "abb"), "true");
+        assert_eq!(defaut("redfish", "port"), "443");
+        assert_eq!(defaut("redfish", "request_timeout_seconds"), "8");
+        assert_eq!(defaut("redfish", "auth"), "basic");
         assert_eq!(
             defaut("push", "expected_interval"),
             crate::collectors::push::DEFAULT_EXPECTED_INTERVAL
@@ -1830,12 +2661,22 @@ mod tests {
             ("pdm", "dumbmonit@pdm"),
             ("pmg", "dumbmonit@pmg"),
             ("synology", "dumbmonit"),
+            ("opnsense", "dumbmonit"),
+            ("truenas", "dumbmonit"),
+            ("redfish", "dumbmonit"),
             ("agent", "token"),
         ];
         for (kind, dedie) in attendus {
             let text = notice(kind);
             assert!(text.contains(dedie), "« {kind} » ne nomme pas le compte dédié « {dedie} »");
-            let allowed = text.to_lowercase().replace("administrators", "");
+            // Deux exceptions nommées, qui sont des privilèges et non des
+            // comptes : le groupe `administrators` de DSM, et le privilège
+            // « Local Administrator » que l'API REST de TrueNAS exige.
+            let allowed = text
+                .to_lowercase()
+                .replace("administrators", "")
+                .replace("local administrator", "")
+                .replace("read-only administrator", "");
             for word in allowed.split(|c: char| !c.is_alphanumeric()) {
                 assert!(
                     !matches!(word, "root" | "admin" | "administrator"),
@@ -1878,8 +2719,16 @@ mod tests {
             ("pdm", include_str!("../../../../docs/devices/pdm.md")),
             ("pmg", include_str!("../../../../docs/devices/pmg.md")),
             ("synology", include_str!("../../../../docs/devices/synology.md")),
+            ("opnsense", include_str!("../../../../docs/devices/opnsense.md")),
+            ("truenas", include_str!("../../../../docs/devices/truenas.md")),
+            ("redfish", include_str!("../../../../docs/devices/redfish.md")),
             ("agent", include_str!("../../../../docs/devices/agent.md")),
             ("push", include_str!("../../../../docs/devices/push.md")),
+            ("smtp", include_str!("../../../../docs/devices/services.md")),
+            ("postgres", include_str!("../../../../docs/devices/services.md")),
+            ("mysql", include_str!("../../../../docs/devices/services.md")),
+            ("mqtt", include_str!("../../../../docs/devices/services.md")),
+            ("websocket", include_str!("../../../../docs/devices/services.md")),
         ];
         fn flatten(text: &str) -> String {
             text.replace('`', "").split_whitespace().collect::<Vec<_>>().join(" ")
@@ -1918,5 +2767,51 @@ mod tests {
         for kind in ["tcp", "dns", "ping", "tls", "push"] {
             assert_eq!(describe(kind).credential_types, &["none"], "« {kind} » n'envoie rien");
         }
+    }
+
+    /// Une base de données ne se surveille pas anonymement : le formulaire ne
+    /// doit pas proposer « aucune authentification », qui échouerait à coup sûr.
+    #[test]
+    fn les_sondes_applicatives_annoncent_les_identifiants_quelles_savent_envoyer() {
+        for kind in ["postgres", "mysql"] {
+            assert_eq!(
+                describe(kind).credential_types,
+                &["username_password"],
+                "« {kind} » exige un compte"
+            );
+        }
+        for kind in ["smtp", "mqtt"] {
+            assert_eq!(describe(kind).credential_types, &["none", "username_password"], "{kind}");
+        }
+        assert_eq!(
+            describe("websocket").credential_types,
+            &["none", "username_password", "api_token"]
+        );
+    }
+
+    /// Les défauts des sondes applicatives sont ceux de leurs `options.rs` : un
+    /// port faux dans le formulaire enverrait l'utilisateur chercher une panne
+    /// qui n'existe pas.
+    #[test]
+    fn les_defauts_des_sondes_applicatives_sont_ceux_des_collecteurs() {
+        let defaut = |kind: &'static str, cle: &str| {
+            describe(kind).options.iter().find(|o| o.key == cle).map(|o| o.default).unwrap()
+        };
+        assert_eq!(defaut("smtp", "security"), "starttls");
+        assert_eq!(defaut("smtp", "helo_name"), dumbmonit_collectors::uptime::SMTP_DEFAULT_HELO);
+        assert_eq!(defaut("postgres", "port"), "5432");
+        assert_eq!(defaut("postgres", "database"), "postgres");
+        assert_eq!(defaut("mysql", "port"), "3306");
+        assert_eq!(defaut("mysql", "database"), "", "MySQL n'exige pas qu'on nomme une base");
+        for kind in ["postgres", "mysql"] {
+            assert_eq!(
+                defaut(kind, "query"),
+                dumbmonit_collectors::uptime::SQL_DEFAULT_QUERY,
+                "« {kind} » : la requête par défaut ne doit lire aucune table"
+            );
+            assert_eq!(defaut(kind, "sslmode"), "prefer");
+        }
+        assert_eq!(defaut("mqtt", "tls"), "false");
+        assert_eq!(defaut("mqtt", "expect_message"), "false");
     }
 }

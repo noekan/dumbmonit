@@ -1,0 +1,10 @@
+{
+  "identifier": "{serial_lunid}S59ANM0R221670X_0025385211917649",
+  "name": "nvme0n1", "devname": "nvme0n1",
+  "subsystem": "nvme", "bus": "UNKNOWN", "number": 66304,
+  "serial": "S59ANM0R221670X", "lunid": "0025385211917649",
+  "size": 1000204886016, "description": "", "transfermode": "Auto",
+  "hddstandby": "ALWAYS ON", "advpowermgmt": "DISABLED", "expiretime": null,
+  "model": "Samsung SSD 970 EVO Plus 1TB", "rotationrate": null, "type": "SSD",
+  "zfs_guid": "13773670657159748505", "enclosure": null, "pool": null
+}

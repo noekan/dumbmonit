@@ -83,6 +83,23 @@ pub enum Failure {
     PacketLoss,
     /// Réponse DNS reçue mais sans l'enregistrement attendu.
     Record,
+    /// Identifiants refusés : SMTP AUTH, connexion SQL, CONNACK MQTT.
+    ///
+    /// Distincte de `Connect` parce qu'elle se corrige ailleurs : le service
+    /// fonctionne, c'est le compte de supervision qui a été révoqué ou dont le
+    /// mot de passe a tourné.
+    Auth,
+    /// Le service a répondu, mais pas dans le protocole attendu : code SMTP
+    /// inattendu, paquet MQTT mal formé, poignée de main WebSocket refusée.
+    Protocol,
+    /// Connexion et authentification réussies, mais la requête SQL a échoué.
+    ///
+    /// C'est le signal « la base est là mais ne travaille plus » : en
+    /// redémarrage, en lecture seule, ou privée de la table interrogée.
+    Query,
+    /// Le contenu attendu n'est pas arrivé : message MQTT retenu absent, trame
+    /// WebSocket muette ou différente, valeur SQL inattendue.
+    Payload,
 }
 
 impl Failure {
@@ -99,6 +116,10 @@ impl Failure {
             Self::Body => "body",
             Self::PacketLoss => "packet_loss",
             Self::Record => "record",
+            Self::Auth => "auth",
+            Self::Protocol => "protocol",
+            Self::Query => "query",
+            Self::Payload => "payload",
         }
     }
 }
@@ -272,6 +293,10 @@ mod tests {
             Failure::Body,
             Failure::PacketLoss,
             Failure::Record,
+            Failure::Auth,
+            Failure::Protocol,
+            Failure::Query,
+            Failure::Payload,
         ];
         let mut vus: Vec<&str> = Vec::new();
         for raison in toutes {

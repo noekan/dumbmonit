@@ -1,0 +1,31 @@
+{
+  "version": "25.04.2.6",
+  "buildtime": {
+    "$date": 1761718723000
+  },
+  "hostname": "truenas",
+  "physmem": 5163343872,
+  "model": "13th Gen Intel(R) Core(TM) i3-1315U",
+  "cores": 2,
+  "physical_cores": 2,
+  "loadavg": [
+    0.77197265625,
+    1.21142578125,
+    1.16845703125
+  ],
+  "uptime": "0:16:40.939493",
+  "uptime_seconds": 1000.939493228,
+  "system_serial": "Not Specified",
+  "system_product": "Standard PC (Q35 + ICH9, 2009)",
+  "system_product_version": "pc-q35-9.0",
+  "license": null,
+  "boottime": {
+    "$date": 1790289786000
+  },
+  "datetime": {
+    "$date": 1790290787000
+  },
+  "timezone": "America/Los_Angeles",
+  "system_manufacturer": "QEMU",
+  "ecc_memory": true
+}

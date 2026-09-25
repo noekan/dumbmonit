@@ -1,0 +1,222 @@
+[
+  {
+    "id": 1,
+    "name": "tank",
+    "guid": "2280433153965505253",
+    "path": "/mnt/tank",
+    "status": "ONLINE",
+    "scan": {
+      "function": "SCRUB",
+      "state": "SCANNING",
+      "start_time": {
+        "$date": 1790290946000
+      },
+      "end_time": null,
+      "percentage": 89.14252519607544,
+      "bytes_to_process": 1077501952,
+      "bytes_processed": 1077534720,
+      "bytes_issued": 960045056,
+      "pause": null,
+      "errors": 0,
+      "total_secs_left": 0
+    },
+    "expand": null,
+    "topology": {
+      "data": [
+        {
+          "name": "raidz1-0",
+          "type": "RAIDZ1",
+          "path": null,
+          "guid": "1639298526686699772",
+          "status": "ONLINE",
+          "stats": {
+            "timestamp": 735809181362,
+            "read_errors": 0,
+            "write_errors": 0,
+            "checksum_errors": 0,
+            "ops": [
+              0,
+              2869,
+              17359,
+              0,
+              0,
+              0,
+              0
+            ],
+            "bytes": [
+              0,
+              2007576576,
+              1153417216,
+              0,
+              0,
+              0,
+              0
+            ],
+            "size": 5905580032,
+            "allocated": 1077878784,
+            "fragmentation": 1,
+            "self_healed": 0,
+            "configured_ashift": 12,
+            "logical_ashift": 12,
+            "physical_ashift": 9
+          },
+          "children": [
+            {
+              "name": "a2d51cb7-7262-4431-a2b4-3b905221adb7",
+              "type": "DISK",
+              "path": "/dev/disk/by-partuuid/a2d51cb7-7262-4431-a2b4-3b905221adb7",
+              "guid": "6552475225270499906",
+              "status": "ONLINE",
+              "stats": {
+                "timestamp": 735809318341,
+                "read_errors": 0,
+                "write_errors": 0,
+                "checksum_errors": 0,
+                "ops": [
+                  0,
+                  964,
+                  5788,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "bytes": [
+                  0,
+                  669261824,
+                  384491520,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "size": 0,
+                "allocated": 0,
+                "fragmentation": 0,
+                "self_healed": 0,
+                "configured_ashift": 12,
+                "logical_ashift": 9,
+                "physical_ashift": 9
+              },
+              "children": [],
+              "device": "sdc1",
+              "disk": "sdc",
+              "unavail_disk": null
+            },
+            {
+              "name": "f57f7380-b3ed-47f4-b5a7-dcffac1604eb",
+              "type": "DISK",
+              "path": "/dev/disk/by-partuuid/f57f7380-b3ed-47f4-b5a7-dcffac1604eb",
+              "guid": "4060482899948100205",
+              "status": "ONLINE",
+              "stats": {
+                "timestamp": 735809315412,
+                "read_errors": 0,
+                "write_errors": 0,
+                "checksum_errors": 0,
+                "ops": [
+                  0,
+                  950,
+                  5796,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "bytes": [
+                  0,
+                  668528640,
+                  384544768,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "size": 0,
+                "allocated": 0,
+                "fragmentation": 0,
+                "self_healed": 0,
+                "configured_ashift": 12,
+                "logical_ashift": 9,
+                "physical_ashift": 9
+              },
+              "children": [],
+              "device": "sdd1",
+              "disk": "sdd",
+              "unavail_disk": null
+            },
+            {
+              "name": "595336fa-ea4b-403e-aad7-27226d87cd26",
+              "type": "DISK",
+              "path": "/dev/disk/by-partuuid/595336fa-ea4b-403e-aad7-27226d87cd26",
+              "guid": "14083669257712398338",
+              "status": "ONLINE",
+              "stats": {
+                "timestamp": 735809348294,
+                "read_errors": 0,
+                "write_errors": 0,
+                "checksum_errors": 0,
+                "ops": [
+                  0,
+                  955,
+                  5775,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "bytes": [
+                  0,
+                  669786112,
+                  384380928,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "size": 0,
+                "allocated": 0,
+                "fragmentation": 0,
+                "self_healed": 0,
+                "configured_ashift": 12,
+                "logical_ashift": 9,
+                "physical_ashift": 9
+              },
+              "children": [],
+              "device": "sda1",
+              "disk": "sda",
+              "unavail_disk": null
+            }
+          ],
+          "unavail_disk": null
+        }
+      ],
+      "log": [],
+      "cache": [],
+      "spare": [],
+      "special": [],
+      "dedup": []
+    },
+    "healthy": true,
+    "warning": false,
+    "status_code": "OK",
+    "status_detail": null,
+    "size": 5905580032,
+    "allocated": 1077878784,
+    "free": 4827701248,
+    "freeing": 0,
+    "fragmentation": "1",
+    "size_str": "5905580032",
+    "allocated_str": "1077878784",
+    "free_str": "4827701248",
+    "freeing_str": "0",
+    "dedup_table_quota": "auto",
+    "dedup_table_size": 0,
+    "autotrim": {
+      "value": "off",
+      "rawvalue": "off",
+      "parsed": "off",
+      "source": "DEFAULT"
+    }
+  }
+]

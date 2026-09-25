@@ -1,0 +1,56 @@
+[
+  {
+    "dataset": "tank/media",
+    "recursive": false,
+    "lifetime_value": 2,
+    "lifetime_unit": "WEEK",
+    "enabled": true,
+    "exclude": [],
+    "naming_schema": "auto-%Y-%m-%d_%H-%M",
+    "allow_empty": true,
+    "schedule": {
+      "minute": "0",
+      "hour": "*",
+      "dom": "*",
+      "month": "*",
+      "dow": "*",
+      "begin": "00:00",
+      "end": "23:59"
+    },
+    "id": 1,
+    "vmware_sync": false,
+    "state": {
+      "state": "FINISHED",
+      "datetime": {
+        "$date": 1790290801000
+      }
+    }
+  },
+  {
+    "dataset": "tank/docs",
+    "recursive": true,
+    "lifetime_value": 1,
+    "lifetime_unit": "DAY",
+    "enabled": true,
+    "exclude": [],
+    "naming_schema": "hourly-%Y%m%d-%H%M",
+    "allow_empty": true,
+    "schedule": {
+      "minute": "30",
+      "hour": "*",
+      "dom": "*",
+      "month": "*",
+      "dow": "*",
+      "begin": "00:00",
+      "end": "23:59"
+    },
+    "id": 2,
+    "vmware_sync": false,
+    "state": {
+      "state": "FINISHED",
+      "datetime": {
+        "$date": 1790290388000
+      }
+    }
+  }
+]

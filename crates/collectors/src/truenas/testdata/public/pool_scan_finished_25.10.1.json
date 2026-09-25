@@ -1,0 +1,13 @@
+{"scan": {
+  "bytes_issued": 3834374463488,
+  "bytes_processed": 3839252938752,
+  "bytes_to_process": 3839111053312,
+  "end_time": {"$date": 1775399792000},
+  "errors": 0,
+  "function": "SCRUB",
+  "pause": null,
+  "percentage": 99.99601244926453,
+  "start_time": {"$date": 1775372405000},
+  "state": "FINISHED",
+  "total_secs_left": null
+}}

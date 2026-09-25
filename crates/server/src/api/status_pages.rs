@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, put};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use chrono::{DateTime, NaiveDate, TimeDelta, Utc};
 use dumbmonit_proto::{Target, TargetId};
@@ -27,6 +27,10 @@ use serde_json::Value;
 
 use crate::api::{ApiError, ApiResult};
 use crate::db;
+
+mod badges;
+mod branding;
+mod subscribers;
 use crate::db::status_pages::{
     Incident, IncidentInput, IncidentUpdate, PageItem, PageItemInput, StatusPage, StatusPageInput,
 };
@@ -48,7 +52,13 @@ const MAX_ITEMS: usize = 200;
 const MIN_HISTORY_DAYS: i64 = 7;
 const MAX_HISTORY_DAYS: i64 = 90;
 
+const MAX_FOOTER_LEN: usize = 280;
+const MAX_URL_LEN: usize = 300;
+
 const THEMES: [&str; 3] = ["auto", "light", "dark"];
+/// Teintes d'accent proposées. Le jeu est fermé : chacune a ses deux valeurs
+/// (jour, nuit) vérifiées pour le contraste dans `web/src/routes/s/`.
+pub(crate) const ACCENTS: [&str; 6] = ["default", "blue", "teal", "violet", "rose", "amber"];
 const INCIDENT_STATUSES: [&str; 4] = ["investigating", "identified", "monitoring", "resolved"];
 const MAINTENANCE_STATUSES: [&str; 3] = ["scheduled", "in_progress", "completed"];
 const SEVERITIES: [&str; 2] = ["minor", "major"];
@@ -80,6 +90,12 @@ pub fn routes() -> Router<AppState> {
         .route("/status-pages", get(list_pages).post(create_page))
         .route("/status-pages/{id}", get(get_page).put(update_page).delete(delete_page))
         .route("/status-pages/{id}/items", put(set_items))
+        .route(
+            "/status-pages/{id}/logo",
+            get(branding::admin_logo).put(branding::upload_logo).delete(branding::delete_logo),
+        )
+        .route("/status-pages/{id}/subscribers", get(subscribers::list))
+        .route("/status-pages/{id}/subscribers/{subscriber}", delete(subscribers::remove))
         .route("/incidents", get(list_incidents).post(create_incident))
         .route("/incidents/{id}", put(update_incident).delete(delete_incident))
         .route("/incidents/{id}/updates", get(list_updates).post(add_update))
@@ -91,6 +107,15 @@ pub fn public_routes() -> Router<AppState> {
         .route("/public/status/{slug}", get(public_status))
         .route("/public/status/{slug}/badge.svg", get(public_badge))
         .route("/public/status/{slug}/rss", get(public_rss))
+        .route("/public/status/{slug}/uptime.svg", get(badges::page_uptime))
+        .route("/public/status/{slug}/response.svg", get(badges::page_response))
+        .route("/public/status/{slug}/components/{key}/badge.svg", get(badges::item_status))
+        .route("/public/status/{slug}/components/{key}/uptime.svg", get(badges::item_uptime))
+        .route("/public/status/{slug}/components/{key}/response.svg", get(badges::item_response))
+        .route("/public/status/{slug}/logo", get(branding::public_logo))
+        .route("/public/status/{slug}/subscribe", post(subscribers::subscribe))
+        .route("/public/status/{slug}/confirm", post(subscribers::confirm))
+        .route("/public/status/{slug}/unsubscribe", post(subscribers::unsubscribe))
 }
 
 // --------------------------------------------------------------------------
@@ -124,10 +149,28 @@ pub struct StatusPagePayload {
     pub theme: Option<String>,
     #[serde(default)]
     pub show_uptime_days: Option<i64>,
+    /// Absent : la valeur enregistrée est gardée (défaut à la création).
+    #[serde(default)]
+    pub accent: Option<String>,
+    #[serde(default)]
+    pub footer_text: Option<String>,
+    #[serde(default)]
+    pub homepage_url: Option<String>,
+    /// Absent : inchangé ; `null` : abonnements coupés ; un nombre : le canal
+    /// SMTP qui envoie les courriels aux abonnés.
+    #[serde(default)]
+    pub subscribe_channel_id: Option<Value>,
 }
 
 impl StatusPagePayload {
-    fn validate(self) -> ApiResult<StatusPageInput> {
+    /// Valide la saisie. `existing` fournit les réglages d'habillage qu'un
+    /// client ne renvoie pas ; `origin` est l'origine vue par l'administrateur.
+    async fn validate(
+        self,
+        state: &AppState,
+        existing: Option<&StatusPage>,
+        origin: String,
+    ) -> ApiResult<StatusPageInput> {
         let title = self.title.trim().to_string();
         if title.is_empty() {
             return Err(ApiError::BadRequest("Title is required.".into()));
@@ -166,6 +209,54 @@ impl StatusPagePayload {
                 "The history must cover {MIN_HISTORY_DAYS} to {MAX_HISTORY_DAYS} days."
             )));
         }
+        let accent = match self.accent {
+            Some(accent) => accent.trim().to_string(),
+            None => existing.map_or_else(|| "default".to_string(), |page| page.accent.clone()),
+        };
+        if !ACCENTS.contains(&accent.as_str()) {
+            return Err(ApiError::BadRequest(format!(
+                "Unknown accent \"{accent}\" (expected: {}).",
+                ACCENTS.join(", ")
+            )));
+        }
+        let footer_text = match self.footer_text {
+            Some(text) => text.trim().to_string(),
+            None => existing.map(|page| page.footer_text.clone()).unwrap_or_default(),
+        };
+        if footer_text.chars().count() > MAX_FOOTER_LEN {
+            return Err(ApiError::BadRequest(format!(
+                "The footer text is limited to {MAX_FOOTER_LEN} characters."
+            )));
+        }
+        if footer_text.chars().any(|c| c.is_control() && c != '\n') {
+            return Err(ApiError::BadRequest("The footer text must be plain text.".into()));
+        }
+        let homepage_url = match self.homepage_url {
+            Some(url) => validate_homepage(url.trim())?,
+            None => existing.map(|page| page.homepage_url.clone()).unwrap_or_default(),
+        };
+        let subscribe_channel_id = match self.subscribe_channel_id {
+            None => existing.and_then(|page| page.subscribe_channel_id),
+            Some(Value::Null) => None,
+            Some(value) => {
+                let id = value.as_i64().ok_or_else(|| {
+                    ApiError::BadRequest(
+                        "subscribe_channel_id must be a channel id or null.".into(),
+                    )
+                })?;
+                let channel = db::alerts::get_channel(&state.pool, &state.cipher, id)
+                    .await?
+                    .ok_or_else(|| {
+                        ApiError::BadRequest(format!("Notification channel {id} does not exist."))
+                    })?;
+                if channel.kind != "smtp" {
+                    return Err(ApiError::BadRequest(
+                        "Subscribers are mailed through an email (SMTP) channel.".into(),
+                    ));
+                }
+                Some(id)
+            }
+        };
         Ok(StatusPageInput {
             slug,
             title,
@@ -173,8 +264,37 @@ impl StatusPagePayload {
             published: self.published.unwrap_or(false),
             theme,
             show_uptime_days,
+            accent,
+            footer_text,
+            homepage_url,
+            subscribe_channel_id,
+            link_origin: origin,
         })
     }
+}
+
+/// Lien vers le site de l'organisation : vide, ou une URL http(s) absolue sans
+/// identifiants. Tout autre schéma (`javascript:`, `data:`) est refusé.
+fn validate_homepage(raw: &str) -> ApiResult<String> {
+    if raw.is_empty() {
+        return Ok(String::new());
+    }
+    let invalid =
+        || ApiError::BadRequest("The website link must be an http:// or https:// address.".into());
+    if raw.len() > MAX_URL_LEN {
+        return Err(ApiError::BadRequest(format!(
+            "The website link is limited to {MAX_URL_LEN} characters."
+        )));
+    }
+    let url = reqwest::Url::parse(raw).map_err(|_| invalid())?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none_or(str::is_empty)
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err(invalid());
+    }
+    Ok(url.to_string())
 }
 
 /// `^[a-z0-9-]{2,40}$`, sans expression régulière : la règle tient en une ligne.
@@ -258,9 +378,10 @@ pub async fn get_page(
 
 pub async fn create_page(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<StatusPagePayload>,
 ) -> ApiResult<(StatusCode, Json<StatusPageView>)> {
-    let input = payload.validate()?;
+    let input = payload.validate(&state, None, public_origin(&headers)).await?;
     let id = db::status_pages::create_page(&state.pool, &input)
         .await
         .map_err(duplicate_slug_to_conflict)?;
@@ -273,9 +394,12 @@ pub async fn create_page(
 pub async fn update_page(
     State(state): State<AppState>,
     Path(id): Path<i64>,
+    headers: HeaderMap,
     Json(payload): Json<StatusPagePayload>,
 ) -> ApiResult<Json<StatusPageView>> {
-    let input = payload.validate()?;
+    let existing =
+        db::status_pages::get_page(&state.pool, id).await?.ok_or_else(|| page_not_found(id))?;
+    let input = payload.validate(&state, Some(&existing), public_origin(&headers)).await?;
     let updated = db::status_pages::update_page(&state.pool, id, &input)
         .await
         .map_err(duplicate_slug_to_conflict)?;
@@ -293,6 +417,7 @@ pub async fn delete_page(
     Path(id): Path<i64>,
 ) -> ApiResult<StatusCode> {
     if db::status_pages::delete_page(&state.pool, id).await? {
+        branding::remove_logo_file(&state, id).await;
         invalidate_cache();
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -576,6 +701,7 @@ pub async fn create_incident(
         .await?
         .ok_or_else(|| incident_not_found(id))?;
     tracing::info!(incident = id, kind = %incident.kind, "incident created");
+    subscribers::announce(&state, incident.clone(), Some(body));
     let mut views = incident_views(&state, vec![incident]).await?;
     Ok((StatusCode::CREATED, Json(views.remove(0))))
 }
@@ -605,6 +731,10 @@ pub async fn update_incident(
     let incident = db::status_pages::get_incident(&state.pool, id)
         .await?
         .ok_or_else(|| incident_not_found(id))?;
+    // Un changement de statut sans message se dit aussi aux abonnés.
+    if incident.status != existing.status {
+        subscribers::announce(&state, incident.clone(), None);
+    }
     let mut views = incident_views(&state, vec![incident]).await?;
     Ok(Json(views.remove(0)))
 }
@@ -671,6 +801,7 @@ pub async fn add_update(
     let incident = db::status_pages::get_incident(&state.pool, id)
         .await?
         .ok_or_else(|| incident_not_found(id))?;
+    subscribers::announce(&state, incident.clone(), Some(body));
     let mut views = incident_views(&state, vec![incident]).await?;
     Ok((StatusCode::CREATED, Json(views.remove(0))))
 }
@@ -700,6 +831,15 @@ struct PublicPage {
     theme: String,
     show_uptime_days: i64,
     updated_at: String,
+    /// Teinte d'accent choisie parmi [`ACCENTS`].
+    accent: String,
+    footer_text: String,
+    /// Site de l'organisation, vide si la page n'en cite pas.
+    homepage_url: String,
+    /// Adresse relative du logo, versionnée pour les caches ; `None` sans logo.
+    logo_url: Option<String>,
+    /// La page propose l'abonnement par courriel (un canal SMTP actif est choisi).
+    subscribe: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -710,11 +850,16 @@ struct PublicGroup {
 
 #[derive(Debug, Serialize)]
 struct PublicItem {
+    /// Clé stable du service dans les adresses publiques (badges), dérivée de
+    /// son libellé public — jamais de l'identifiant interne.
+    key: String,
     label: String,
     /// `up`, `down`, `degraded`, `maintenance` ou `unknown`.
     state: &'static str,
     uptime_24h: Option<f64>,
     uptime_7d: Option<f64>,
+    uptime_30d: Option<f64>,
+    /// Seulement quand la page montre 90 jours d'historique.
     uptime_90d: Option<f64>,
     latency_ms: Option<f64>,
     history: Vec<DayBucket>,
@@ -724,6 +869,8 @@ struct PublicItem {
 struct DayBucket {
     date: String,
     uptime_pct: Option<f64>,
+    /// Minutes d'indisponibilité mesurées ce jour-là ; `None` sans mesure.
+    down_minutes: Option<u32>,
     incidents: u32,
 }
 
@@ -819,9 +966,12 @@ struct Metrics {
     latency_ms: HashMap<TargetId, f64>,
     uptime_24h: HashMap<TargetId, f64>,
     uptime_7d: HashMap<TargetId, f64>,
+    uptime_30d: HashMap<TargetId, f64>,
     uptime_90d: HashMap<TargetId, f64>,
     /// Par cible, disponibilité de chaque jour indexée par début de jour (s).
     daily: HashMap<TargetId, HashMap<i64, f64>>,
+    /// Par cible, minutes d'indisponibilité de chaque jour, même index.
+    daily_down: HashMap<TargetId, HashMap<i64, f64>>,
 }
 
 fn target_of(metric: &BTreeMap<String, String>) -> Option<TargetId> {
@@ -893,6 +1043,12 @@ async fn collect_metrics(
         let q_recent = format!("avg_over_time(dumbmonit_probe_success{{{sel}}}[1h]) * 100");
         let q_day = format!("avg_over_time(dumbmonit_probe_success{{{sel}}}[24h]) * 100");
         let q_week = format!("avg_over_time(dumbmonit_probe_success{{{sel}}}[7d]) * 100");
+        let q_month = format!("avg_over_time(dumbmonit_probe_success{{{sel}}}[30d]) * 100");
+        // Échecs du jour : nombre de mesures moins leur somme (1 par succès).
+        let q_failed = format!(
+            "count_over_time(dumbmonit_probe_success{{{sel}}}[1d]) \
+             - sum_over_time(dumbmonit_probe_success{{{sel}}}[1d])"
+        );
         let q_quarter = format!("avg_over_time(dumbmonit_probe_success{{{sel}}}[90d]) * 100");
         let q_latency =
             format!("avg_over_time(dumbmonit_probe_duration_seconds{{{sel}}}[1h]) * 1000");
@@ -902,17 +1058,37 @@ async fn collect_metrics(
             victoria.query(&q_recent),
             victoria.query(&q_day),
             victoria.query(&q_week),
+            victoria.query(&q_month),
             victoria.query(&q_quarter),
             victoria.query(&q_latency),
             victoria.query_range(&q_daily, range_start_ms, range_end_ms, 86_400),
+            victoria.query_range(&q_failed, range_start_ms, range_end_ms, 86_400),
         );
         match result {
-            Ok((last, recent, day, week, quarter, latency, daily)) => {
+            Ok((last, recent, day, week, month, quarter, latency, daily, failed)) => {
                 metrics.probe_last = instant_map(last);
                 metrics.probe_recent = instant_map(recent);
                 metrics.uptime_24h = instant_map(day);
                 metrics.uptime_7d = instant_map(week);
+                metrics.uptime_30d = instant_map(month);
                 metrics.uptime_90d = instant_map(quarter);
+                // Une mesure manquée vaut l'intervalle de la sonde : c'est la
+                // durée pendant laquelle le service est resté réputé en panne.
+                let intervals: HashMap<TargetId, f64> =
+                    targets.iter().map(|t| (t.id, t.interval.as_secs_f64().max(1.0))).collect();
+                for series in failed {
+                    let Some(id) = target_of(&series.metric) else { continue };
+                    let interval = intervals.get(&id).copied().unwrap_or(60.0);
+                    let entry = metrics.daily_down.entry(id).or_default();
+                    for (ts, raw) in series.values {
+                        if let Ok(count) = raw.parse::<f64>()
+                            && count.is_finite()
+                        {
+                            let minutes = (count.max(0.0) * interval / 60.0).min(1_440.0);
+                            entry.insert(ts as i64 - 86_400, minutes);
+                        }
+                    }
+                }
                 metrics.latency_ms = instant_map(latency);
                 for series in daily {
                     let Some(id) = target_of(&series.metric) else { continue };
@@ -935,21 +1111,24 @@ async fn collect_metrics(
         let q_first = format!("tfirst_over_time(dumbmonit_up{{{sel}}}[90d])");
         let q_day = presence_query(&sel, "24h");
         let q_week = presence_query(&sel, "7d");
+        let q_month = presence_query(&sel, "30d");
         let q_quarter = presence_query(&sel, "90d");
         let q_daily = presence_query(&sel, "1d");
         let result = tokio::try_join!(
             victoria.query(&q_first),
             victoria.query(&q_day),
             victoria.query(&q_week),
+            victoria.query(&q_month),
             victoria.query(&q_quarter),
             victoria.query_range(&q_daily, range_start_ms, range_end_ms, 86_400),
         );
         match result {
-            Ok((first, day, week, quarter, daily)) => {
+            Ok((first, day, week, month, quarter, daily)) => {
                 let first = instant_map(first);
-                let windows: [(&str, Vec<InstantSeries>, f64); 3] = [
+                let windows: [(&str, Vec<InstantSeries>, f64); 4] = [
                     ("24h", day, 86_400.0),
                     ("7d", week, 7.0 * 86_400.0),
+                    ("30d", month, 30.0 * 86_400.0),
                     ("90d", quarter, 90.0 * 86_400.0),
                 ];
                 for (name, series, window_secs) in windows {
@@ -960,6 +1139,7 @@ async fn collect_metrics(
                         let bucket = match name {
                             "24h" => &mut metrics.uptime_24h,
                             "7d" => &mut metrics.uptime_7d,
+                            "30d" => &mut metrics.uptime_30d,
                             _ => &mut metrics.uptime_90d,
                         };
                         bucket.insert(id, value);
@@ -977,6 +1157,13 @@ async fn collect_metrics(
                             (day_end.min(now_secs) as f64) - (day_start as f64).max(first_ts);
                         if let Some(value) = rescale(measured, 86_400.0, covered) {
                             entry.insert(day_start, value);
+                            // Tranches de cinq minutes muettes sur la part couverte.
+                            let minutes = (100.0 - value).max(0.0) / 100.0 * covered / 60.0;
+                            metrics
+                                .daily_down
+                                .entry(id)
+                                .or_default()
+                                .insert(day_start, minutes.min(1_440.0));
                         }
                     }
                 }
@@ -1040,6 +1227,26 @@ fn to_public_incident(incident: Incident, updates: Vec<IncidentUpdate>) -> Publi
             })
             .collect(),
     }
+}
+
+/// Clé publique d'un service : son libellé en slug, suffixée en cas de doublon.
+fn unique_key(label: &str, taken: &mut HashSet<String>) -> String {
+    let base = match slugify(label) {
+        base if base.is_empty() => "service".to_string(),
+        base => base,
+    };
+    let mut key = base.clone();
+    let mut n = 2;
+    while !taken.insert(key.clone()) {
+        key = format!("{base}-{n}");
+        n += 1;
+    }
+    key
+}
+
+/// Étiquette de version tirée d'un horodatage : chiffres seulement.
+fn version_tag(stamp: &str) -> String {
+    stamp.chars().filter(char::is_ascii_digit).collect()
 }
 
 fn round(value: f64) -> f64 {
@@ -1127,6 +1334,7 @@ async fn build_public(state: &AppState, page: &StatusPage) -> ApiResult<PublicSt
         })
         .collect();
     let empty_daily = HashMap::new();
+    let mut keys: HashSet<String> = HashSet::new();
 
     let mut groups: Vec<PublicGroup> = Vec::new();
     let mut n_down = 0usize;
@@ -1152,6 +1360,7 @@ async fn build_public(state: &AppState, page: &StatusPage) -> ApiResult<PublicSt
             _ => {}
         }
         let daily = metrics.daily.get(&target.id).unwrap_or(&empty_daily);
+        let daily_down = metrics.daily_down.get(&target.id).unwrap_or(&empty_daily);
         let history = day_starts
             .iter()
             .zip(&incidents_per_day)
@@ -1161,15 +1370,25 @@ async fn build_public(state: &AppState, page: &StatusPage) -> ApiResult<PublicSt
                     .map(|date| date.format("%Y-%m-%d").to_string())
                     .unwrap_or_default(),
                 uptime_pct: daily.get(&day).map(|v| round(*v)),
+                // Une journée sans mesure n'a pas de minutes de panne : elle est
+                // inconnue, pas parfaite.
+                down_minutes: daily.get(&day).map(|_| {
+                    daily_down.get(&day).map_or(0, |minutes| minutes.round().max(0.0) as u32)
+                }),
                 incidents: count,
             })
             .collect();
+        let key = unique_key(&item.label, &mut keys);
         let public_item = PublicItem {
+            key,
             label: item.label,
             state: state_word,
             uptime_24h: metrics.uptime_24h.get(&target.id).map(|v| round(*v)),
             uptime_7d: metrics.uptime_7d.get(&target.id).map(|v| round(*v)),
-            uptime_90d: metrics.uptime_90d.get(&target.id).map(|v| round(*v)),
+            uptime_30d: metrics.uptime_30d.get(&target.id).map(|v| round(*v)),
+            uptime_90d: (days >= 90)
+                .then(|| metrics.uptime_90d.get(&target.id).map(|v| round(*v)))
+                .flatten(),
             latency_ms: metrics.latency_ms.get(&target.id).map(|v| round(*v)),
             history,
         };
@@ -1228,6 +1447,13 @@ async fn build_public(state: &AppState, page: &StatusPage) -> ApiResult<PublicSt
             theme: page.theme.clone(),
             show_uptime_days: days,
             updated_at: page.updated_at.clone(),
+            accent: page.accent.clone(),
+            footer_text: page.footer_text.clone(),
+            homepage_url: page.homepage_url.clone(),
+            logo_url: page.logo_type.as_ref().map(|_| {
+                format!("/api/public/status/{}/logo?v={}", page.slug, version_tag(&page.updated_at))
+            }),
+            subscribe: subscribers::offers_subscription(state, page).await,
         },
         overall,
         generated_at: format_timestamp(now),
@@ -1256,50 +1482,10 @@ fn xml_escape(text: &str) -> String {
     out
 }
 
-/// Badge à la manière de shields.io : « status | operational ».
+/// Badge d'état global de la page : « status | operational ».
 fn render_badge(overall: &str) -> String {
-    let (word, colour) = match overall {
-        "operational" => ("operational", "#2f9e8f"),
-        "degraded" => ("degraded", "#c88a1c"),
-        "major" => ("major outage", "#c8453b"),
-        "maintenance" => ("maintenance", "#3b7dd8"),
-        _ => ("unknown", "#7a7f8a"),
-    };
-    let label = "status";
-    // Largeur approximative d'un caractère de Verdana 11 px : suffisant pour un
-    // badge, où un pixel de trop ne se voit pas.
-    let label_w = label.len() as u32 * 7 + 10;
-    let value_w = word.len() as u32 * 7 + 10;
-    let total = label_w + value_w;
-    format!(
-        concat!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{total}\" height=\"20\" ",
-            "role=\"img\" aria-label=\"{label}: {word}\">",
-            "<title>{label}: {word}</title>",
-            "<linearGradient id=\"s\" x2=\"0\" y2=\"100%\">",
-            "<stop offset=\"0\" stop-color=\"#bbb\" stop-opacity=\".1\"/>",
-            "<stop offset=\"1\" stop-opacity=\".1\"/></linearGradient>",
-            "<clipPath id=\"r\"><rect width=\"{total}\" height=\"20\" rx=\"3\" fill=\"#fff\"/></clipPath>",
-            "<g clip-path=\"url(#r)\">",
-            "<rect width=\"{label_w}\" height=\"20\" fill=\"#555\"/>",
-            "<rect x=\"{label_w}\" width=\"{value_w}\" height=\"20\" fill=\"{colour}\"/>",
-            "<rect width=\"{total}\" height=\"20\" fill=\"url(#s)\"/></g>",
-            "<g fill=\"#fff\" text-anchor=\"middle\" ",
-            "font-family=\"Verdana,Geneva,DejaVu Sans,sans-serif\" font-size=\"11\">",
-            "<text x=\"{label_x}\" y=\"15\" fill=\"#010101\" fill-opacity=\".3\">{label}</text>",
-            "<text x=\"{label_x}\" y=\"14\">{label}</text>",
-            "<text x=\"{value_x}\" y=\"15\" fill=\"#010101\" fill-opacity=\".3\">{word}</text>",
-            "<text x=\"{value_x}\" y=\"14\">{word}</text></g></svg>"
-        ),
-        total = total,
-        label = label,
-        word = word,
-        label_w = label_w,
-        value_w = value_w,
-        colour = colour,
-        label_x = label_w / 2,
-        value_x = label_w + value_w / 2,
-    )
+    let (word, colour) = badges::overall_word(overall);
+    badges::render("status", word, colour)
 }
 
 pub async fn public_badge(
@@ -1311,7 +1497,7 @@ pub async fn public_badge(
     Ok((
         [
             (header::CONTENT_TYPE, "image/svg+xml; charset=utf-8"),
-            (header::CACHE_CONTROL, "public, max-age=30"),
+            (header::CACHE_CONTROL, "public, max-age=60"),
         ],
         render_badge(overall),
     )

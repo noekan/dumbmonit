@@ -1,0 +1,506 @@
+[
+  {
+    "id": "tank",
+    "type": "FILESYSTEM",
+    "name": "tank",
+    "pool": "tank",
+    "children": [
+      {
+        "id": "tank/docs",
+        "type": "FILESYSTEM",
+        "name": "tank/docs",
+        "pool": "tank",
+        "children": [
+          {
+            "id": "tank/docs/archive",
+            "type": "FILESYSTEM",
+            "name": "tank/docs/archive",
+            "pool": "tank",
+            "children": [],
+            "quota": {
+              "parsed": null,
+              "rawvalue": "0",
+              "value": null,
+              "source": "DEFAULT",
+              "source_info": null
+            },
+            "refquota": {
+              "parsed": null,
+              "rawvalue": "0",
+              "value": null,
+              "source": "DEFAULT",
+              "source_info": null
+            },
+            "used": {
+              "parsed": 84120608,
+              "rawvalue": "84120608",
+              "value": "80.2M",
+              "source": "NONE",
+              "source_info": null
+            },
+            "available": {
+              "parsed": 3081357712,
+              "rawvalue": "3081357712",
+              "value": "2.87G",
+              "source": "NONE",
+              "source_info": null
+            }
+          }
+        ],
+        "quota": {
+          "parsed": null,
+          "rawvalue": "0",
+          "value": null,
+          "source": "DEFAULT",
+          "source_info": null
+        },
+        "refquota": {
+          "parsed": 1073741824,
+          "rawvalue": "1073741824",
+          "value": "1G",
+          "source": "LOCAL",
+          "source_info": null
+        },
+        "used": {
+          "parsed": 84251552,
+          "rawvalue": "84251552",
+          "value": "80.3M",
+          "source": "NONE",
+          "source_info": null
+        },
+        "available": {
+          "parsed": 1073610880,
+          "rawvalue": "1073610880",
+          "value": "1024M",
+          "source": "NONE",
+          "source_info": null
+        }
+      },
+      {
+        "id": "tank/replica",
+        "type": "FILESYSTEM",
+        "name": "tank/replica",
+        "pool": "tank",
+        "children": [
+          {
+            "id": "tank/replica/media",
+            "type": "FILESYSTEM",
+            "name": "tank/replica/media",
+            "pool": "tank",
+            "children": [],
+            "quota": {
+              "parsed": 1073741824,
+              "rawvalue": "1073741824",
+              "value": "1G",
+              "source": "RECEIVED",
+              "source_info": null
+            },
+            "refquota": {
+              "parsed": null,
+              "rawvalue": "0",
+              "value": null,
+              "source": "DEFAULT",
+              "source_info": null
+            },
+            "used": {
+              "parsed": 314723904,
+              "rawvalue": "314723904",
+              "value": "300M",
+              "source": "NONE",
+              "source_info": null
+            },
+            "available": {
+              "parsed": 759017920,
+              "rawvalue": "759017920",
+              "value": "724M",
+              "source": "NONE",
+              "source_info": null
+            }
+          }
+        ],
+        "quota": {
+          "parsed": null,
+          "rawvalue": "0",
+          "value": null,
+          "source": "DEFAULT",
+          "source_info": null
+        },
+        "refquota": {
+          "parsed": null,
+          "rawvalue": "0",
+          "value": null,
+          "source": "DEFAULT",
+          "source_info": null
+        },
+        "used": {
+          "parsed": 314854848,
+          "rawvalue": "314854848",
+          "value": "300M",
+          "source": "NONE",
+          "source_info": null
+        },
+        "available": {
+          "parsed": 3081357712,
+          "rawvalue": "3081357712",
+          "value": "2.87G",
+          "source": "NONE",
+          "source_info": null
+        }
+      },
+      {
+        "id": "tank/media",
+        "type": "FILESYSTEM",
+        "name": "tank/media",
+        "pool": "tank",
+        "children": [],
+        "quota": {
+          "parsed": 1073741824,
+          "rawvalue": "1073741824",
+          "value": "1G",
+          "source": "LOCAL",
+          "source_info": null
+        },
+        "refquota": {
+          "parsed": null,
+          "rawvalue": "0",
+          "value": null,
+          "source": "DEFAULT",
+          "source_info": null
+        },
+        "used": {
+          "parsed": 314811200,
+          "rawvalue": "314811200",
+          "value": "300M",
+          "source": "NONE",
+          "source_info": null
+        },
+        "available": {
+          "parsed": 758930624,
+          "rawvalue": "758930624",
+          "value": "724M",
+          "source": "NONE",
+          "source_info": null
+        }
+      },
+      {
+        "id": "tank/vol1",
+        "type": "VOLUME",
+        "name": "tank/vol1",
+        "pool": "tank",
+        "children": [],
+        "used": {
+          "parsed": 76384,
+          "rawvalue": "76384",
+          "value": "74.6K",
+          "source": "NONE",
+          "source_info": null
+        },
+        "available": {
+          "parsed": 3081357712,
+          "rawvalue": "3081357712",
+          "value": "2.87G",
+          "source": "NONE",
+          "source_info": null
+        },
+        "mountpoint": null
+      }
+    ],
+    "quota": {
+      "parsed": null,
+      "rawvalue": "0",
+      "value": null,
+      "source": "DEFAULT",
+      "source_info": null
+    },
+    "refquota": {
+      "parsed": null,
+      "rawvalue": "0",
+      "value": null,
+      "source": "DEFAULT",
+      "source_info": null
+    },
+    "used": {
+      "parsed": 717633136,
+      "rawvalue": "717633136",
+      "value": "684M",
+      "source": "NONE",
+      "source_info": null
+    },
+    "available": {
+      "parsed": 3081357712,
+      "rawvalue": "3081357712",
+      "value": "2.87G",
+      "source": "NONE",
+      "source_info": null
+    }
+  },
+  {
+    "id": "tank/docs",
+    "type": "FILESYSTEM",
+    "name": "tank/docs",
+    "pool": "tank",
+    "children": [
+      {
+        "id": "tank/docs/archive",
+        "type": "FILESYSTEM",
+        "name": "tank/docs/archive",
+        "pool": "tank",
+        "children": [],
+        "quota": {
+          "parsed": null,
+          "rawvalue": "0",
+          "value": null,
+          "source": "DEFAULT",
+          "source_info": null
+        },
+        "refquota": {
+          "parsed": null,
+          "rawvalue": "0",
+          "value": null,
+          "source": "DEFAULT",
+          "source_info": null
+        },
+        "used": {
+          "parsed": 84120608,
+          "rawvalue": "84120608",
+          "value": "80.2M",
+          "source": "NONE",
+          "source_info": null
+        },
+        "available": {
+          "parsed": 3081357712,
+          "rawvalue": "3081357712",
+          "value": "2.87G",
+          "source": "NONE",
+          "source_info": null
+        }
+      }
+    ],
+    "quota": {
+      "parsed": null,
+      "rawvalue": "0",
+      "value": null,
+      "source": "DEFAULT",
+      "source_info": null
+    },
+    "refquota": {
+      "parsed": 1073741824,
+      "rawvalue": "1073741824",
+      "value": "1G",
+      "source": "LOCAL",
+      "source_info": null
+    },
+    "used": {
+      "parsed": 84251552,
+      "rawvalue": "84251552",
+      "value": "80.3M",
+      "source": "NONE",
+      "source_info": null
+    },
+    "available": {
+      "parsed": 1073610880,
+      "rawvalue": "1073610880",
+      "value": "1024M",
+      "source": "NONE",
+      "source_info": null
+    }
+  },
+  {
+    "id": "tank/docs/archive",
+    "type": "FILESYSTEM",
+    "name": "tank/docs/archive",
+    "pool": "tank",
+    "children": [],
+    "quota": {
+      "parsed": null,
+      "rawvalue": "0",
+      "value": null,
+      "source": "DEFAULT",
+      "source_info": null
+    },
+    "refquota": {
+      "parsed": null,
+      "rawvalue": "0",
+      "value": null,
+      "source": "DEFAULT",
+      "source_info": null
+    },
+    "used": {
+      "parsed": 84120608,
+      "rawvalue": "84120608",
+      "value": "80.2M",
+      "source": "NONE",
+      "source_info": null
+    },
+    "available": {
+      "parsed": 3081357712,
+      "rawvalue": "3081357712",
+      "value": "2.87G",
+      "source": "NONE",
+      "source_info": null
+    }
+  },
+  {
+    "id": "tank/replica",
+    "type": "FILESYSTEM",
+    "name": "tank/replica",
+    "pool": "tank",
+    "children": [
+      {
+        "id": "tank/replica/media",
+        "type": "FILESYSTEM",
+        "name": "tank/replica/media",
+        "pool": "tank",
+        "children": [],
+        "quota": {
+          "parsed": 1073741824,
+          "rawvalue": "1073741824",
+          "value": "1G",
+          "source": "RECEIVED",
+          "source_info": null
+        },
+        "refquota": {
+          "parsed": null,
+          "rawvalue": "0",
+          "value": null,
+          "source": "DEFAULT",
+          "source_info": null
+        },
+        "used": {
+          "parsed": 314723904,
+          "rawvalue": "314723904",
+          "value": "300M",
+          "source": "NONE",
+          "source_info": null
+        },
+        "available": {
+          "parsed": 759017920,
+          "rawvalue": "759017920",
+          "value": "724M",
+          "source": "NONE",
+          "source_info": null
+        }
+      }
+    ],
+    "quota": {
+      "parsed": null,
+      "rawvalue": "0",
+      "value": null,
+      "source": "DEFAULT",
+      "source_info": null
+    },
+    "refquota": {
+      "parsed": null,
+      "rawvalue": "0",
+      "value": null,
+      "source": "DEFAULT",
+      "source_info": null
+    },
+    "used": {
+      "parsed": 314854848,
+      "rawvalue": "314854848",
+      "value": "300M",
+      "source": "NONE",
+      "source_info": null
+    },
+    "available": {
+      "parsed": 3081357712,
+      "rawvalue": "3081357712",
+      "value": "2.87G",
+      "source": "NONE",
+      "source_info": null
+    }
+  },
+  {
+    "id": "tank/replica/media",
+    "type": "FILESYSTEM",
+    "name": "tank/replica/media",
+    "pool": "tank",
+    "children": [],
+    "quota": {
+      "parsed": 1073741824,
+      "rawvalue": "1073741824",
+      "value": "1G",
+      "source": "RECEIVED",
+      "source_info": null
+    },
+    "refquota": {
+      "parsed": null,
+      "rawvalue": "0",
+      "value": null,
+      "source": "DEFAULT",
+      "source_info": null
+    },
+    "used": {
+      "parsed": 314723904,
+      "rawvalue": "314723904",
+      "value": "300M",
+      "source": "NONE",
+      "source_info": null
+    },
+    "available": {
+      "parsed": 759017920,
+      "rawvalue": "759017920",
+      "value": "724M",
+      "source": "NONE",
+      "source_info": null
+    }
+  },
+  {
+    "id": "tank/media",
+    "type": "FILESYSTEM",
+    "name": "tank/media",
+    "pool": "tank",
+    "children": [],
+    "quota": {
+      "parsed": 1073741824,
+      "rawvalue": "1073741824",
+      "value": "1G",
+      "source": "LOCAL",
+      "source_info": null
+    },
+    "refquota": {
+      "parsed": null,
+      "rawvalue": "0",
+      "value": null,
+      "source": "DEFAULT",
+      "source_info": null
+    },
+    "used": {
+      "parsed": 314811200,
+      "rawvalue": "314811200",
+      "value": "300M",
+      "source": "NONE",
+      "source_info": null
+    },
+    "available": {
+      "parsed": 758930624,
+      "rawvalue": "758930624",
+      "value": "724M",
+      "source": "NONE",
+      "source_info": null
+    }
+  },
+  {
+    "id": "tank/vol1",
+    "type": "VOLUME",
+    "name": "tank/vol1",
+    "pool": "tank",
+    "children": [],
+    "used": {
+      "parsed": 76384,
+      "rawvalue": "76384",
+      "value": "74.6K",
+      "source": "NONE",
+      "source_info": null
+    },
+    "available": {
+      "parsed": 3081357712,
+      "rawvalue": "3081357712",
+      "value": "2.87G",
+      "source": "NONE",
+      "source_info": null
+    },
+    "mountpoint": null
+  }
+]

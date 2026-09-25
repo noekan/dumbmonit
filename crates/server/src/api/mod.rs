@@ -14,12 +14,14 @@ mod metrics;
 mod notify_policy;
 mod oidc;
 mod onboarding;
+mod opnsense;
 mod pbs;
 mod pdm;
 mod pmg;
 mod prometheus;
 mod proxmox;
 mod push;
+mod redfish;
 mod relay;
 mod spa;
 mod status_pages;
@@ -27,6 +29,7 @@ mod synology;
 mod targets;
 mod tokens;
 mod totp;
+mod truenas;
 mod users;
 
 pub use error::{ApiError, ApiResult};
@@ -106,6 +109,12 @@ pub fn router(state: AppState) -> Router {
         .merge(pdm::routes())
         // Files d'attente, filtrage et santé d'une Proxmox Mail Gateway (`pmg.rs`).
         .merge(pmg::routes())
+        // Passerelles, trafic et santé d'un pare-feu OPNsense (`opnsense.rs`).
+        .merge(opnsense::routes())
+        // Pools, protection des données et santé d'un NAS TrueNAS (`truenas.rs`).
+        .merge(truenas::routes())
+        // Matériel d'un serveur lu par son contrôleur de gestion (`redfish.rs`).
+        .merge(redfish::routes())
         // Moniteurs en poussée : jeton d'une cible et sa régénération (`push.rs`).
         .merge(push::ui_routes())
         // Sauvegarde et restauration de l'instance (`backup.rs`).
@@ -225,13 +234,25 @@ const CSP_BASE: &str = "default-src 'none'; \
      base-uri 'none'; \
      form-action 'self'";
 
+/// Chemins qu'une page tierce peut encadrer : une page de statut
+/// (`/s/<slug>`) et sa vue compacte (`/s/<slug>/embed`), rien d'autre — ni les
+/// pages de confirmation ou de désabonnement, ni un chemin qui ne ferait que
+/// commencer par `/s/` pour qu'une application monopage y serve autre chose.
+fn is_embeddable(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix("/s/") else { return false };
+    let rest = rest.strip_suffix('/').unwrap_or(rest);
+    let slug = rest.strip_suffix("/embed").unwrap_or(rest);
+    (2..=40).contains(&slug.len())
+        && slug.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
 /// En-têtes de protection posés sur toute réponse, interface comme API.
 ///
 /// L'interface est une application monopage : encadrée dans une page tierce,
 /// elle se prête au détournement de clic. Seules les pages de statut publiques
 /// (`/s/…`) sont faites pour être intégrées ailleurs ; elles restent encadrables.
 async fn security_headers(mut request: Request, next: Next) -> Response {
-    let embeddable = request.uri().path().starts_with("/s/");
+    let embeddable = is_embeddable(request.uri().path());
     // Un nonce par réponse : 128 bits d'aléa, inutilisables une seconde fois.
     let nonce = hex::encode(rand::random::<[u8; 16]>());
     request.extensions_mut().insert(spa::Nonce(nonce.clone()));
@@ -267,6 +288,21 @@ mod tests {
         assert!(!CSP_BASE.contains("http"), "aucune origine externe : {CSP_BASE}");
         // Les scripts ne sont jamais autorisés en ligne sans nonce.
         assert!(!CSP_BASE.contains("script-src"), "script-src dépend de la réponse");
+    }
+
+    #[test]
+    fn only_status_pages_and_their_embed_can_be_framed() {
+        assert!(is_embeddable("/s/home-lab"));
+        assert!(is_embeddable("/s/home-lab/"));
+        assert!(is_embeddable("/s/home-lab/embed"));
+        assert!(!is_embeddable("/s/home-lab/unsubscribe"));
+        assert!(!is_embeddable("/s/home-lab/confirm"));
+        assert!(!is_embeddable("/s/x%2F..%2Fsettings"));
+        assert!(!is_embeddable("/s/../settings"));
+        assert!(!is_embeddable("/settings"));
+        assert!(!is_embeddable("/status/3"));
+        assert!(!is_embeddable("/api/public/status/home-lab"));
+        assert!(!is_embeddable("/s/"));
     }
 
     #[test]

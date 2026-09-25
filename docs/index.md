@@ -30,7 +30,7 @@ windows are scheduled.
 | [Proxmox VE](devices/proxmox.md) | Nodes, virtual machines and containers, storages, cluster quorum, and the age of the last successful backup per machine. |
 | [Proxmox Backup Server](devices/pbs.md) | Datastore usage and fill-up forecast, deduplication, age and verification of each machine's last snapshot, failed tasks, garbage collection. |
 | [Synology DSM](devices/synology.md) | Volumes, disks and their SMART health, temperature, load, through the NAS web API. |
-| [Linux and Windows agent](devices/agent.md) | CPU, memory, disks, network, services, containers and uptime of machines that do not speak SNMP. One command to install. |
+| [Linux, macOS, FreeBSD and Windows agent](devices/agent.md) | CPU, memory, disks, network, services, containers and uptime of machines that do not speak SNMP, plus temperatures, disk health (SMART) and ZFS pools where the machine exposes them. One command to install. |
 | [Services](devices/services.md) | HTTP(S), TCP port, DNS, ping and TLS certificate expiry, Uptime Kuma style, with a history bar and availability percentage. |
 
 ## What runs

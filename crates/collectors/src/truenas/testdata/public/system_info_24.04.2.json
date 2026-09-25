@@ -1,0 +1,21 @@
+{
+  "version": "TrueNAS-SCALE-24.04.2",
+  "buildtime": {"$date": 1720437275000},
+  "hostname": "CastleNAS",
+  "physmem": 1081586864128,
+  "model": "AMD EPYC 7H12 64-Core Processor",
+  "cores": 256,
+  "physical_cores": 128,
+  "loadavg": [21.2607421875, 11.607421875, 7.9052734375],
+  "uptime": "1:02:17.423922",
+  "uptime_seconds": 3737.423922489,
+  "system_serial": "1SG4L93",
+  "system_product": "PowerEdge R7525",
+  "system_product_version": "Not Specified",
+  "license": null,
+  "boottime": {"$date": 1721413677000},
+  "datetime": {"$date": 1721417414000},
+  "timezone": "America/Detroit",
+  "system_manufacturer": "Dell Inc.",
+  "ecc_memory": true
+}

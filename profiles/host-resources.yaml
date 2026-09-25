@@ -121,3 +121,18 @@ metrics:
       keep_only_when_oid_equals:
         - oid: 1.3.6.1.2.1.25.2.3.1.2
           values: ["1.3.6.1.2.1.25.2.1.2"]
+
+  # Moyennes de charge de UCD-SNMP-MIB (laLoadInt, en centièmes) : Net-SNMP les
+  # publie toujours, y compris là où hrProcessorLoad reste vide — c'est le cas du
+  # contrôleur de gestion (BMC) Supermicro relevé, un Net-SNMP 5.8 sur ARM dont la
+  # hrProcessorTable ne porte que l'identifiant du processeur. Les agents qui
+  # n'implémentent pas UCD (Windows) laissent la série vide.
+  - name: load_average
+    oid: 1.3.6.1.4.1.2021.10.1.5
+    kind: gauge
+    walk: true
+    scale: 0.01
+    labels:
+      period: 1.3.6.1.4.1.2021.10.1.2
+    filters:
+      max_rows: 3

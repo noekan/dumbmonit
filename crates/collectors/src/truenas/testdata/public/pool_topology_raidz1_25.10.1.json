@@ -1,0 +1,51 @@
+{
+  "guid": "6862066784358104532",
+  "name": "raidz1-0",
+  "path": null,
+  "type": "RAIDZ1",
+  "status": "ONLINE",
+  "unavail_disk": null,
+  "stats": {
+    "allocated": 1287345840128,
+    "bytes": [0, 6937819832320, 6596889501696, 0, 0, 0, 0],
+    "checksum_errors": 0,
+    "configured_ashift": 12,
+    "fragmentation": 20,
+    "logical_ashift": 9,
+    "ops": [0, 22545914, 172076123, 0, 0, 0, 0],
+    "physical_ashift": 12,
+    "read_errors": 0,
+    "self_healed": 0,
+    "size": 5978594476032,
+    "timestamp": 3632232341367535,
+    "write_errors": 0
+  },
+  "children": [
+    {
+      "children": [],
+      "device": "sdc1",
+      "disk": "sdc",
+      "guid": "13874372009672584363",
+      "name": "2a752c7c-509a-4ebd-bf71-6cc4ca429ab7",
+      "path": "/dev/disk/by-partuuid/2a752c7c-509a-4ebd-bf71-6cc4ca429ab7",
+      "stats": {
+        "allocated": 0,
+        "bytes": [0, 2313477189632, 2198984794112, 0, 0, 0, 0],
+        "checksum_errors": 0,
+        "configured_ashift": 12,
+        "fragmentation": 0,
+        "logical_ashift": 9,
+        "ops": [0, 3430644, 55659266, 0, 0, 0, 0],
+        "physical_ashift": 12,
+        "read_errors": 0,
+        "self_healed": 0,
+        "size": 0,
+        "timestamp": 3632232341439611,
+        "write_errors": 0
+      },
+      "status": "ONLINE",
+      "type": "DISK",
+      "unavail_disk": null
+    }
+  ]
+}

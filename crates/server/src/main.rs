@@ -106,6 +106,16 @@ async fn run(config: Config) -> Result<()> {
         collectors::SynologyCollector::new()
             .with_abb_history(collectors::synology_history::sqlite_history(pool.clone())),
     ));
+    registry.register(Arc::new(
+        collectors::OpnsenseCollector::new()
+            .with_observer(collectors::opnsense_history::sqlite_observer(pool.clone())),
+    ));
+    registry.register(Arc::new(
+        collectors::TruenasCollector::new()
+            .with_observer(collectors::truenas_history::sqlite_observer(pool.clone())),
+    ));
+    // Matériel serveur, lu sur le contrôleur de gestion (BMC) en Redfish.
+    registry.register(Arc::new(collectors::RedfishCollector::new()));
 
     // Machines équipées de l'agent : les mesures arrivent en push, ce collecteur ne
     // fait que constater leur fraîcheur.
@@ -117,6 +127,14 @@ async fn run(config: Config) -> Result<()> {
     registry.register(Arc::new(collectors::DnsCollector::new()));
     registry.register(Arc::new(collectors::PingCollector::new()));
     registry.register(Arc::new(collectors::TlsCollector::new()));
+
+    // Sondes applicatives : elles mènent le début d'une vraie session plutôt que
+    // de constater l'ouverture d'un port.
+    registry.register(Arc::new(collectors::SmtpCollector::new()));
+    registry.register(Arc::new(collectors::PostgresCollector::new()));
+    registry.register(Arc::new(collectors::MysqlCollector::new()));
+    registry.register(Arc::new(collectors::MqttCollector::new()));
+    registry.register(Arc::new(collectors::WebsocketCollector::new()));
 
     // Moniteurs en poussée (heartbeat) : le travail surveillé appelle une URL, ce
     // collecteur ne fait que constater qu'il l'a fait à temps.

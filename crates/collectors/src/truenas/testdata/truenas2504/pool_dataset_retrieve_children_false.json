@@ -1,0 +1,36 @@
+[
+  {
+    "id": "tank",
+    "type": "FILESYSTEM",
+    "name": "tank",
+    "pool": "tank",
+    "quota": {
+      "parsed": null,
+      "rawvalue": "0",
+      "value": null,
+      "source": "DEFAULT",
+      "source_info": null
+    },
+    "refquota": {
+      "parsed": null,
+      "rawvalue": "0",
+      "value": null,
+      "source": "DEFAULT",
+      "source_info": null
+    },
+    "used": {
+      "parsed": 717633136,
+      "rawvalue": "717633136",
+      "value": "684M",
+      "source": "NONE",
+      "source_info": null
+    },
+    "available": {
+      "parsed": 3081357712,
+      "rawvalue": "3081357712",
+      "value": "2.87G",
+      "source": "NONE",
+      "source_info": null
+    }
+  }
+]

@@ -13,6 +13,8 @@
 
 mod collect;
 mod discovery;
+#[cfg(test)]
+mod fixture;
 mod oid;
 mod pattern;
 mod profile;
@@ -225,7 +227,18 @@ mod tests {
         let catalog = SnmpCollector::new().catalog();
         let mut ids = catalog.ids();
         ids.sort_unstable();
-        assert_eq!(ids, vec!["host-resources", "if-mib", "printer", "system", "ups"]);
+        assert_eq!(
+            ids,
+            vec![
+                "ethernet-switch",
+                "host-resources",
+                "if-mib",
+                "printer",
+                "system",
+                "ups",
+                "zyxel"
+            ]
+        );
     }
 
     #[test]
@@ -235,8 +248,11 @@ mod tests {
         for profile in SnmpCollector::new().catalog().profiles() {
             assert!(!profile.name.trim().is_empty(), "profil « {} » sans nom", profile.id);
             for metric in &profile.metrics {
+                // LLDP-MIB est une MIB de l'IEEE, rangée sous iso.std.iso8802
+                // (1.0.8802) et non sous l'arbre Internet.
                 assert!(
-                    metric.oid.arcs().starts_with(&[1, 3, 6, 1]),
+                    metric.oid.arcs().starts_with(&[1, 3, 6, 1])
+                        || metric.oid.arcs().starts_with(&[1, 0, 8802]),
                     "profil « {} », métrique « {} » : OID hors de l'arbre Internet",
                     profile.id,
                     metric.name

@@ -91,7 +91,18 @@ export type TargetState =
  * decides which page is shown (availability, response time) and where the
  * state comes from (`dumbmonit_probe_success` rather than the last probe).
  */
-export const UPTIME_KINDS = ['http', 'tcp', 'dns', 'ping', 'tls'] as const;
+export const UPTIME_KINDS = [
+	'http',
+	'tcp',
+	'dns',
+	'ping',
+	'tls',
+	'smtp',
+	'postgres',
+	'mysql',
+	'mqtt',
+	'websocket'
+] as const;
 
 export function isUptimeKind(kind: string): boolean {
 	return (UPTIME_KINDS as readonly string[]).includes(kind);
@@ -147,6 +158,10 @@ const FAILURE_REASON_LABEL: Record<string, string> = {
 	body: 'Unreadable response',
 	packet_loss: 'Excessive packet loss',
 	record: 'Expected DNS record missing',
+	auth: 'Credentials refused',
+	protocol: 'The service answered, but not in the expected protocol',
+	query: 'Connected, but the query failed',
+	payload: 'Expected content missing from the answer',
 	missed: 'Heartbeat missed: the job did not call in on time',
 	reported_down: 'The job reported a failure'
 };

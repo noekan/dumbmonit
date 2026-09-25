@@ -3,21 +3,24 @@
 	 * Public status page — `/s/<slug>`. No session, no nav, no cookie: one
 	 * document from `GET /api/public/status/<slug>`, refreshed every minute.
 	 *
-	 * Top to bottom: title and the overall banner, the open announcements
+	 * Top to bottom: logo, title and the overall banner, the open announcements
 	 * (incidents, maintenance) with their timeline, the services by group with
-	 * their daily history bar, then "Past incidents" by day for 30 days. The
-	 * theme follows the page setting (`light` / `dark`) or the visitor's system.
+	 * their daily history bar, "Past incidents" by day for 30 days, then how to
+	 * get updates (RSS, and email when the owner set up an SMTP channel). The
+	 * theme follows the page setting (`light` / `dark`) or the visitor's system;
+	 * the accent is one of a closed set of tokens, never free-form CSS.
 	 */
 	import { page } from '$app/state';
-	import { CalendarClock, Megaphone } from 'lucide-svelte';
+	import { CalendarClock, ExternalLink, Megaphone } from 'lucide-svelte';
 	import { getPublicStatus, toApiError, type PublicIncident, type PublicStatus } from '$lib/api';
 	import { formatDateTime, formatRelative, parseServerDate } from '$lib/format';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { DecryptText, EmptyState, ErrorNotice, Plate, Skeleton } from '$lib/ui';
 	import Logo from '$lib/components/Logo.svelte';
 	import IncidentCard from '$lib/components/status/IncidentCard.svelte';
+	import StatusUpdates from '$lib/components/status/StatusUpdates.svelte';
 	import ServiceRow from '$lib/components/status/ServiceRow.svelte';
-	import { isClosed, overallBanner } from '$lib/components/status/words';
+	import { accentClass, homepageHost, isClosed, overallBanner } from '$lib/components/status/words';
 
 	const REFRESH_MS = 60_000;
 
@@ -101,7 +104,7 @@
 	<meta name="robots" content="noindex" />
 </svelte:head>
 
-<div class="min-h-full bg-canvas text-ink">
+<div class={`min-h-full border-t-4 border-accent bg-canvas text-ink ${accentClass(status?.page.accent)}`}>
 	<main class="mx-auto w-full max-w-3xl px-4 pt-8 pb-16 sm:px-6 sm:pt-12">
 		{#if error && notFound}
 			<EmptyState mascot="dizzy" title="This status page does not exist." description="Check the link you were given, or ask whoever runs this DumbMonit for the right one." />
@@ -115,10 +118,27 @@
 				<Skeleton class="h-28 w-full" />
 			</div>
 		{:else}
-			<header class="rise-in">
-				<h1 class="display text-3xl text-ink sm:text-4xl">{status.page.title}</h1>
-				{#if status.page.description}
-					<p class="mt-2 max-w-prose text-base text-ink-2">{status.page.description}</p>
+			<header class="rise-in flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+				<div class="flex min-w-0 items-center gap-4">
+					{#if status.page.logo_url}
+						<img src={status.page.logo_url} alt="" class="size-12 shrink-0 rounded-lg object-contain sm:size-14" />
+					{/if}
+					<div class="min-w-0">
+						<h1 class="display text-3xl break-words text-ink sm:text-4xl">{status.page.title}</h1>
+						{#if status.page.description}
+							<p class="mt-1.5 max-w-prose text-base text-ink-2">{status.page.description}</p>
+						{/if}
+					</div>
+				</div>
+				{#if status.page.homepage_url}
+					<a
+						class="inline-flex items-center gap-1.5 rounded-md py-1 text-sm font-semibold text-accent underline decoration-accent/40 underline-offset-4 hover:decoration-accent"
+						href={status.page.homepage_url}
+						rel="noopener noreferrer nofollow"
+					>
+						{homepageHost(status.page.homepage_url)}
+						<ExternalLink class="size-3.5" aria-hidden="true" />
+					</a>
 				{/if}
 			</header>
 
@@ -202,11 +222,17 @@
 					</div>
 				{/if}
 			</section>
+			<StatusUpdates slug={status.page.slug} subscribe={status.page.subscribe} />
 		{/if}
 
-		<footer class="mt-12 flex items-center justify-center gap-2 text-[0.8125rem] text-ink-2">
-			<Logo class="size-5" />
-			<span>Powered by <a class="font-semibold text-ink underline decoration-line underline-offset-2 hover:decoration-ink" href="https://github.com/noekan/dumbmonit" rel="noreferrer">DumbMonit</a></span>
+		<footer class="mt-12 grid justify-items-center gap-3 text-center text-[0.8125rem] text-ink-2">
+			{#if status?.page.footer_text}
+				<p class="max-w-prose whitespace-pre-line">{status.page.footer_text}</p>
+			{/if}
+			<p class="flex items-center gap-2">
+				<Logo class="size-5" />
+				<span>Powered by <a class="font-semibold text-ink underline decoration-line underline-offset-2 hover:decoration-ink" href="https://github.com/noekan/dumbmonit" rel="noreferrer">DumbMonit</a></span>
+			</p>
 		</footer>
 	</main>
 </div>

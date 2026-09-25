@@ -1,7 +1,8 @@
-# Linux and Windows agent
+# Linux, macOS, FreeBSD and Windows agent
 
 A small binary installed on the machine to monitor. It measures CPU, memory,
-disks, network, services and containers, then **pushes** its readings to the
+disks, network, services and containers — and, where the machine exposes them,
+temperatures, disk health and ZFS pools — then **pushes** its readings to the
 DumbMonit server over HTTP.
 
 The direction is deliberate: the agent calls the server, never the other way
@@ -24,7 +25,42 @@ cannot write into another machine's series, even by forging its labels.
 | Host | `uptime_seconds`, `process_count` | |
 | Services | `service_up` (1 = running) | `service` |
 | Containers | `container_up`, `container_count`, `container_running_count`, `container_series_skipped` (containers beyond `docker_max_containers`) | `container`, `image` |
+| Sensors | `agent_sensor_temperature_celsius`, `agent_sensor_temperature_critical_celsius` (the threshold the hardware itself declares), `agent_sensor_fan_rpm` | `sensor`, `fan` |
+| Disk health (SMART) | `agent_disk_smart_ok` (1 = the disk passes its own self-assessment), `agent_disk_temperature_celsius`, `agent_disk_power_on_hours`, `agent_disk_wearout_percent`, `agent_disk_reallocated_sectors`, `agent_disk_pending_sectors`, `agent_disk_media_errors` | `device`, `model` |
+| ZFS | `agent_zfs_pool_health` (0 online, 1 degraded, 2 worse), `agent_zfs_pool_size/used/free_bytes`, `agent_zfs_pool_used_percent`, `agent_zfs_pool_fragmentation_percent`, `agent_zfs_pool_device_errors`, `agent_zfs_pool_data_errors`, `agent_zfs_pool_scrub_running`, `agent_zfs_pool_scrub_errors`, `agent_zfs_pool_scrub_age_seconds` | `pool` |
 | Agent | `agent_collect_seconds`, `agent_buffered_samples`, `agent_dropped_samples` | |
+
+A series that cannot be measured is **absent**, never zero: no `smartctl`, no
+`agent_disk_*`; no readable probe, no `agent_sensor_*`; no ZFS, no
+`agent_zfs_*`. A temperature outside 1–150 °C is dropped rather than published,
+and a fan reading 0 rpm is dropped too — a motherboard has more fan headers
+than fans, and an empty one reads zero like a dead fan does.
+
+### What is collected where
+
+| | Linux | macOS | FreeBSD | Windows |
+|---|---|---|---|---|
+| CPU, memory, swap, filesystems, network, uptime, processes | yes | yes | yes | yes |
+| Load average | yes | yes | yes | no (Windows has no such notion) |
+| Services | systemd (`systemctl`) | launchd (`launchctl`) | rc.d (`service`) | Windows services |
+| Docker containers | yes | yes, if `docker_socket` points at Docker Desktop's socket | no (no Docker daemon) | no |
+| Temperatures | `/sys/class/hwmon` | SMC sensors | `dev.cpu.N.temperature` (CPU only) | no |
+| Fans | `/sys/class/hwmon` | no | no | no |
+| Disk health (SMART) | `smartctl` | `smartctl` (Homebrew) | `smartctl` (`sysutils/smartmontools`) | `smartctl` |
+| ZFS pools | `zpool` (OpenZFS) | no | `zpool` | no |
+| OS health (updates, reboot, failed units, SELinux) | yes | no | no | no |
+| Plakar backups | yes | yes | yes | yes |
+| Machine identity | `/etc/machine-id` | `IOPlatformUUID` | `kern.hostuuid`, `/etc/hostid` | host name |
+| Relay mode | yes | yes | yes | yes |
+
+Windows has no temperature row on purpose: reading sensors there means going
+through WMI, with administrative rights, for values most machines do not
+expose at all. Publishing nothing is the honest answer.
+
+`smartctl` (smartmontools) and `zpool` are looked for at every reading period
+and used when present; neither is installed by the agent, and neither is
+required. Both need root — the service the installer registers runs as root, a
+hand-started agent under your own account will find nothing.
 
 Counters are sent raw, so that a restart of the agent never produces a fake
 rate; apply `rate()` in queries.
@@ -33,6 +69,16 @@ Built-in rules that apply: Device unreachable, High CPU, Unusual CPU. "Device
 unreachable" works on agents too: the server checks the age of the last batch
 received and declares the machine silent after three missed periods (at least
 90 seconds).
+
+Four more fire only on machines that produce the matching series, so they need
+no setting up and cannot go off on a machine without the hardware:
+
+| Rule | Fires when |
+|---|---|
+| **Disk SMART failing** (critical) | a disk's own self-assessment reports it as failing |
+| **ZFS pool degraded** (critical) | a pool is no longer `ONLINE` for five minutes |
+| **ZFS scrub found errors** (critical) | the last scrub found errors, or the pool reports permanently corrupted files |
+| **Temperature above critical** (critical) | a sensor exceeds the critical threshold **its own hardware declares** — no value is hard-coded, 85 °C being an emergency on a disk and a normal afternoon on a laptop CPU |
 
 ## Install
 
@@ -93,6 +139,50 @@ you create a token.
     (`ProtectSystem=strict`, `NoNewPrivileges`, `MemoryMax=128M`,
     `CPUQuota=20%`).
 
+=== "macOS (launchd)"
+
+    The macOS binaries are **not** served by the DumbMonit image: building them
+    requires Apple's SDK, which its licence forbids redistributing. Download
+    the one for your Mac from the
+    [releases page](https://github.com/noekan/dumbmonit/releases/latest) —
+    `dumbmonit-agent-macos-aarch64` (Apple silicon) or
+    `dumbmonit-agent-macos-x86_64` (Intel) — and pass it to the same script:
+
+    ```sh
+    curl -sSLO https://github.com/noekan/dumbmonit/releases/latest/download/dumbmonit-agent-macos-aarch64
+    curl -sSL http://server:8080/install.sh | sudo sh -s -- \
+        --token=dmon_xxx --url=http://server:8080 --bin=./dumbmonit-agent-macos-aarch64
+    ```
+
+    The script installs the binary in `/usr/local/bin`, writes
+    `/usr/local/etc/dumbmonit/agent.yaml` (mode 0600) and registers the system
+    daemon `com.dumbmonit.agent` in `/Library/LaunchDaemons`, started with
+    `launchctl bootstrap system`. It runs at boot, with no one logged in.
+
+    Asking the server for `/download/dumbmonit-agent-macos-…` answers with the
+    address above rather than a bare 404.
+
+    !!! note "Prefer to build it yourself?"
+        On the Mac itself, with Rust installed:
+        `cargo build --release -p dumbmonit-agent`, then
+        `--bin=target/release/dumbmonit-agent`. That is the same binary the
+        release job produces.
+
+=== "FreeBSD (rc.d)"
+
+    ```sh
+    fetch -qo - http://server:8080/install.sh | sh -s -- --token=dmon_xxx --url=http://server:8080
+    ```
+
+    x86_64 only. The script downloads `dumbmonit-agent-freebsd-x86_64` from the
+    server, writes `/usr/local/etc/dumbmonit/agent.yaml` (mode 0600) and
+    installs `/usr/local/etc/rc.d/dumbmonit_agent`, enabled with
+    `service dumbmonit_agent enable`. `daemon(8)` supervises the agent,
+    restarts it if it stops and writes `/var/log/dumbmonit-agent.log`.
+
+    Works the same on TrueNAS CORE and other FreeBSD-based appliances, where
+    the ZFS series are the point of the exercise.
+
 === "Windows (service)"
 
     ```powershell
@@ -104,6 +194,19 @@ you create a token.
     restart on failure.
 
 One token can enrol several machines: name it after a group or a machine.
+
+### Managing the service
+
+| | Linux (systemd) | Linux (OpenRC) | macOS (launchd) | FreeBSD (rc.d) |
+|---|---|---|---|---|
+| Status | `systemctl status dumbmonit-agent` | `rc-service dumbmonit-agent status` | `sudo launchctl print system/com.dumbmonit.agent` | `service dumbmonit_agent status` |
+| Logs | `journalctl -u dumbmonit-agent -f` | `tail -f /var/log/dumbmonit-agent.log` | `tail -f /var/log/dumbmonit-agent.log` | `tail -f /var/log/dumbmonit-agent.log` |
+| Restart | `systemctl restart dumbmonit-agent` | `rc-service dumbmonit-agent restart` | `sudo launchctl kickstart -k system/com.dumbmonit.agent` | `service dumbmonit_agent restart` |
+| Stop | `systemctl stop dumbmonit-agent` | `rc-service dumbmonit-agent stop` | `sudo launchctl bootout system/com.dumbmonit.agent` | `service dumbmonit_agent onestop` |
+| Configuration | `/etc/dumbmonit/agent.yaml` | `/etc/dumbmonit/agent.yaml` | `/usr/local/etc/dumbmonit/agent.yaml` | `/usr/local/etc/dumbmonit/agent.yaml` |
+| Service file | `/etc/systemd/system/dumbmonit-agent.service` | `/etc/init.d/dumbmonit-agent` | `/Library/LaunchDaemons/com.dumbmonit.agent.plist` | `/usr/local/etc/rc.d/dumbmonit_agent` |
+
+`--uninstall` removes all of it, service included, on every system.
 
 !!! note "The download is verified"
     The server publishes the SHA-256 of each agent binary next to it
@@ -122,7 +225,7 @@ One token can enrol several machines: name it after a group or a machine.
 | `--token=TOKEN` | `-Token` | Enrollment token (required). |
 | `--url=URL` | `-Url` | Server URL, for example `http://server:8080`. On Linux, `DUMBMONIT_URL` in the environment is used if the flag is absent. |
 | `--interval=N` | `-Interval` | Sampling period in seconds (default 30). |
-| `--services=a,b,c` | `-Services @('a','b')` | systemd units or Windows services whose state is reported. |
+| `--services=a,b,c` | `-Services @('a','b')` | Services whose state is reported, named as the host system names them: systemd units on Linux, launchd labels (`com.apple.sshd`) on macOS, rc.d names on FreeBSD, Windows services. |
 | `--tags=key=value,…` | `-Tags @{key='value'}` | Tags, copied as `tag_<key>` on every series. |
 | `--hostname=NAME` | `-HostName` | Name announced to the server (default: the machine's). |
 | `--bin=PATH` | `-BinPath` | Local binary to install instead of downloading it. |
@@ -146,8 +249,8 @@ has to be revoked first.
 
 ## Configuration file
 
-`/etc/dumbmonit/agent.yaml` on Linux, `C:\ProgramData\DumbMonit\agent.yaml` on
-Windows:
+`/etc/dumbmonit/agent.yaml` on Linux, `/usr/local/etc/dumbmonit/agent.yaml` on
+macOS and FreeBSD, `C:\ProgramData\DumbMonit\agent.yaml` on Windows:
 
 ```yaml
 server_url: http://server:8080
@@ -162,9 +265,23 @@ tags:                      # free labels, prefixed "tag_" on the server
   room: basement
 docker: true               # container inventory (default: true)
 docker_socket: /var/run/docker.sock
+sensors: true              # temperatures and fans (default: true)
+smart: true                # disk health through smartctl (default: true)
+smart_bin: smartctl        # path, when it is not in the service's PATH
+smart_interval_secs: 300   # minimum 60: a sleeping disk is never woken to be read
+zfs: true                  # ZFS pools through zpool (default: true)
+zfs_bin: zpool
+zfs_interval_secs: 120     # minimum 30
 max_buffered_samples: 20000
 log_level: info
 ```
+
+`sensors`, `smart` and `zfs` are detected, never assumed: left at `true` on a
+machine with no probe, no `smartctl` or no pool, they cost one look per period
+and emit nothing at all. Set one to `false` to stop even looking — worth doing
+on a NAS whose disks you would rather `smartctl` never touched, although the
+agent already passes `-n standby` so that a sleeping disk is measured only when
+it is awake for other reasons.
 
 Next to it, `/etc/dumbmonit/agent-secret` (`C:\ProgramData\DumbMonit\agent-secret`
 on Windows) holds the binding secret the server handed this machine. The agent
@@ -193,6 +310,13 @@ a container without mounting a file:
 | `DUMBMONIT_AGENT_INTERFACES_ONLY` | Interfaces to keep; when set, replaces the ignore list |
 | `DUMBMONIT_AGENT_MOUNTS_IGNORE` | Mount points left out of filesystems and disk I/O; default skips `/var/lib/docker/`, `/run/…`, `/sys/`, `/proc/`, `/dev/`, `/snap/` |
 | `DUMBMONIT_AGENT_CPU_PER_CORE` | `true` to also send one CPU series per core (default `false`) |
+| `DUMBMONIT_AGENT_SENSORS` | `true` / `false`: temperatures and fans (default `true`) |
+| `DUMBMONIT_AGENT_SMART` | `true` / `false`: disk health through `smartctl` (default `true`) |
+| `DUMBMONIT_AGENT_SMART_BIN` | Path of `smartctl` |
+| `DUMBMONIT_AGENT_SMART_INTERVAL_SECS` | Period between two SMART readings, default `300`, minimum `60` |
+| `DUMBMONIT_AGENT_ZFS` | `true` / `false`: ZFS pools through `zpool` (default `true`) |
+| `DUMBMONIT_AGENT_ZFS_BIN` | Path of `zpool` |
+| `DUMBMONIT_AGENT_ZFS_INTERVAL_SECS` | Period between two ZFS readings, default `120`, minimum `30` |
 | `DUMBMONIT_AGENT_MAX_BUFFERED_SAMPLES` | Size of the catch-up buffer |
 | `DUMBMONIT_AGENT_LOG` | `trace`, `debug`, `info`, `warn`, `error` |
 | `DUMBMONIT_AGENT_RELAY` | `true` to run, for the server, the probes of the devices assigned to this agent (see [Run the agent in Docker / on another network](#run-the-agent-in-docker--on-another-network)) |
@@ -597,12 +721,12 @@ built-in rule.
 To try it locally with an unencrypted kloset:
 
 ```sh
-mkdir -p /tmp/plakar-lab-src && echo hello > /tmp/plakar-lab-src/a.txt
-plakar at /tmp/plakar-lab create -plaintext
-plakar at /tmp/plakar-lab backup /tmp/plakar-lab-src
-plakar at /tmp/plakar-lab ls
+mkdir -p /tmp/plakar-demo-src && echo hello > /tmp/plakar-demo-src/a.txt
+plakar at /tmp/plakar-demo create -plaintext
+plakar at /tmp/plakar-demo backup /tmp/plakar-demo-src
+plakar at /tmp/plakar-demo ls
 ```
 
-then add `plakar_klosets: ["/tmp/plakar-lab"]` to `agent.yaml` (a bare path
+then add `plakar_klosets: ["/tmp/plakar-demo"]` to `agent.yaml` (a bare path
 outside a home is not discovered) and check with `dumbmonit-agent --dry-run`
 that `backup_*` samples appear.

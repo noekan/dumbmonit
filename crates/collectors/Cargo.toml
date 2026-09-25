@@ -55,6 +55,28 @@ tokio-rustls = "0.26"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"
 
+# --- Sondes applicatives (SMTP, SQL, MQTT, WebSocket) ---
+#
+# `base64` sert aux authentifications SMTP (AUTH PLAIN/LOGIN) et à la clé de la
+# poignée de main WebSocket ; `sha1` uniquement à cette dernière, où la RFC 6455
+# l'impose comme condiment de la réponse `Sec-WebSocket-Accept`. Les deux sont
+# déjà dans le verrou de dépendances par transitivité : rien de neuf n'entre.
+base64 = "0.22"
+sha1 = "0.10"
+
+# PostgreSQL et MySQL/MariaDB. `sqlx` est déjà la couche base du serveur ; ses
+# pilotes `postgres` et `mysql` sont en Rust pur, sans C, et passent donc le
+# binaire statique musl et l'image `scratch`. Le coût assumé est la taille du
+# binaire de l'agent relais, qui embarque tous les collecteurs réseau : écrire
+# deux protocoles d'authentification (SCRAM-SHA-256, caching_sha2_password) à la
+# main coûterait bien plus cher en code à maintenir qu'en octets.
+#
+# `sqlite` reste hors de cette liste : ce serait la même bibliothèque C que le
+# serveur, pour une base de données qu'aucune sonde réseau ne peut atteindre.
+sqlx = { version = "0.9", default-features = false, features = [
+    "runtime-tokio", "postgres", "mysql", "tls-rustls-ring-native-roots",
+] }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
 # Faux services HTTP (DSM, PVE) montés dans les tests unitaires.

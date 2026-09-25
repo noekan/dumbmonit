@@ -1,0 +1,208 @@
+[
+  {
+    "id": 1,
+    "target_dataset": "tank/replica/media",
+    "recursive": false,
+    "compression": null,
+    "speed_limit": null,
+    "enabled": true,
+    "direction": "PUSH",
+    "transport": "LOCAL",
+    "sudo": false,
+    "netcat_active_side": null,
+    "netcat_active_side_port_min": null,
+    "netcat_active_side_port_max": null,
+    "source_datasets": [
+      "tank/media"
+    ],
+    "exclude": [],
+    "naming_schema": [],
+    "name_regex": null,
+    "auto": false,
+    "only_matching_schedule": false,
+    "readonly": "SET",
+    "allow_from_scratch": false,
+    "hold_pending_snapshots": false,
+    "retention_policy": "SOURCE",
+    "lifetime_unit": null,
+    "lifetime_value": null,
+    "lifetimes": [],
+    "large_block": true,
+    "embed": false,
+    "compressed": true,
+    "retries": 5,
+    "netcat_active_side_listen_address": null,
+    "netcat_passive_side_connect_address": null,
+    "logging_level": null,
+    "name": "local media copy",
+    "state": {
+      "state": "FINISHED",
+      "datetime": {
+        "$date": 1790290434000
+      },
+      "warnings": [],
+      "last_snapshot": "tank/media@auto-2026-09-24_15-53"
+    },
+    "properties": true,
+    "properties_exclude": [],
+    "properties_override": {},
+    "replicate": false,
+    "encryption": false,
+    "encryption_inherit": null,
+    "encryption_key": null,
+    "encryption_key_format": null,
+    "encryption_key_location": null,
+    "ssh_credentials": null,
+    "periodic_snapshot_tasks": [
+      {
+        "id": 1,
+        "dataset": "tank/media",
+        "recursive": false,
+        "lifetime_value": 2,
+        "lifetime_unit": "WEEK",
+        "enabled": true,
+        "exclude": [],
+        "naming_schema": "auto-%Y-%m-%d_%H-%M",
+        "allow_empty": true,
+        "schedule": {
+          "minute": "0",
+          "hour": "*",
+          "dom": "*",
+          "month": "*",
+          "dow": "*",
+          "begin": "00:00",
+          "end": "23:59"
+        }
+      }
+    ],
+    "also_include_naming_schema": [],
+    "schedule": null,
+    "restrict_schedule": null,
+    "job": {
+      "id": 70,
+      "method": "replication.run",
+      "arguments": [
+        1
+      ],
+      "transient": false,
+      "description": null,
+      "abortable": false,
+      "logs_path": "/var/log/jobs/70.log",
+      "logs_excerpt": "[2026/09/24 15:53:37] INFO     [replication_task__task_1] [zettarepl.replication.pre_retention] Pre-retention destroying snapshots: []\n[2026/09/24 15:53:37] INFO     [replication_task__task_1] [zettarepl.replication.run] For replication task 'task_1': doing push from 'tank/media' to 'tank/replica/media' of snapshot='auto-2026-09-24_15-53' incremental_base=None include_intermediate=False receive_resume_token=None encryption=False\n",
+      "progress": {
+        "percent": 100,
+        "description": "Sending 1 of 1: tank/media@auto-2026-09-24_15-53 (226.97 MiB / 287.06 MiB)",
+        "extra": null
+      },
+      "result": null,
+      "result_encoding_error": null,
+      "error": null,
+      "exception": null,
+      "exc_info": null,
+      "state": "SUCCESS",
+      "time_started": {
+        "$date": 1790290416000
+      },
+      "time_finished": {
+        "$date": 1790290434000
+      },
+      "credentials": {
+        "type": "API_KEY",
+        "data": {
+          "username": "truenas_admin",
+          "login_at": {
+            "$date": 1790290416000
+          },
+          "api_key": {
+            "id": 1,
+            "name": "dumbmonit"
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": 2,
+    "target_dataset": "tank/replica/docs",
+    "recursive": true,
+    "compression": null,
+    "speed_limit": null,
+    "enabled": true,
+    "direction": "PUSH",
+    "transport": "LOCAL",
+    "sudo": false,
+    "netcat_active_side": null,
+    "netcat_active_side_port_min": null,
+    "netcat_active_side_port_max": null,
+    "source_datasets": [
+      "tank/docs"
+    ],
+    "exclude": [],
+    "naming_schema": [],
+    "name_regex": null,
+    "auto": true,
+    "only_matching_schedule": false,
+    "readonly": "SET",
+    "allow_from_scratch": false,
+    "hold_pending_snapshots": false,
+    "retention_policy": "SOURCE",
+    "lifetime_unit": null,
+    "lifetime_value": null,
+    "lifetimes": [],
+    "large_block": true,
+    "embed": false,
+    "compressed": true,
+    "retries": 5,
+    "netcat_active_side_listen_address": null,
+    "netcat_passive_side_connect_address": null,
+    "logging_level": null,
+    "name": "never run",
+    "state": {
+      "state": "PENDING"
+    },
+    "properties": true,
+    "properties_exclude": [],
+    "properties_override": {},
+    "replicate": false,
+    "encryption": false,
+    "encryption_inherit": null,
+    "encryption_key": null,
+    "encryption_key_format": null,
+    "encryption_key_location": null,
+    "ssh_credentials": null,
+    "periodic_snapshot_tasks": [
+      {
+        "id": 2,
+        "dataset": "tank/docs",
+        "recursive": true,
+        "lifetime_value": 1,
+        "lifetime_unit": "DAY",
+        "enabled": true,
+        "exclude": [],
+        "naming_schema": "hourly-%Y%m%d-%H%M",
+        "allow_empty": true,
+        "schedule": {
+          "minute": "30",
+          "hour": "*",
+          "dom": "*",
+          "month": "*",
+          "dow": "*",
+          "begin": "00:00",
+          "end": "23:59"
+        }
+      }
+    ],
+    "also_include_naming_schema": [],
+    "schedule": {
+      "minute": "15",
+      "hour": "3",
+      "dom": "*",
+      "month": "*",
+      "dow": "*",
+      "begin": "00:00",
+      "end": "23:59"
+    },
+    "restrict_schedule": null,
+    "job": null
+  }
+]

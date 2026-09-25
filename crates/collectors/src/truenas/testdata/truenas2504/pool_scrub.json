@@ -1,0 +1,17 @@
+[
+  {
+    "pool": 1,
+    "threshold": 35,
+    "description": "",
+    "schedule": {
+      "minute": "00",
+      "hour": "00",
+      "dom": "*",
+      "month": "*",
+      "dow": "7"
+    },
+    "enabled": true,
+    "id": 1,
+    "pool_name": "tank"
+  }
+]

@@ -1,0 +1,22 @@
+{
+  "identifier": "{serial_lunid}WD-WX72A704T2RC_50014ee2bdbe3ae7",
+  "name": "sdc",
+  "devname": "sdc",
+  "subsystem": "scsi",
+  "bus": "ATA",
+  "number": 2080,
+  "serial": "WD-WX72A704T2RC",
+  "lunid": "50014ee2bdbe3ae7",
+  "size": 2000398934016,
+  "description": "",
+  "transfermode": "Auto",
+  "hddstandby": "ALWAYS ON",
+  "advpowermgmt": "DISABLED",
+  "expiretime": null,
+  "model": "WDC_WD20EZAZ-00GGJB0",
+  "rotationrate": 5400,
+  "type": "HDD",
+  "zfs_guid": "13874372009672584363",
+  "enclosure": null,
+  "pool": null
+}

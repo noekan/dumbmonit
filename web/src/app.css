@@ -131,6 +131,31 @@ html.dark {
 	--ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* ---------------------------------------------------------------------------
+   Accent of a public status page — a closed set the owner picks from. Each
+   hue is an ink: ≥ 4.5:1 against the surface in its light, and `on-accent`
+   text is ≥ 4.5:1 on it. `default` is the page's own ink.
+   --------------------------------------------------------------------------- */
+:root {
+	--c-accent: var(--c-ink);
+	--c-on-accent: var(--c-surface);
+}
+.sp-accent-blue { --c-accent: #1f5fae; }
+.sp-accent-teal { --c-accent: #0b6d66; }
+.sp-accent-violet { --c-accent: #6a3fb5; }
+.sp-accent-rose { --c-accent: #b0284f; }
+.sp-accent-amber { --c-accent: #8f5d12; }
+html.dark .sp-accent-blue { --c-accent: #8fbaff; }
+html.dark .sp-accent-teal { --c-accent: #5fe0d4; }
+html.dark .sp-accent-violet { --c-accent: #c3a8ff; }
+html.dark .sp-accent-rose { --c-accent: #ff8fae; }
+html.dark .sp-accent-amber { --c-accent: #ffc864; }
+
+@theme inline {
+	--color-accent: var(--c-accent);
+	--color-on-accent: var(--c-on-accent);
+}
+
 html {
 	height: 100%;
 	scrollbar-color: var(--c-line-strong) transparent;

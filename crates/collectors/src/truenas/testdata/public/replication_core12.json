@@ -1,0 +1,47 @@
+{
+ "id": 1,
+ "name": "MVDRAIDZS2DPOOL - MVDRaidZPool",
+ "direction": "PUSH",
+ "transport": "SSH+NETCAT",
+ "source_datasets": [
+  "MVDRAIDZS2DPOOL"
+ ],
+ "target_dataset": "MVDRaidZPool",
+ "recursive": true,
+ "enabled": true,
+ "auto": true,
+ "retention_policy": "SOURCE",
+ "retries": 15,
+ "schedule": null,
+ "restrict_schedule": null,
+ "state": {
+  "state": "FINISHED",
+  "datetime": {
+   "$date": 1643918421098
+  },
+  "warnings": [],
+  "last_snapshot": "MVDRAIDZS2DPOOL/mvdsqlclustersharedvol@auto-2022-02-03_12-00"
+ },
+ "periodic_snapshot_tasks": [
+  {
+   "id": 9,
+   "dataset": "MVDRAIDZS2DPOOL",
+   "recursive": true,
+   "lifetime_value": 3,
+   "lifetime_unit": "DAY",
+   "enabled": true,
+   "exclude": [],
+   "naming_schema": "auto-%Y-%m-%d_%H-%M",
+   "allow_empty": true,
+   "schedule": {
+    "minute": "0",
+    "hour": "*",
+    "dom": "*",
+    "month": "*",
+    "dow": "*",
+    "begin": "00:00",
+    "end": "23:59"
+   }
+  }
+ ]
+}

@@ -9,12 +9,15 @@
 
 pub mod dummy;
 pub mod http;
+pub mod opnsense;
 pub mod pbs;
 pub mod pdm;
 pub mod pmg;
 pub mod proxmox;
+pub mod redfish;
 pub mod snmp;
 pub mod synology;
+pub mod truenas;
 pub mod uptime;
 
 use std::collections::HashMap;
@@ -24,13 +27,19 @@ use std::time::Duration;
 use dumbmonit_proto::{Collector, MetricKind, ProbeError, Sample, Target};
 
 pub use dummy::DummyCollector;
+pub use opnsense::OpnsenseCollector;
 pub use pbs::PbsCollector;
 pub use pdm::PdmCollector;
 pub use pmg::PmgCollector;
 pub use proxmox::ProxmoxCollector;
+pub use redfish::RedfishCollector;
 pub use snmp::SnmpCollector;
 pub use synology::SynologyCollector;
-pub use uptime::{DnsCollector, HttpCollector, PingCollector, TcpCollector, TlsCollector};
+pub use truenas::TruenasCollector;
+pub use uptime::{
+    DnsCollector, HttpCollector, MqttCollector, MysqlCollector, PingCollector, PostgresCollector,
+    SmtpCollector, TcpCollector, TlsCollector, WebsocketCollector,
+};
 
 #[derive(Clone, Default)]
 pub struct Registry {
@@ -53,11 +62,19 @@ impl Registry {
         registry.register(Arc::new(PmgCollector::new()));
         registry.register(Arc::new(PdmCollector::new()));
         registry.register(Arc::new(SynologyCollector::new()));
+        registry.register(Arc::new(OpnsenseCollector::new()));
+        registry.register(Arc::new(TruenasCollector::new()));
+        registry.register(Arc::new(RedfishCollector::new()));
         registry.register(Arc::new(HttpCollector::new()));
         registry.register(Arc::new(TcpCollector::new()));
         registry.register(Arc::new(DnsCollector::new()));
         registry.register(Arc::new(PingCollector::new()));
         registry.register(Arc::new(TlsCollector::new()));
+        registry.register(Arc::new(SmtpCollector::new()));
+        registry.register(Arc::new(PostgresCollector::new()));
+        registry.register(Arc::new(MysqlCollector::new()));
+        registry.register(Arc::new(MqttCollector::new()));
+        registry.register(Arc::new(WebsocketCollector::new()));
         registry
     }
 

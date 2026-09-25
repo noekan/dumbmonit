@@ -1,14 +1,19 @@
 #!/bin/sh
-# Installe l'agent système DumbMonit et son service (systemd ou OpenRC).
+# Installe l'agent système DumbMonit et son service.
 #
 #   curl -sSL http://serveur:8080/install.sh | sh -s -- --token=dmon_xxx --url=http://serveur:8080
 #
 # C'est la commande que le serveur affiche à la création d'un jeton ; le binaire
-# est téléchargé sur ce même serveur, qui l'embarque dans son image.
+# est téléchargé sur ce même serveur, qui l'embarque dans son image — sauf pour
+# macOS, dont le binaire est publié avec la version (voir plus bas).
+#
+# Quatre systèmes d'init, un seul script : systemd et OpenRC sous Linux, launchd
+# sous macOS, rc.d sous FreeBSD. Chacun a ses chemins, son fichier de service et
+# ses commandes ; tout le reste — téléchargement, empreinte, configuration,
+# envoi de vérification — leur est commun.
 #
 # POSIX pur, sans bashisme : les NAS et les images minimales n'ont souvent que
-# BusyBox ou dash, et un script d'installation qui exige bash n'est pas un script
-# d'installation universel.
+# BusyBox ou dash, et le /bin/sh de FreeBSD n'est pas bash non plus.
 #
 # Idempotent : le relancer met à jour le binaire et la configuration sans rien
 # casser, ce qui en fait aussi la procédure de mise à jour. Une machine encore
@@ -31,21 +36,12 @@ LOCAL_BIN=""
 UNINSTALL=0
 NO_START=0
 
-CONFIG_DIR="/etc/dumbmonit"
-CONFIG_FILE="$CONFIG_DIR/agent.yaml"
-BIN_PATH="/usr/local/bin/dumbmonit-agent"
-UNIT_PATH="/etc/systemd/system/dumbmonit-agent.service"
-OPENRC_PATH="/etc/init.d/dumbmonit-agent"
 SERVICE_NAME="dumbmonit-agent"
-
-# Noms d'avant le renommage EzyMonit → DumbMonit. Une installation qui les porte
-# encore est migrée sur place à l'installation, et `--uninstall` en fait aussi
-# le ménage.
-LEGACY_CONFIG_DIR="/etc/ezymonit"
-LEGACY_BIN_PATH="/usr/local/bin/ezymonit-agent"
-LEGACY_UNIT_PATH="/etc/systemd/system/ezymonit-agent.service"
-LEGACY_OPENRC_PATH="/etc/init.d/ezymonit-agent"
-LEGACY_SERVICE_NAME="ezymonit-agent"
+# Étiquette launchd et nom rc.d : ni l'un ni l'autre n'accepte le nom Linux tel
+# quel — launchd veut un identifiant en domaine inversé, rc.d refuse le tiret.
+LAUNCHD_LABEL="com.dumbmonit.agent"
+RC_NAME="dumbmonit_agent"
+LOG_FILE="/var/log/dumbmonit-agent.log"
 
 usage() {
     cat <<'FIN'
@@ -58,7 +54,8 @@ OPTIONS:
     --token=TOKEN       Enrollment token (required)
     --url=URL           Server URL, for example http://server:8080
     --interval=N        Sampling period in seconds (default: 30)
-    --services=a,b,c    systemd units whose state is reported
+    --services=a,b,c    Services whose state is reported: systemd units on
+                        Linux, launchd labels on macOS, rc.d names on FreeBSD
     --tags=key=value    Tags, comma-separated
     --hostname=NAME     Name announced to the server (default: the machine's)
     --bin=PATH          Local binary to install instead of downloading it
@@ -67,7 +64,13 @@ OPTIONS:
     --uninstall         Uninstall the agent and delete its configuration
     --help              Show this help
 
-The service is registered with systemd, or with OpenRC otherwise (Alpine).
+Supported systems: Linux (systemd or OpenRC, x86_64 and aarch64), macOS
+(launchd, Apple silicon and Intel), FreeBSD (rc.d, x86_64). On Windows, use
+install.ps1 instead.
+
+The macOS binary is not shipped in the DumbMonit image — building it requires
+Apple's SDK, which cannot be redistributed. Download it from the releases page
+and pass it with --bin=PATH.
 FIN
 }
 
@@ -98,17 +101,78 @@ done
 
 [ "$(id -u)" -eq 0 ] || echec "this installer must run as root (try with sudo)"
 
-# Gestionnaire de services. `systemctl` peut exister sans que systemd soit
-# l'init (conteneur, chroot) : on regarde donc qui est PID 1 quand les deux
-# outils sont présents, et à défaut on se fie à l'outil disponible.
-if command -v systemctl >/dev/null 2>&1 \
-   && { ! command -v rc-update >/dev/null 2>&1 || [ -d /run/systemd/system ]; }; then
-    INIT="systemd"
-elif command -v rc-update >/dev/null 2>&1; then
-    INIT="openrc"
-else
-    INIT=""
+# ------------------------------------------------- système et architecture
+
+# Le système décide de trois choses d'un coup : le nom du binaire à
+# télécharger, l'endroit où tout se range, et le gestionnaire de services.
+case "$(uname -s)" in
+    Linux)
+        PLATFORM="linux"
+        CONFIG_DIR="/etc/dumbmonit"
+        BIN_PATH="/usr/local/bin/dumbmonit-agent"
+        # `systemctl` peut exister sans que systemd soit l'init (conteneur,
+        # chroot) : on regarde donc qui est PID 1 quand les deux outils sont
+        # présents, et à défaut on se fie à l'outil disponible.
+        if command -v systemctl >/dev/null 2>&1 \
+           && { ! command -v rc-update >/dev/null 2>&1 || [ -d /run/systemd/system ]; }; then
+            INIT="systemd"
+        elif command -v rc-update >/dev/null 2>&1; then
+            INIT="openrc"
+        else
+            INIT=""
+        fi
+        ;;
+    Darwin)
+        PLATFORM="macos"
+        # `/usr/local/etc` plutôt que `/etc` : macOS réserve `/etc` au système,
+        # et une mise à jour majeure y fait le ménage.
+        CONFIG_DIR="/usr/local/etc/dumbmonit"
+        BIN_PATH="/usr/local/bin/dumbmonit-agent"
+        INIT="launchd"
+        ;;
+    FreeBSD)
+        PLATFORM="freebsd"
+        # Convention des ports FreeBSD : tout ce qui n'est pas la base vit sous
+        # `/usr/local`.
+        CONFIG_DIR="/usr/local/etc/dumbmonit"
+        BIN_PATH="/usr/local/bin/dumbmonit-agent"
+        INIT="rcd"
+        ;;
+    *)
+        echec "unsupported system: $(uname -s).
+       This script installs the agent on Linux, macOS and FreeBSD;
+       use install.ps1 on Windows."
+        ;;
+esac
+
+CONFIG_FILE="$CONFIG_DIR/agent.yaml"
+UNIT_PATH="/etc/systemd/system/dumbmonit-agent.service"
+OPENRC_PATH="/etc/init.d/dumbmonit-agent"
+PLIST_PATH="/Library/LaunchDaemons/$LAUNCHD_LABEL.plist"
+RC_PATH="/usr/local/etc/rc.d/$RC_NAME"
+
+case "$(uname -m)" in
+    x86_64|amd64)  ARCH="x86_64" ;;
+    aarch64|arm64) ARCH="aarch64" ;;
+    *) echec "unsupported architecture: $(uname -m)" ;;
+esac
+
+# La matrice est volontairement explicite : mieux vaut une phrase ici qu'un 404
+# sur un nom de fichier qui n'a jamais existé.
+if [ "$PLATFORM" = "freebsd" ] && [ "$ARCH" != "x86_64" ]; then
+    echec "the FreeBSD agent is built for x86_64 only.
+       Build it yourself with 'cargo build --release -p dumbmonit-agent'
+       and install it with --bin=PATH."
 fi
+
+# Noms d'avant le renommage EzyMonit → DumbMonit. Une installation qui les porte
+# encore est migrée sur place à l'installation, et `--uninstall` en fait aussi
+# le ménage. L'ancien agent n'a existé que sous Linux.
+LEGACY_CONFIG_DIR="/etc/ezymonit"
+LEGACY_BIN_PATH="/usr/local/bin/ezymonit-agent"
+LEGACY_UNIT_PATH="/etc/systemd/system/ezymonit-agent.service"
+LEGACY_OPENRC_PATH="/etc/init.d/ezymonit-agent"
+LEGACY_SERVICE_NAME="ezymonit-agent"
 
 # --------------------------------------------------------- ancien agent
 
@@ -172,16 +236,31 @@ migrate_legacy() {
     fi
 }
 
-if [ "$UNINSTALL" -eq 1 ]; then
-    info "stopping the service"
+# ------------------------------------------------------------ service
+
+arreter_service() {
     case "$INIT" in
         systemd) systemctl disable --now "$SERVICE_NAME" 2>/dev/null || true ;;
         openrc)
             rc-service "$SERVICE_NAME" stop 2>/dev/null || true
             rc-update del "$SERVICE_NAME" default 2>/dev/null || true
             ;;
+        launchd)
+            # `bootout` est le pendant moderne de `unload` : il retire le
+            # service du domaine système, même s'il n'y est pas — d'où le `||`.
+            launchctl bootout "system/$LAUNCHD_LABEL" 2>/dev/null || true
+            ;;
+        rcd)
+            service "$RC_NAME" onestop 2>/dev/null || true
+            sysrc -x "${RC_NAME}_enable" 2>/dev/null || true
+            ;;
     esac
-    rm -f "$UNIT_PATH" "$OPENRC_PATH" "$BIN_PATH"
+}
+
+if [ "$UNINSTALL" -eq 1 ]; then
+    info "stopping the service"
+    arreter_service
+    rm -f "$UNIT_PATH" "$OPENRC_PATH" "$PLIST_PATH" "$RC_PATH" "$BIN_PATH"
     rm -rf "$CONFIG_DIR"
     # Les restes d'une installation d'avant le renommage partent aussi.
     retirer_ancien_agent || true
@@ -204,16 +283,34 @@ URL="${URL%/}"
 
 # ---------------------------------------------------------------- binaire
 
-case "$(uname -s)" in
-    Linux) ;;
-    *) echec "this script installs the agent on Linux; use install.ps1 on Windows" ;;
-esac
+telecharger() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$1" -o "$2"
+    elif command -v fetch >/dev/null 2>&1; then
+        fetch -qo "$2" "$1"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO "$2" "$1"
+    else
+        echec "none of curl, fetch or wget found: install one of them, or use --bin=PATH"
+    fi
+}
 
-case "$(uname -m)" in
-    x86_64|amd64)  ARCH="x86_64" ;;
-    aarch64|arm64) ARCH="aarch64" ;;
-    *) echec "unsupported architecture: $(uname -m)" ;;
-esac
+# Récupère le corps d'une réponse même en erreur : c'est là que le serveur
+# explique pourquoi il ne sert pas ce binaire-là (macOS, image sans agents).
+# Sans outil ou sans réponse, ne dit rien plutôt que d'inventer une raison.
+expliquer_echec() {
+    corps=""
+    if command -v curl >/dev/null 2>&1; then
+        corps="$(curl -sSL "$1" 2>/dev/null || true)"
+    elif command -v fetch >/dev/null 2>&1; then
+        corps="$(fetch -qo - "$1" 2>/dev/null || true)"
+    elif command -v wget >/dev/null 2>&1; then
+        corps="$(wget -qO - "$1" 2>/dev/null || true)"
+    fi
+    if [ -n "$corps" ]; then
+        echo "$corps" >&2
+    fi
+}
 
 install_binaire() {
     destination="$1"
@@ -225,20 +322,14 @@ install_binaire() {
         return
     fi
 
-    source_url="$URL/download/dumbmonit-agent-linux-$ARCH"
+    source_url="$URL/download/dumbmonit-agent-$PLATFORM-$ARCH"
     info "downloading $source_url"
-    telecharger "$source_url" "$destination" || echec "download failed from $source_url"
-    verifier_empreinte "$source_url" "$destination"
-}
-
-telecharger() {
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$1" -o "$2"
-    elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$2" "$1"
-    else
-        echec "neither curl nor wget found: install one of them, or use --bin=PATH"
+    if ! telecharger "$source_url" "$destination"; then
+        rm -f "$destination"
+        expliquer_echec "$source_url"
+        echec "download failed from $source_url"
     fi
+    verifier_empreinte "$source_url" "$destination"
 }
 
 # Le serveur publie l'empreinte SHA-256 de chaque binaire à côté de celui-ci
@@ -257,12 +348,16 @@ verifier_empreinte() {
     fi
     attendu="$(cut -d' ' -f1 "$attendu_fichier" | tr -d '[:space:]')"
     rm -f "$attendu_fichier"
+    # `sha256sum` sous Linux, `shasum -a 256` sous macOS, `sha256 -q` sous
+    # FreeBSD : trois noms pour la même empreinte.
     if command -v sha256sum >/dev/null 2>&1; then
         obtenu="$(sha256sum "$fichier" | cut -d' ' -f1)"
     elif command -v shasum >/dev/null 2>&1; then
         obtenu="$(shasum -a 256 "$fichier" | cut -d' ' -f1)"
+    elif command -v sha256 >/dev/null 2>&1; then
+        obtenu="$(sha256 -q "$fichier" | tr -d '[:space:]')"
     else
-        echo "Warning: neither sha256sum nor shasum found, binary not verified" >&2
+        echo "Warning: no SHA-256 tool found, binary not verified" >&2
         return 0
     fi
     if [ -z "$attendu" ] || [ "$attendu" != "$obtenu" ]; then
@@ -276,6 +371,7 @@ verifier_empreinte() {
 # Écriture à côté puis renommage : un `cp` sur un binaire en cours d'exécution
 # échoue avec « Text file busy », alors qu'un renommage est atomique et sans effet
 # sur le processus déjà lancé.
+mkdir -p "$(dirname "$BIN_PATH")"
 TMP_BIN="$BIN_PATH.nouveau"
 install_binaire "$TMP_BIN"
 chmod 0755 "$TMP_BIN"
@@ -329,6 +425,7 @@ info "configuration written to $CONFIG_FILE"
 # ------------------------------------------------------------- service
 
 ecrire_unite_systemd() {
+    mkdir -p "$(dirname "$UNIT_PATH")"
     cat > "$UNIT_PATH" <<FIN
 [Unit]
 Description=DumbMonit system agent
@@ -373,6 +470,7 @@ FIN
 }
 
 ecrire_service_openrc() {
+    mkdir -p "$(dirname "$OPENRC_PATH")"
     cat > "$OPENRC_PATH" <<FIN
 #!/sbin/openrc-run
 # DumbMonit system agent — written by install.sh.
@@ -395,6 +493,81 @@ FIN
     chmod 0755 "$OPENRC_PATH"
 }
 
+# launchd : un démon système, pas un agent de session — il doit tourner même
+# quand personne n'est connecté, et donc vivre dans /Library/LaunchDaemons.
+ecrire_plist_launchd() {
+    mkdir -p "$(dirname "$PLIST_PATH")"
+    cat > "$PLIST_PATH" <<FIN
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$LAUNCHD_LABEL</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$BIN_PATH</string>
+        <string>--config=$CONFIG_FILE</string>
+    </array>
+    <!-- Démarre au boot, et redémarre si l'agent s'arrête. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <!-- Sans cela, un agent qui échoue au démarrage serait relancé dix fois par
+         seconde jusqu'à ce que launchd s'en lasse. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <!-- Même délai qu'ailleurs : l'agent vide son tampon avant d'être tué. -->
+    <key>ExitTimeOut</key>
+    <integer>15</integer>
+    <key>StandardOutPath</key>
+    <string>$LOG_FILE</string>
+    <key>StandardErrorPath</key>
+    <string>$LOG_FILE</string>
+</dict>
+</plist>
+FIN
+    # launchd refuse de charger un plist que quelqu'un d'autre que root peut
+    # modifier — il y verrait, à raison, une porte ouverte. Le groupe « wheel »
+    # existe partout sous macOS ; l'échec n'est possible que sur un système qui
+    # n'en a pas, et où launchd n'existe pas non plus.
+    chown root:wheel "$PLIST_PATH" 2>/dev/null || true
+    chmod 0644 "$PLIST_PATH"
+}
+
+# rc.d : l'agent reste au premier plan, c'est donc daemon(8) qui le détache, le
+# surveille et écrit son journal — la manière FreeBSD de faire ce que systemd
+# fait tout seul.
+ecrire_service_rcd() {
+    mkdir -p "$(dirname "$RC_PATH")"
+    cat > "$RC_PATH" <<FIN
+#!/bin/sh
+# DumbMonit system agent — written by install.sh.
+#
+# PROVIDE: $RC_NAME
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="$RC_NAME"
+rcvar="${RC_NAME}_enable"
+pidfile="/var/run/\${name}.pid"
+command="/usr/sbin/daemon"
+procname="/usr/sbin/daemon"
+# -r : daemon(8) relance l'agent s'il s'arrête. -P : le pid du superviseur, que
+# « service stop » doit tuer. -o : le journal, faute de journald ici.
+command_args="-r -P \${pidfile} -t \${name} -o $LOG_FILE $BIN_PATH --config=$CONFIG_FILE"
+
+load_rc_config \$name
+: \${${RC_NAME}_enable:="NO"}
+
+run_rc_command "\$1"
+FIN
+    chmod 0755 "$RC_PATH"
+}
+
 case "$INIT" in
     systemd)
         ecrire_unite_systemd
@@ -403,6 +576,14 @@ case "$INIT" in
     openrc)
         ecrire_service_openrc
         info "service installed at $OPENRC_PATH"
+        ;;
+    launchd)
+        ecrire_plist_launchd
+        info "service installed at $PLIST_PATH"
+        ;;
+    rcd)
+        ecrire_service_rcd
+        info "service installed at $RC_PATH"
         ;;
 esac
 
@@ -443,5 +624,26 @@ case "$INIT" in
         info "agent installed and started"
         info "status: rc-service $SERVICE_NAME status"
         info "logs:   tail -f /var/log/$SERVICE_NAME.log"
+        ;;
+    launchd)
+        # `bootout` puis `bootstrap` : c'est la seule façon de recharger un plist
+        # modifié. Le premier échoue quand rien n'était chargé, ce qui est le cas
+        # d'une première installation.
+        launchctl bootout "system/$LAUNCHD_LABEL" 2>/dev/null || true
+        launchctl bootstrap system "$PLIST_PATH"
+        launchctl enable "system/$LAUNCHD_LABEL" 2>/dev/null || true
+        launchctl kickstart -k "system/$LAUNCHD_LABEL"
+        info "agent installed and started"
+        info "status: sudo launchctl print system/$LAUNCHD_LABEL"
+        info "logs:   tail -f $LOG_FILE"
+        ;;
+    rcd)
+        # `service … enable` écrit dans /etc/rc.conf : c'est ce qui fait revenir
+        # l'agent au prochain démarrage de la machine.
+        service "$RC_NAME" enable >/dev/null
+        service "$RC_NAME" restart
+        info "agent installed and started"
+        info "status: service $RC_NAME status"
+        info "logs:   tail -f $LOG_FILE"
         ;;
 esac

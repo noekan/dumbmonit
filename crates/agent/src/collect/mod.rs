@@ -15,8 +15,11 @@ pub mod docker;
 pub mod filter;
 pub mod plakar;
 pub mod registry;
+pub mod sensors;
 pub mod services;
+pub mod smart;
 pub mod system_health;
+pub mod zfs;
 
 use std::collections::BTreeMap;
 
@@ -28,8 +31,11 @@ use sysinfo::{
 use crate::collect::docker::ContainerInventory;
 use crate::collect::filter::NameFilter;
 use crate::collect::plakar::PlakarReport;
+use crate::collect::sensors::SensorsStat;
 use crate::collect::services::ServiceState;
+use crate::collect::smart::SmartReport;
 use crate::collect::system_health::SystemHealthStat;
+use crate::collect::zfs::ZfsReport;
 
 /// Systèmes de fichiers virtuels : ils ne représentent aucun espace réel et
 /// n'apporteraient que du bruit — et, pour les surcouches de conteneurs, une
@@ -225,6 +231,12 @@ pub struct Snapshot {
     pub system_health: Option<SystemHealthStat>,
     /// Sauvegardes Plakar. `None` : première lecture pas encore aboutie.
     pub backups: Option<PlakarReport>,
+    /// Températures et ventilateurs. `None` : aucune sonde lisible ici.
+    pub sensors: Option<SensorsStat>,
+    /// Santé des disques. `None` : `smartctl` absent, ou aucun disque lisible.
+    pub smart: Option<SmartReport>,
+    /// Pools ZFS. `None` : pas de ZFS sur cette machine.
+    pub zfs: Option<ZfsReport>,
 }
 
 impl Snapshot {
@@ -250,6 +262,15 @@ impl Snapshot {
         }
         if let Some(backups) = &self.backups {
             samples.extend(plakar::samples(backups, now_ms));
+        }
+        if let Some(probes) = &self.sensors {
+            samples.extend(sensors::samples(probes, now_ms));
+        }
+        if let Some(disks) = &self.smart {
+            samples.extend(smart::samples(disks, now_ms));
+        }
+        if let Some(pools) = &self.zfs {
+            samples.extend(zfs::samples(pools, now_ms));
         }
         samples
     }
@@ -511,6 +532,9 @@ impl SystemProbe {
             containers: None,
             system_health: None,
             backups: None,
+            sensors: None,
+            smart: None,
+            zfs: None,
         }
     }
 
@@ -1019,6 +1043,36 @@ mod tests {
                     readable: true,
                 }],
             }),
+            sensors: Some(SensorsStat {
+                temperatures: vec![sensors::TemperatureStat {
+                    sensor: "coretemp Package id 0".into(),
+                    celsius: 61.0,
+                    critical: Some(100.0),
+                }],
+                fans: Vec::new(),
+            }),
+            smart: Some(SmartReport {
+                disks: vec![smart::DiskSmart {
+                    device: "sda".into(),
+                    model: "WDC".into(),
+                    passed: Some(true),
+                    ..smart::DiskSmart::default()
+                }],
+            }),
+            zfs: Some(ZfsReport {
+                pools: vec![zfs::PoolStat {
+                    capacity: zfs::PoolCapacity {
+                        pool: "tank".into(),
+                        size_bytes: 100,
+                        allocated_bytes: 40,
+                        free_bytes: 60,
+                        used_percent: 40,
+                        fragmentation_percent: Some(3),
+                        health: zfs::PoolHealth::Online,
+                    },
+                    status: zfs::PoolStatus { pool: "tank".into(), ..zfs::PoolStatus::default() },
+                }],
+            }),
         };
 
         let samples = snapshot.to_samples(1_700_000_000_000);
@@ -1040,6 +1094,9 @@ mod tests {
             "container_up",
             "agent_reboot_required",
             "backup_size_bytes",
+            "agent_sensor_temperature_celsius",
+            "agent_disk_smart_ok",
+            "agent_zfs_pool_health",
         ] {
             assert!(samples.iter().any(|s| s.metric == family), "famille absente : {family}");
         }

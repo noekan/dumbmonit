@@ -120,7 +120,7 @@ are untouched.
 ## Agent
 
 The agent has its own variables and configuration file: see
-[Linux and Windows agent](../devices/agent.md#configuration-file).
+[Linux, macOS, FreeBSD and Windows agent](../devices/agent.md#configuration-file).
 
 ### Collection scope
 

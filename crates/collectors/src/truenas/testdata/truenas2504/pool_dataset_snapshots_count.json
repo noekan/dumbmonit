@@ -1,0 +1,174 @@
+[
+  {
+    "id": "tank",
+    "type": "FILESYSTEM",
+    "name": "tank",
+    "pool": "tank",
+    "children": [
+      {
+        "id": "tank/docs",
+        "type": "FILESYSTEM",
+        "name": "tank/docs",
+        "pool": "tank",
+        "children": [
+          {
+            "id": "tank/docs/archive",
+            "type": "FILESYSTEM",
+            "name": "tank/docs/archive",
+            "pool": "tank",
+            "children": [],
+            "snapshot_count": 2,
+            "user_properties": {}
+          }
+        ],
+        "snapshot_count": 2,
+        "user_properties": {}
+      },
+      {
+        "id": "tank/replica",
+        "type": "FILESYSTEM",
+        "name": "tank/replica",
+        "pool": "tank",
+        "children": [
+          {
+            "id": "tank/replica/media",
+            "type": "FILESYSTEM",
+            "name": "tank/replica/media",
+            "pool": "tank",
+            "children": [],
+            "snapshot_count": 1,
+            "comments": {
+              "value": "with quota",
+              "rawvalue": "with quota",
+              "source": "RECEIVED",
+              "parsed": "with quota"
+            },
+            "user_properties": {}
+          }
+        ],
+        "snapshot_count": 0,
+        "user_properties": {}
+      },
+      {
+        "id": "tank/media",
+        "type": "FILESYSTEM",
+        "name": "tank/media",
+        "pool": "tank",
+        "children": [],
+        "snapshot_count": 4,
+        "comments": {
+          "value": "with quota",
+          "rawvalue": "with quota",
+          "source": "LOCAL",
+          "parsed": "with quota"
+        },
+        "user_properties": {}
+      },
+      {
+        "id": "tank/vol1",
+        "type": "VOLUME",
+        "name": "tank/vol1",
+        "pool": "tank",
+        "children": [],
+        "snapshot_count": 0,
+        "mountpoint": null,
+        "user_properties": {}
+      }
+    ],
+    "snapshot_count": 0,
+    "user_properties": {}
+  },
+  {
+    "id": "tank/docs",
+    "type": "FILESYSTEM",
+    "name": "tank/docs",
+    "pool": "tank",
+    "children": [
+      {
+        "id": "tank/docs/archive",
+        "type": "FILESYSTEM",
+        "name": "tank/docs/archive",
+        "pool": "tank",
+        "children": [],
+        "snapshot_count": 2,
+        "user_properties": {}
+      }
+    ],
+    "snapshot_count": 2,
+    "user_properties": {}
+  },
+  {
+    "id": "tank/docs/archive",
+    "type": "FILESYSTEM",
+    "name": "tank/docs/archive",
+    "pool": "tank",
+    "children": [],
+    "snapshot_count": 2,
+    "user_properties": {}
+  },
+  {
+    "id": "tank/replica",
+    "type": "FILESYSTEM",
+    "name": "tank/replica",
+    "pool": "tank",
+    "children": [
+      {
+        "id": "tank/replica/media",
+        "type": "FILESYSTEM",
+        "name": "tank/replica/media",
+        "pool": "tank",
+        "children": [],
+        "snapshot_count": 1,
+        "comments": {
+          "value": "with quota",
+          "rawvalue": "with quota",
+          "source": "RECEIVED",
+          "parsed": "with quota"
+        },
+        "user_properties": {}
+      }
+    ],
+    "snapshot_count": 0,
+    "user_properties": {}
+  },
+  {
+    "id": "tank/replica/media",
+    "type": "FILESYSTEM",
+    "name": "tank/replica/media",
+    "pool": "tank",
+    "children": [],
+    "snapshot_count": 1,
+    "comments": {
+      "value": "with quota",
+      "rawvalue": "with quota",
+      "source": "RECEIVED",
+      "parsed": "with quota"
+    },
+    "user_properties": {}
+  },
+  {
+    "id": "tank/media",
+    "type": "FILESYSTEM",
+    "name": "tank/media",
+    "pool": "tank",
+    "children": [],
+    "snapshot_count": 4,
+    "comments": {
+      "value": "with quota",
+      "rawvalue": "with quota",
+      "source": "LOCAL",
+      "parsed": "with quota"
+    },
+    "user_properties": {}
+  },
+  {
+    "id": "tank/vol1",
+    "type": "VOLUME",
+    "name": "tank/vol1",
+    "pool": "tank",
+    "children": [],
+    "snapshot_count": 0,
+    "mountpoint": null,
+    "user_properties": {}
+  }
+]

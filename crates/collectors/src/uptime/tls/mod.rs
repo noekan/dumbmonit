@@ -28,8 +28,8 @@
 //! | `allow_private_targets` | `false` | Autorise la boucle locale et le lien local (voir `guard`). |
 //! | `timeout_seconds` | `5` | Délai propre à la sonde (1 à 60). |
 
-mod cert;
-mod handshake;
+pub(crate) mod cert;
+pub(crate) mod handshake;
 pub(crate) mod options;
 
 use std::time::Duration;

@@ -1,0 +1,143 @@
+# Ce qu'un commutateur Ethernet dit de ses ports au-delà d'IF-MIB : les erreurs
+# de trame par cause (EtherLike-MIB, RFC 3635), le duplex négocié, le trafic de
+# diffusion en compteurs 64 bits, et les voisins LLDP (IEEE 802.1AB).
+#
+# Ce profil ne s'attribue à aucun sysObjectID : les MIB qu'il lit sont
+# standard, mais seuls les commutateurs les remplissent vraiment. Il est inclus
+# par les profils de constructeur (zyxel.yaml) et peut être choisi à la main
+# pour un commutateur que l'auto-détection range sous « if-mib ».
+#
+# Éprouvé sur un relevé réel de Zyxel XS1930-10 (EtherLike complet, 10 ports).
+id: ethernet-switch
+name: Ethernet switch (EtherLike-MIB, LLDP)
+
+include: [if-mib]
+
+metrics:
+  # dot3StatsTable est indexée par ifIndex (dot3StatsIndex = ifIndex) : la
+  # jointure avec ifName se fait donc d'elle-même.
+  #
+  # FCS et alignement : trames reçues corrompues. C'est la signature d'un câble
+  # ou d'une jarretière fatigués, d'un connecteur mal serti, d'une fibre sale.
+  - name: ether_fcs_errors
+    oid: 1.3.6.1.2.1.10.7.2.1.3
+    kind: counter
+    walk: true
+    labels:
+      ifname: 1.3.6.1.2.1.31.1.1.1.1
+
+  - name: ether_alignment_errors
+    oid: 1.3.6.1.2.1.10.7.2.1.2
+    kind: counter
+    walk: true
+    labels:
+      ifname: 1.3.6.1.2.1.31.1.1.1.1
+
+  # Erreurs de symbole : le signal lui-même est mauvais, avant même de former
+  # une trame. Sur le relevé Zyxel, c'est le port dont le lien est tombé qui en
+  # accumule le plus.
+  - name: ether_symbol_errors
+    oid: 1.3.6.1.2.1.10.7.2.1.18
+    kind: counter
+    walk: true
+    labels:
+      ifname: 1.3.6.1.2.1.31.1.1.1.1
+
+  # Collisions tardives et excessives : n'existent qu'en semi-duplex. Un compteur
+  # qui monte sur un lien censé être en duplex intégral trahit un désaccord de
+  # négociation entre les deux extrémités.
+  - name: ether_late_collisions
+    oid: 1.3.6.1.2.1.10.7.2.1.8
+    kind: counter
+    walk: true
+    labels:
+      ifname: 1.3.6.1.2.1.31.1.1.1.1
+
+  - name: ether_excessive_collisions
+    oid: 1.3.6.1.2.1.10.7.2.1.9
+    kind: counter
+    walk: true
+    labels:
+      ifname: 1.3.6.1.2.1.31.1.1.1.1
+
+  # Erreurs internes du contrôleur, en émission et en réception : le port lui-même
+  # et non le câble.
+  - name: ether_mac_transmit_errors
+    oid: 1.3.6.1.2.1.10.7.2.1.10
+    kind: counter
+    walk: true
+    labels:
+      ifname: 1.3.6.1.2.1.31.1.1.1.1
+
+  - name: ether_mac_receive_errors
+    oid: 1.3.6.1.2.1.10.7.2.1.16
+    kind: counter
+    walk: true
+    labels:
+      ifname: 1.3.6.1.2.1.31.1.1.1.1
+
+  # dot3StatsFrameTooLongs (colonne 13) n'est volontairement PAS lue : le relevé
+  # Zyxel y compte des milliards de trames sur des ports sans la moindre erreur,
+  # c'est-à-dire les trames jumbo que le commutateur transmet pourtant très bien.
+  # Une série qui monte en permanence sur un réseau sain apprendrait seulement à
+  # ignorer ce tableau.
+
+  # dot3StatsDuplexStatus : 1 = inconnu (port sans lien), 2 = semi-duplex,
+  # 3 = duplex intégral.
+  - name: ether_duplex_status
+    oid: 1.3.6.1.2.1.10.7.2.1.19
+    kind: gauge
+    walk: true
+    labels:
+      ifname: 1.3.6.1.2.1.31.1.1.1.1
+
+  # Diffusion et multidiffusion, en compteurs 64 bits de la ifXTable (les
+  # colonnes 32 bits de la même table bouclent en quelques minutes sur un port
+  # 10 Gbit/s chargé). Une tempête de diffusion se lit ici avant de se lire
+  # ailleurs.
+  - name: if_broadcast_packets_in
+    oid: 1.3.6.1.2.1.31.1.1.1.9
+    kind: counter
+    walk: true
+    labels:
+      ifname: 1.3.6.1.2.1.31.1.1.1.1
+
+  - name: if_multicast_packets_in
+    oid: 1.3.6.1.2.1.31.1.1.1.8
+    kind: counter
+    walk: true
+    labels:
+      ifname: 1.3.6.1.2.1.31.1.1.1.1
+
+  # Voisins LLDP (lldpRemTable), pour information : qui est branché où. La
+  # table est indexée par lldpRemTimeMark.lldpRemLocalPortNum.lldpRemIndex, si
+  # bien que le port local se lit dans l'étiquette « index » (deuxième arc) et
+  # non dans ifName. La valeur, lldpRemChassisIdSubtype, ne porte pas de sens
+  # propre : la série existe pour ses étiquettes, comme system_info. Un
+  # commutateur sans voisin, ou dont LLDP est coupé, laisse la table vide.
+  - name: lldp_neighbor_info
+    oid: 1.0.8802.1.1.2.1.4.1.1.4
+    kind: gauge
+    walk: true
+    labels:
+      remote_sysname: 1.0.8802.1.1.2.1.4.1.1.9
+      remote_port: 1.0.8802.1.1.2.1.4.1.1.7
+      remote_port_desc: 1.0.8802.1.1.2.1.4.1.1.8
+    filters:
+      max_rows: 128
+
+# Mêmes filtres que les compteurs d'IF-MIB, sur les mêmes colonnes : un port
+# désactivé ou jamais monté n'a pas d'erreurs à raconter.
+filters:
+  max_rows: 256
+  drop_when_oid_equals:
+    - oid: 1.3.6.1.2.1.2.2.1.7
+      values: [2, 3]
+    - oid: 1.3.6.1.2.1.2.2.1.3
+      values: [24, 53, 131, 150]
+  drop_when_all:
+    - conditions:
+        - oid: 1.3.6.1.2.1.2.2.1.8
+          values: [2, 6]
+        - oid: 1.3.6.1.2.1.2.2.1.9
+          values: [0]

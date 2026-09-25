@@ -16,7 +16,9 @@ use serde::Deserialize;
 use crate::collect::docker::DEFAULT_MAX_CONTAINERS;
 use crate::collect::filter::NameFilter;
 use crate::collect::plakar::{self, PlakarConfig};
+use crate::collect::smart::{self, SmartConfig};
 use crate::collect::system_health::SystemHealthConfig;
+use crate::collect::zfs::{self, ZfsConfig};
 use crate::collect::{DEFAULT_INTERFACES_IGNORE, DEFAULT_MOUNTS_IGNORE, ProbeConfig};
 
 /// Période d'échantillonnage par défaut. Trente secondes donnent des graphes
@@ -75,6 +77,13 @@ struct FileConfig {
     plakar_klosets: Option<Vec<String>>,
     plakar_home: Option<String>,
     plakar_interval_secs: Option<u64>,
+    sensors: Option<bool>,
+    smart: Option<bool>,
+    smart_bin: Option<String>,
+    smart_interval_secs: Option<u64>,
+    zfs: Option<bool>,
+    zfs_bin: Option<String>,
+    zfs_interval_secs: Option<u64>,
     max_buffered_samples: Option<usize>,
     log_level: Option<String>,
     system_health: Option<SystemHealthFile>,
@@ -151,6 +160,12 @@ pub struct Config {
     pub system_health: SystemHealthConfig,
     /// Sauvegardes Plakar.
     pub plakar: PlakarConfig,
+    /// Lire les sondes de température et les ventilateurs de la machine.
+    pub sensors: bool,
+    /// Santé des disques, par `smartctl`.
+    pub smart: SmartConfig,
+    /// Pools ZFS, par `zpool`.
+    pub zfs: ZfsConfig,
     pub max_buffered_samples: usize,
     /// Fichier où l'agent range le secret de liaison que le serveur lui
     /// attribue. À côté de la configuration par défaut, pour qu'un déplacement
@@ -188,6 +203,9 @@ impl fmt::Debug for Config {
             .field("log_level", &self.log_level)
             .field("system_health", &self.system_health)
             .field("plakar", &self.plakar)
+            .field("sensors", &self.sensors)
+            .field("smart", &self.smart)
+            .field("zfs", &self.zfs)
             .finish()
     }
 }
@@ -401,6 +419,35 @@ impl Config {
             interval: Duration::from_secs(plakar_interval_secs),
         };
 
+        // Matériel : sondes, disques, pools ZFS. Chacun se détecte tout seul et
+        // se tait quand il ne trouve rien ; le drapeau ne sert qu'à couper la
+        // détection elle-même.
+        let sensors = flag("DUMBMONIT_AGENT_SENSORS", file.sensors, true)?;
+        let smart = SmartConfig {
+            enabled: flag("DUMBMONIT_AGENT_SMART", file.smart, true)?,
+            bin: command_name(env.get("DUMBMONIT_AGENT_SMART_BIN").or(file.smart_bin), "smartctl"),
+            interval: Duration::from_secs(read_interval(
+                &env,
+                "DUMBMONIT_AGENT_SMART_INTERVAL_SECS",
+                file.smart_interval_secs,
+                smart::DEFAULT_INTERVAL_SECS,
+                smart::MIN_INTERVAL_SECS,
+                "the SMART reading period",
+            )?),
+        };
+        let zfs = ZfsConfig {
+            enabled: flag("DUMBMONIT_AGENT_ZFS", file.zfs, true)?,
+            bin: command_name(env.get("DUMBMONIT_AGENT_ZFS_BIN").or(file.zfs_bin), "zpool"),
+            interval: Duration::from_secs(read_interval(
+                &env,
+                "DUMBMONIT_AGENT_ZFS_INTERVAL_SECS",
+                file.zfs_interval_secs,
+                zfs::DEFAULT_INTERVAL_SECS,
+                zfs::MIN_INTERVAL_SECS,
+                "the ZFS reading period",
+            )?),
+        };
+
         let max_buffered_samples = match env.get("DUMBMONIT_AGENT_MAX_BUFFERED_SAMPLES") {
             Some(raw) => raw.trim().parse::<usize>().with_context(|| {
                 format!("DUMBMONIT_AGENT_MAX_BUFFERED_SAMPLES: invalid value '{raw}'")
@@ -444,6 +491,9 @@ impl Config {
             probe,
             system_health,
             plakar,
+            sensors,
+            smart,
+            zfs,
             max_buffered_samples,
             secret_path: Self::resolve_secret_path(&env, config_path),
             log_level,
@@ -525,6 +575,40 @@ impl EnvSource {
 
 fn split_list(raw: &str) -> Vec<String> {
     raw.split(',').map(str::trim).filter(|item| !item.is_empty()).map(str::to_string).collect()
+}
+
+/// Nom d'une commande externe : celui de la configuration, ou celui par défaut.
+/// Une valeur vide ne désigne rien et vaut donc absence.
+fn command_name(configured: Option<String>, default: &str) -> String {
+    configured
+        .map(|bin| bin.trim().to_string())
+        .filter(|bin| !bin.is_empty())
+        .unwrap_or_else(|| default.to_string())
+}
+
+/// Période d'une lecture de fond, avec son plancher.
+///
+/// Le plancher n'est pas un détail de confort : interroger `smartctl` toutes les
+/// secondes réveillerait des disques en veille à longueur de journée.
+fn read_interval(
+    env: &EnvSource,
+    variable: &str,
+    from_file: Option<u64>,
+    default: u64,
+    minimum: u64,
+    what: &str,
+) -> Result<u64> {
+    let seconds = match env.get(variable) {
+        Some(raw) => raw
+            .trim()
+            .parse::<u64>()
+            .with_context(|| format!("{variable}: invalid value '{raw}'"))?,
+        None => from_file.unwrap_or(default),
+    };
+    if seconds < minimum {
+        bail!("{what} must be at least {minimum} seconds");
+    }
+    Ok(seconds)
 }
 
 fn parse_tags(raw: &str) -> Result<BTreeMap<String, String>> {
@@ -813,6 +897,66 @@ docker_max_containers: 20
             env(&[("DUMBMONIT_AGENT_PLAKAR_INTERVAL_SECS", "5")]),
         );
         assert!(config.is_err());
+    }
+
+    #[test]
+    fn hardware_collection_is_on_by_default_and_reads_the_file() {
+        // Par défaut, tout est allumé : ces trois lectures se détectent
+        // elles-mêmes et ne coûtent rien là où il n'y a rien à lire.
+        let config = Config::merge(file_with_url_and_token(), env(&[])).expect("configuration");
+        assert!(config.sensors);
+        assert_eq!(config.smart, SmartConfig::default());
+        assert_eq!(config.zfs, ZfsConfig::default());
+
+        let yaml = "sensors: false\nsmart_bin: /usr/local/sbin/smartctl\n\
+                    smart_interval_secs: 900\nzfs_bin: /sbin/zpool\nzfs_interval_secs: 60\n";
+        let file = FileConfig {
+            server_url: Some("http://s:8080".into()),
+            token: Some("dmon_abc".into()),
+            ..serde_yaml_ng::from_str(yaml).expect("YAML valide")
+        };
+        let config = Config::merge(file, env(&[])).expect("configuration");
+        assert!(!config.sensors);
+        assert_eq!(config.smart.bin, "/usr/local/sbin/smartctl");
+        assert_eq!(config.smart.interval, Duration::from_secs(900));
+        assert_eq!(config.zfs.bin, "/sbin/zpool");
+        assert_eq!(config.zfs.interval, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn hardware_collection_can_be_switched_off_from_the_environment() {
+        let config = Config::merge(
+            file_with_url_and_token(),
+            env(&[
+                ("DUMBMONIT_AGENT_SENSORS", "false"),
+                ("DUMBMONIT_AGENT_SMART", "false"),
+                ("DUMBMONIT_AGENT_ZFS", "0"),
+            ]),
+        )
+        .expect("configuration");
+        assert!(!config.sensors);
+        assert!(!config.smart.enabled);
+        assert!(!config.zfs.enabled);
+    }
+
+    #[test]
+    fn too_frequent_a_hardware_reading_is_refused() {
+        // Interroger `smartctl` toutes les secondes réveillerait des disques en
+        // veille à longueur de journée : le plancher n'est pas négociable.
+        assert!(
+            Config::merge(
+                file_with_url_and_token(),
+                env(&[("DUMBMONIT_AGENT_SMART_INTERVAL_SECS", "5")])
+            )
+            .is_err()
+        );
+        assert!(
+            Config::merge(
+                file_with_url_and_token(),
+                env(&[("DUMBMONIT_AGENT_ZFS_INTERVAL_SECS", "1")])
+            )
+            .is_err()
+        );
     }
 
     #[test]

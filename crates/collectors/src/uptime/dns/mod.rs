@@ -93,11 +93,29 @@ async fn resolve(report: &mut Report, resolver: &TokioResolver, options: &Option
         return;
     }
 
-    if options.expect.is_empty() {
+    if options.expect.is_empty() && options.forbid.is_empty() {
         return;
     }
 
     let answers = answer::render(records);
+
+    let forbidden = answer::forbidden_present(&answers, &options.forbid);
+    if !forbidden.is_empty() {
+        report.fail(
+            Failure::Record,
+            format!(
+                "forbidden values present in the answer: {} (got: {})",
+                forbidden.join(", "),
+                answers.join(", ")
+            ),
+        );
+        return;
+    }
+
+    if options.expect.is_empty() {
+        return;
+    }
+
     let missing = answer::missing(&answers, &options.expect);
     if !missing.is_empty() {
         report.fail(
@@ -108,6 +126,23 @@ async fn resolve(report: &mut Report, resolver: &TokioResolver, options: &Option
                 answers.join(", ")
             ),
         );
+        return;
+    }
+
+    // En mode exact, un enregistrement de plus est aussi grave qu'un de moins :
+    // c'est ainsi qu'une zone détournée se signale sans rien effacer.
+    if options.expect_mode == answer::Mode::Exact {
+        let unexpected = answer::unexpected(&answers, &options.expect);
+        if !unexpected.is_empty() {
+            report.fail(
+                Failure::Record,
+                format!(
+                    "the answer holds values that were not expected: {} (expected exactly: {})",
+                    unexpected.join(", "),
+                    options.expect.join(", ")
+                ),
+            );
+        }
     }
 }
 
@@ -205,6 +240,28 @@ mod tests {
             .unwrap_err();
         assert!(matches!(error, ProbeError::Config(_)));
         assert!(!error.means_down(), "une faute de frappe n'est pas une panne de service");
+    }
+
+    /// Les trois assertions de zone, vérifiées sur des réponses fabriquées :
+    /// aucune requête DNS n'est émise, seul le verdict est en jeu.
+    #[test]
+    fn les_assertions_de_zone_distinguent_labsence_de_lajout_et_de_linterdit() {
+        use answer::fixtures::a;
+
+        let attendu = "203.0.113.10";
+        let mut options =
+            Options::from_target(&cible("dns", "exemple.fr", &[("expect", attendu)])).unwrap();
+
+        // Un enregistrement ajouté à côté du bon : invisible par défaut.
+        let detourne = [a("exemple.fr.", [203, 0, 113, 10]), a("exemple.fr.", [198, 51, 100, 7])];
+        let answers = answer::render(&detourne);
+        assert!(answer::missing(&answers, &options.expect).is_empty());
+
+        options.expect_mode = answer::Mode::Exact;
+        assert_eq!(answer::unexpected(&answers, &options.expect), vec!["198.51.100.7"]);
+
+        options.forbid = vec!["198.51.100.7".to_string()];
+        assert_eq!(answer::forbidden_present(&answers, &options.forbid), vec!["198.51.100.7"]);
     }
 
     #[test]

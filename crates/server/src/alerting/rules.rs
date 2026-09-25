@@ -181,6 +181,169 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "dumbmonit_ups_battery_status",
             )
         },
+        // Port réseau qui accumule les erreurs (IF-MIB, tout équipement SNMP).
+        //
+        // `increase` sur une heure plutôt qu'un seuil sur le compteur brut : un
+        // commutateur allumé depuis trois ans a forcément quelques erreurs, ce
+        // qui compte est qu'elles continuent d'arriver. Le relevé réel d'un Zyxel
+        // montre le cas type : un port au lien tombé, des milliers d'erreurs en
+        // entrée, les ports voisins à zéro. Cinquante par heure écarte la trame
+        // isolée d'un débranchement.
+        //
+        // `increase_prometheus` et non `increase` : sur une série neuve,
+        // VictoriaMetrics compte la première valeur comme un accroissement quand
+        // elle lui paraît petite — vérifié sur le relevé Zyxel, où un port à sept
+        // erreurs historiques ressortait avec sept erreurs « dans l'heure » dès
+        // l'ajout de l'équipement. La variante Prometheus exige deux points dans
+        // la fenêtre : rien ne sonne pendant la première heure, puis seules les
+        // erreurs réellement nouvelles comptent.
+        Rule {
+            description: "A network port logged more than fifty errors in the last hour: \
+                          usually a failing cable, a dirty fibre or a duplex mismatch."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 50.0,
+            for_duration: Duration::from_secs(15 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "port_errors",
+                "Port accumulating errors",
+                RuleKind::Threshold,
+                "increase_prometheus(dumbmonit_if_errors_in[1h]) \
+                 + increase_prometheus(dumbmonit_if_errors_out[1h])",
+            )
+        },
+        // Port qui bagote : chaque montée et chaque descente change ifOperStatus.
+        // Plus de quatre changements en trente minutes, c'est au moins deux
+        // coupures, ce qu'aucune maintenance ordinaire ne produit. Un port coupé
+        // par l'administrateur disparaît des séries (filtre d'IF-MIB) et ne peut
+        // donc pas déclencher. `changes_prometheus`, pour la même raison que
+        // ci-dessus : `changes` compte la première valeur d'une série neuve.
+        Rule {
+            description: "A network port went down and up again more than twice in thirty \
+                          minutes."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 4.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(3600)),
+            ..base(
+                "port_flapping",
+                "Port flapping",
+                RuleKind::Threshold,
+                "changes_prometheus(dumbmonit_if_oper_status[30m])",
+            )
+        },
+        // Matériel serveur vu par le contrôleur de gestion, via Redfish
+        // (`collectors/redfish`). Les séries de santé valent 0 OK, 1 Warning,
+        // 2 Critical ; un emplacement « Absent » ou « Disabled » n'en a pas.
+        Rule {
+            description: "The server's management controller reports a fan as failed \
+                          (health Critical)."
+                .to_string(),
+            operator: Operator::Ge,
+            threshold: 2.0,
+            for_duration: Duration::from_secs(2 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "redfish_fan_failed",
+                "Server fan failed",
+                RuleKind::Threshold,
+                "dumbmonit_redfish_fan_health",
+            )
+        },
+        // Même principe que la règle de l'agent : le seuil est celui que le
+        // capteur publie (UpperThresholdCritical), jamais une valeur en dur.
+        Rule {
+            description: "A server temperature sensor is above the critical threshold its \
+                          management controller declares."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            unit: "°C".to_string(),
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "redfish_temperature_critical",
+                "Server temperature above critical",
+                RuleKind::Threshold,
+                "dumbmonit_redfish_temperature_celsius \
+                 >= dumbmonit_redfish_temperature_upper_critical_celsius",
+            )
+        },
+        // Redondance d'alimentation perdue : le serveur tourne encore, sur une
+        // seule alimentation. C'est l'alerte qui laisse le temps d'agir.
+        Rule {
+            description: "The server's power supplies are no longer redundant: one more \
+                          failure and it goes down."
+                .to_string(),
+            operator: Operator::Ge,
+            threshold: 1.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Warning,
+            escalate_after: Some(Duration::from_secs(3600)),
+            ..base(
+                "redfish_psu_redundancy_lost",
+                "Power supply redundancy lost",
+                RuleKind::Threshold,
+                "dumbmonit_redfish_power_redundancy_health",
+            )
+        },
+        Rule {
+            description: "The server's management controller reports a power supply as \
+                          failed (health Critical)."
+                .to_string(),
+            operator: Operator::Ge,
+            threshold: 2.0,
+            for_duration: Duration::from_secs(2 * 60),
+            severity: Severity::Critical,
+            ..base(
+                "redfish_psu_failed",
+                "Power supply failed",
+                RuleKind::Threshold,
+                "dumbmonit_redfish_psu_health",
+            )
+        },
+        // FailurePredicted : le contrôleur de stockage (SMART, PFA) annonce la fin
+        // prochaine du disque. Il fonctionne encore : c'est le moment de le changer.
+        Rule {
+            description: "A drive reports a predicted failure: replace it while it still \
+                          works."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "redfish_drive_failure_predicted",
+                "Drive failure predicted",
+                RuleKind::Threshold,
+                "dumbmonit_redfish_drive_failure_predicted",
+            )
+        },
+        // La santé propre du système (Status.Health), pas son agrégat : le
+        // HealthRollup redirait en double ce que les règles ci-dessus disent déjà
+        // composant par composant.
+        Rule {
+            description: "The server's management controller reports the system health as \
+                          Critical."
+                .to_string(),
+            operator: Operator::Ge,
+            threshold: 2.0,
+            for_duration: Duration::from_secs(2 * 60),
+            severity: Severity::Critical,
+            ..base(
+                "redfish_system_critical",
+                "Server health critical",
+                RuleKind::Threshold,
+                "dumbmonit_redfish_system_health",
+            )
+        },
         // Sauvegarde Proxmox trop ancienne. C'est le genre de panne silencieuse qui
         // ne se découvre qu'au moment de restaurer, quand il est trop tard.
         Rule {
@@ -460,7 +623,12 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "container_restarting",
                 "Container restarting",
                 RuleKind::Threshold,
-                "increase(dumbmonit_container_restart_count[15m])",
+                // `increase_prometheus` et non `increase` : ce dernier compte la
+                // première valeur d'une série neuve comme une hausse. Un conteneur
+                // qui a redémarré cinquante fois l'an dernier et dont la série
+                // réapparaît (agent réinstallé, étiquettes changées) sonnerait
+                // aussitôt « cinquante redémarrages en un quart d'heure ».
+                "increase_prometheus(dumbmonit_container_restart_count[15m])",
             )
         },
         // Information, pas panne : une image plus récente existe dans le dépôt.
@@ -516,6 +684,100 @@ pub fn builtin_rules() -> Vec<Rule> {
                 "Plakar backup failed",
                 RuleKind::Threshold,
                 "dumbmonit_backup_last_status",
+            )
+        },
+        // ------------------------------------------------------------------
+        // Matériel remonté par l'agent : disques, pools ZFS, sondes.
+        //
+        // Ces quatre règles ne visent que des séries que l'agent n'émet **que**
+        // s'il a trouvé de quoi les remplir — `smartctl` installé, un pool ZFS,
+        // une sonde qui annonce son propre seuil. Sur une machine sans rien de
+        // tout cela, elles ne peuvent pas se déclencher, et n'ont donc pas à
+        // être désactivées.
+        // ------------------------------------------------------------------
+
+        // Le disque a fait son autodiagnostic et se déclare en fin de vie. C'est
+        // le préavis le plus précieux qu'un homelab puisse recevoir, et il
+        // arrive en général des semaines avant la panne.
+        Rule {
+            description: "This disk's own SMART self-assessment reports it as failing. \
+                          Replace it and check the backups before it goes."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "disk_smart_failed",
+                "Disk SMART failing",
+                RuleKind::Threshold,
+                // « == bool 0 » rend une série valant 1 par disque en panne
+                // annoncée et 0 pour les autres : le seuil se lit sans détour.
+                "dumbmonit_agent_disk_smart_ok == bool 0",
+            )
+        },
+        // 0 = ONLINE, 1 = DEGRADED, 2 = tout le reste. « > 0 » attrape donc le
+        // pool dégradé comme le pool en faute, sans énumérer des états dont la
+        // liste s'allonge à chaque version d'OpenZFS.
+        Rule {
+            description: "A ZFS pool is no longer healthy: a device is missing, faulted \
+                          or removed."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "zfs_pool_degraded",
+                "ZFS pool degraded",
+                RuleKind::Threshold,
+                "dumbmonit_agent_zfs_pool_health",
+            )
+        },
+        // Un nettoyage qui trouve des erreurs a lu des données abîmées. Le pool
+        // peut être ONLINE et le rester : c'est justement le silence que cette
+        // règle vient rompre.
+        Rule {
+            description: "The last ZFS scrub found errors on this pool.".to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "zfs_scrub_errors",
+                "ZFS scrub found errors",
+                RuleKind::Threshold,
+                // Les fichiers définitivement perdus comptent autant que les
+                // erreurs relevées par le nettoyage lui-même.
+                "dumbmonit_agent_zfs_pool_scrub_errors \
+                 or dumbmonit_agent_zfs_pool_data_errors",
+            )
+        },
+        // Température au-dessus du seuil critique **que la sonde annonce
+        // elle-même**. Pas de valeur en dur : 85 °C est une alerte sur un disque
+        // et une journée ordinaire pour un processeur de portable.
+        Rule {
+            description: "A sensor is above the critical temperature its own hardware \
+                          declares."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            unit: "°C".to_string(),
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "sensor_temperature_critical",
+                "Temperature above critical",
+                RuleKind::Threshold,
+                // Les deux séries portent exactement les mêmes étiquettes : la
+                // comparaison les apparie d'elle-même, et rend la température,
+                // qui est ce qu'on veut lire dans l'alerte.
+                "dumbmonit_agent_sensor_temperature_celsius \
+                 >= dumbmonit_agent_sensor_temperature_critical_celsius",
             )
         },
         // Active Backup for Business (`collectors/synology/abb.rs`). `last_status`
@@ -1552,6 +1814,495 @@ pub fn builtin_rules() -> Vec<Rule> {
             )
         },
         // --- fin du bloc Proxmox Mail Gateway ---
+        // --- OPNsense : passerelles, pare-feu, tunnels (`collectors/opnsense`) ---
+        //
+        // Un pare-feu tombe rarement d'un bloc : il perd un lien, sature sa table
+        // d'états ou cesse de résoudre, et tout le monde continue à le croire en
+        // bonne santé parce qu'il répond toujours au ping. Les règles qui suivent
+        // visent ces pannes-là.
+        //
+        // La bascule multi-WAN est la première : le lien de secours a pris le
+        // relais il y a trois semaines, la facture mobile explose et personne ne
+        // le sait. `gateway_up` vaut 0 sur « down » et « force_down » seulement :
+        // « loss » et « delay » sont des avertissements de dpinger, pas des pannes.
+        Rule {
+            description: "A gateway is down: dpinger no longer gets an answer from it. On a \
+                          multi-WAN firewall the traffic has already moved to another link, \
+                          quietly."
+                .to_string(),
+            operator: Operator::Lt,
+            threshold: 1.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "opnsense_gateway_down",
+                "Internet gateway down",
+                RuleKind::Threshold,
+                "dumbmonit_opnsense_gateway_up",
+            )
+        },
+        // Perte de paquets : une passerelle qui répond encore mais perd un
+        // cinquième de ce qu'on lui envoie rend les appels inaudibles et les
+        // sessions instables, sans jamais être déclarée tombée.
+        Rule {
+            description: "A gateway is losing more than a fifth of the packets sent to it: the \
+                          link answers, badly."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 20.0,
+            clear_threshold: Some(10.0),
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Warning,
+            unit: "%".to_string(),
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "opnsense_gateway_loss",
+                "Gateway losing packets",
+                RuleKind::Threshold,
+                "dumbmonit_opnsense_gateway_loss_percent",
+            )
+        },
+        // Latence : trois cents millisecondes tiennent compte d'un lien mobile de
+        // secours, qui n'a aucune raison de déclencher une alerte pour sa nature.
+        Rule {
+            description: "A gateway's round-trip time has stayed above 300 ms for a quarter of \
+                          an hour."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.3,
+            clear_threshold: Some(0.2),
+            for_duration: Duration::from_secs(15 * 60),
+            severity: Severity::Info,
+            unit: "s".to_string(),
+            repeat_interval: Some(Duration::from_secs(12 * 3600)),
+            ..base(
+                "opnsense_gateway_latency",
+                "Gateway slow",
+                RuleKind::Threshold,
+                "dumbmonit_opnsense_gateway_delay_seconds",
+            )
+        },
+        // Table d'états : elle se remplit longtemps avant de déborder, et quand
+        // elle déborde le pare-feu refuse des connexions neuves sans qu'aucune
+        // autre série ne bouge.
+        Rule {
+            description: "The firewall's state table is more than 80% full. Past the limit it \
+                          drops new connections without any other symptom."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 80.0,
+            clear_threshold: Some(70.0),
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Warning,
+            unit: "%".to_string(),
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "opnsense_state_table_filling",
+                "Firewall state table filling up",
+                RuleKind::Threshold,
+                "dumbmonit_opnsense_pf_states_used_percent",
+            )
+        },
+        // Tampons réseau de FreeBSD : les épuiser arrête le routage alors que le
+        // processeur et la mémoire restent au repos. C'est la panne qui ne
+        // ressemble à rien, et elle a un seuil.
+        Rule {
+            description: "The firewall has used more than 90% of its network buffers. FreeBSD \
+                          stops forwarding when they run out, with the CPU still idle."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 90.0,
+            clear_threshold: Some(80.0),
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Warning,
+            unit: "%".to_string(),
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "opnsense_mbuf_exhausted",
+                "Firewall network buffers exhausted",
+                RuleKind::Threshold,
+                "dumbmonit_opnsense_mbuf_used_percent",
+            )
+        },
+        // Tunnel VPN : la série n'existe que pour un tunnel configuré et activé.
+        // Un greffon absent ou une connexion désactivée n'en produisent aucune,
+        // et ne peuvent donc pas déclencher.
+        Rule {
+            description: "A configured VPN tunnel has had no session for ten minutes.".to_string(),
+            operator: Operator::Lt,
+            threshold: 1.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "opnsense_vpn_tunnel_down",
+                "VPN tunnel down",
+                RuleKind::Threshold,
+                "dumbmonit_opnsense_vpn_tunnel_up",
+            )
+        },
+        // Le résolveur : un pare-feu qui route mais ne résout plus paraît en
+        // bonne santé à tout le monde sauf aux machines derrière lui. La série
+        // n'existe que si Unbound est installé ; un pare-feu qui résout avec
+        // autre chose n'a qu'à désactiver cette règle.
+        Rule {
+            description: "Unbound has stopped answering. The firewall still routes; the machines \
+                          behind it no longer resolve."
+                .to_string(),
+            operator: Operator::Lt,
+            threshold: 1.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "opnsense_resolver_down",
+                "Firewall resolver stopped",
+                RuleKind::Threshold,
+                "dumbmonit_opnsense_unbound_running",
+            )
+        },
+        // Services du cœur : `dpinger` est ce qui surveille les passerelles et
+        // `configd` ce qui exécute tout le reste. Les deux tournent sur toute
+        // installation ; les autres services sont volontairement hors de la
+        // règle, parce qu'un service arrêté exprès n'est pas une panne.
+        Rule {
+            description: "A core service of the firewall is stopped: dpinger, which watches the \
+                          gateways, or configd, which runs everything else."
+                .to_string(),
+            operator: Operator::Lt,
+            threshold: 1.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "opnsense_core_service_down",
+                "Firewall core service stopped",
+                RuleKind::Threshold,
+                "dumbmonit_opnsense_service_running{service=~\"dpinger|configd\"}",
+            )
+        },
+        // Température : un boîtier de pare-feu vit dans un placard, souvent sans
+        // ventilateur. Quatre-vingt-cinq degrés est la limite au-delà de laquelle
+        // les processeurs embarqués commencent à se brider.
+        Rule {
+            description: "A sensor of the firewall is above 85 °C: the fanless box in the \
+                          cupboard is about to start throttling."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 85.0,
+            clear_threshold: Some(78.0),
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Warning,
+            unit: "°C".to_string(),
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "opnsense_temperature_high",
+                "Firewall too hot",
+                RuleKind::Threshold,
+                "dumbmonit_opnsense_temperature_celsius",
+            )
+        },
+        // CARP en mode maintenance : la bascule a été demandée à la main pour une
+        // mise à jour, et jamais annulée. Le pare-feu reste secondaire pour
+        // toujours, ce qui ne se voit nulle part ailleurs.
+        Rule {
+            description: "CARP has been left in persistent maintenance mode: this firewall has \
+                          handed its virtual addresses to its partner and will not take them \
+                          back on its own."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Info,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "opnsense_carp_maintenance",
+                "Firewall left in CARP maintenance mode",
+                RuleKind::Threshold,
+                "dumbmonit_opnsense_carp_maintenance_mode",
+            )
+        },
+        // Mise à jour posée mais pas démarrée : le noyau ou un micrologiciel
+        // attend un redémarrage, et le pare-feu tourne encore sur l'ancien.
+        Rule {
+            description: "An update is installed on the firewall but needs a reboot to take \
+                          effect."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Info,
+            repeat_interval: Some(Duration::from_secs(7 * 24 * 3600)),
+            ..base(
+                "opnsense_reboot_pending",
+                "Firewall reboot pending",
+                RuleKind::Threshold,
+                "dumbmonit_opnsense_firmware_reboot_required",
+            )
+        },
+        // Mises à jour en attente : un pare-feu est la machine la plus exposée du
+        // réseau, et c'est la seule dont les mises à jour comptent vraiment.
+        Rule {
+            description: "The firewall has packages waiting to be updated. It is the most \
+                          exposed machine on the network."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Info,
+            repeat_interval: Some(Duration::from_secs(7 * 24 * 3600)),
+            ..base(
+                "opnsense_updates_pending",
+                "Firewall updates pending",
+                RuleKind::Threshold,
+                "dumbmonit_opnsense_firmware_updates_pending",
+            )
+        },
+        // --- fin du bloc OPNsense ---
+        // --- TrueNAS : pools, disques, protection des données (`collectors/truenas`) ---
+        //
+        // La panne pour laquelle ce bloc existe : un vdev redondant qui a perdu un
+        // disque sert toujours les données. Le partage reste monté, les
+        // sauvegardes passent, et personne ne le voit avant le deuxième disque.
+        // Les règles qui suivent visent ces pannes-là, avant la panne franche.
+        //
+        // `pool_healthy` est l'avis de ZFS lui-même : il tombe à 0 sur un pool
+        // DEGRADED comme sur un pool FAULTED. Cinq minutes absorbent un disque
+        // qu'on remplace à chaud.
+        Rule {
+            description: "A pool is no longer healthy. A degraded pool still serves its data, which \
+                          is exactly why nobody notices until the next disk fails."
+                .to_string(),
+            operator: Operator::Lt,
+            threshold: 1.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "truenas_pool_degraded",
+                "NAS pool degraded",
+                RuleKind::Threshold,
+                "dumbmonit_truenas_pool_healthy",
+            )
+        },
+        // Erreurs de lecture, d'écriture ou de somme de contrôle : ZFS les a
+        // corrigées tant qu'il avait de la redondance, mais un disque qui en
+        // accumule est en train de partir. Elles restent jusqu'au `zpool clear`.
+        Rule {
+            description: "Disks in this pool have reported read, write or checksum errors. ZFS \
+                          repaired what it could; a disk that keeps doing this is on its way out."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(15 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "truenas_pool_device_errors",
+                "NAS disk errors",
+                RuleKind::Threshold,
+                "dumbmonit_truenas_pool_device_errors",
+            )
+        },
+        // Un pool ZFS ralentit nettement passé 80 % et se fragmente ; à 90 % il
+        // devient pénible, à 100 % il refuse d'écrire.
+        Rule {
+            description: "A pool is more than 85% full. ZFS slows down well before it is full."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 85.0,
+            clear_threshold: Some(80.0),
+            for_duration: Duration::from_secs(30 * 60),
+            severity: Severity::Warning,
+            unit: "%".to_string(),
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            escalate_after: Some(Duration::from_secs(7 * 24 * 3600)),
+            ..base(
+                "truenas_pool_almost_full",
+                "NAS pool almost full",
+                RuleKind::Threshold,
+                "dumbmonit_truenas_pool_used_percent",
+            )
+        },
+        // Une vérification qui trouve des erreurs a trouvé des données abîmées ;
+        // elle les a réparées si la redondance le permettait, pas sinon.
+        Rule {
+            description: "The last scrub of this pool found errors: data on disk was damaged."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "truenas_scrub_errors",
+                "NAS scrub found errors",
+                RuleKind::Threshold,
+                "dumbmonit_truenas_pool_last_scrub_errors",
+            )
+        },
+        // Sans vérification, une corruption silencieuse n'est découverte qu'à la
+        // lecture — souvent le jour de la restauration. TrueNAS en planifie une
+        // tous les 35 jours par défaut : 45 jours laissent passer un retard.
+        Rule {
+            description: "This pool has not completed a scrub in more than 45 days: silent \
+                          corruption would only be found when the data is read."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 45.0 * 86_400.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Info,
+            unit: "s".to_string(),
+            repeat_interval: Some(Duration::from_secs(7 * 24 * 3600)),
+            ..base(
+                "truenas_scrub_overdue",
+                "NAS scrub overdue",
+                RuleKind::Threshold,
+                "dumbmonit_truenas_pool_last_scrub_age_seconds",
+            )
+        },
+        // Le journal SMART garde les échecs : la série vaut 1 tant qu'un test
+        // du journal a échoué, et n'existe pas pour un disque jamais testé.
+        Rule {
+            description: "A SMART self-test of this disk failed. Replace it before it takes the \
+                          pool's redundancy with it."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(5 * 60),
+            severity: Severity::Critical,
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "truenas_disk_smart_failed",
+                "NAS disk failed its SMART test",
+                RuleKind::Threshold,
+                "dumbmonit_truenas_disk_smart_failed",
+            )
+        },
+        Rule {
+            description: "A disk of this NAS is above 55 °C.".to_string(),
+            operator: Operator::Gt,
+            threshold: 55.0,
+            clear_threshold: Some(50.0),
+            for_duration: Duration::from_secs(15 * 60),
+            severity: Severity::Warning,
+            unit: "°C".to_string(),
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "truenas_disk_hot",
+                "NAS disk too hot",
+                RuleKind::Threshold,
+                "dumbmonit_truenas_disk_temperature_celsius",
+            )
+        },
+        // Un quota plein refuse les écritures de ce jeu de données seul, alors
+        // que le pool a de la place : l'application qui écrit dedans tombe.
+        Rule {
+            description: "A dataset has used more than 90% of its quota. At 100% its writes fail \
+                          while the pool still has room."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 90.0,
+            clear_threshold: Some(85.0),
+            for_duration: Duration::from_secs(30 * 60),
+            severity: Severity::Warning,
+            unit: "%".to_string(),
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "truenas_dataset_quota_full",
+                "NAS dataset near its quota",
+                RuleKind::Threshold,
+                "dumbmonit_truenas_dataset_quota_used_percent",
+            )
+        },
+        // Une réplication en échec laisse la copie distante vieillir sans rien
+        // dire. La série n'existe que pour une tâche activée.
+        Rule {
+            description: "A replication task failed: the copy on the other side is getting older."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(12 * 3600)),
+            ..base(
+                "truenas_replication_failed",
+                "NAS replication failed",
+                RuleKind::Threshold,
+                "dumbmonit_truenas_replication_error",
+            )
+        },
+        Rule {
+            description: "A periodic snapshot task failed: no new snapshot is being taken."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(12 * 3600)),
+            ..base(
+                "truenas_snapshot_task_failed",
+                "NAS snapshot task failed",
+                RuleKind::Threshold,
+                "dumbmonit_truenas_snapshot_task_error",
+            )
+        },
+        // Une tâche d'instantanés qui ne tourne plus ne tombe pas en erreur :
+        // elle se tait. Huit jours laissent passer une tâche hebdomadaire.
+        Rule {
+            description: "A periodic snapshot task has not run for more than eight days."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 8.0 * 86_400.0,
+            for_duration: Duration::from_secs(3600),
+            severity: Severity::Warning,
+            unit: "s".to_string(),
+            repeat_interval: Some(Duration::from_secs(24 * 3600)),
+            ..base(
+                "truenas_snapshots_stale",
+                "NAS snapshots stale",
+                RuleKind::Threshold,
+                "dumbmonit_truenas_snapshot_task_last_run_age_seconds",
+            )
+        },
+        // TrueNAS calcule lui-même l'état des pools, SMART, la capacité, les
+        // certificats, l'onduleur : relayer ses alertes graves est le filet le
+        // plus large. La série de chaque niveau existe toujours, zéro compris,
+        // ce qui fait retomber la règle quand l'alerte disparaît.
+        Rule {
+            description: "TrueNAS has raised an alert of level ERROR or above. Its own sentence is \
+                          on the device page."
+                .to_string(),
+            operator: Operator::Gt,
+            threshold: 0.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(12 * 3600)),
+            ..base(
+                "truenas_alert_raised",
+                "TrueNAS alert raised",
+                RuleKind::Threshold,
+                "sum by (target, host) (dumbmonit_truenas_alerts{level=~\"ERROR|CRITICAL|ALERT|EMERGENCY\"})",
+            )
+        },
+        // Seuls les services qui démarrent avec le NAS sont mesurés : un service
+        // qu'on a éteint exprès n'a pas de série.
+        Rule {
+            description: "A service set to start with the NAS is stopped.".to_string(),
+            operator: Operator::Lt,
+            threshold: 1.0,
+            for_duration: Duration::from_secs(10 * 60),
+            severity: Severity::Warning,
+            repeat_interval: Some(Duration::from_secs(6 * 3600)),
+            ..base(
+                "truenas_service_down",
+                "NAS service stopped",
+                RuleKind::Threshold,
+                "dumbmonit_truenas_service_running",
+            )
+        },
+        // --- fin du bloc TrueNAS ---
         // --- Proxmox VE : invités, disques, ZFS, paquets (`collectors/proxmox`) ---
         //
         // Les séries d'invité portent `name` et `vmid` : la notification dit
@@ -1977,6 +2728,15 @@ mod tests {
             "disk_almost_full",
             "ups_on_battery",
             "ups_battery_low",
+            // Ports réseau (IF-MIB) et matériel serveur (Redfish).
+            "port_errors",
+            "port_flapping",
+            "redfish_fan_failed",
+            "redfish_temperature_critical",
+            "redfish_psu_redundancy_lost",
+            "redfish_psu_failed",
+            "redfish_drive_failure_predicted",
+            "redfish_system_critical",
             "fs_will_be_full",
             "backup_too_old",
             "pbs_datastore_almost_full",
@@ -1997,6 +2757,11 @@ mod tests {
             "container_update_available",
             "plakar_backup_too_old",
             "plakar_backup_failed",
+            // Matériel vu par l'agent (`crates/agent/src/collect/{smart,zfs,sensors}.rs`).
+            "disk_smart_failed",
+            "zfs_pool_degraded",
+            "zfs_scrub_errors",
+            "sensor_temperature_critical",
             "synology_abb_task_failed",
             "synology_abb_backup_too_old",
             "synology_abb_task_disabled",
@@ -2064,6 +2829,33 @@ mod tests {
             "pmg_cluster_degraded",
             "pmg_certificate_expiring",
             "pmg_updates_pending",
+            // OPNsense (`collectors/opnsense`).
+            "opnsense_gateway_down",
+            "opnsense_gateway_loss",
+            "opnsense_gateway_latency",
+            "opnsense_state_table_filling",
+            "opnsense_mbuf_exhausted",
+            "opnsense_vpn_tunnel_down",
+            "opnsense_resolver_down",
+            "opnsense_core_service_down",
+            "opnsense_temperature_high",
+            "opnsense_carp_maintenance",
+            "opnsense_reboot_pending",
+            "opnsense_updates_pending",
+            // TrueNAS (`collectors/truenas`).
+            "truenas_pool_degraded",
+            "truenas_pool_device_errors",
+            "truenas_pool_almost_full",
+            "truenas_scrub_errors",
+            "truenas_scrub_overdue",
+            "truenas_disk_smart_failed",
+            "truenas_disk_hot",
+            "truenas_dataset_quota_full",
+            "truenas_replication_failed",
+            "truenas_snapshot_task_failed",
+            "truenas_snapshots_stale",
+            "truenas_alert_raised",
+            "truenas_service_down",
             // Sauvegarde locale de l'instance (`backup/local.rs`).
             "instance_backup_missing",
         ] {
@@ -2086,6 +2878,18 @@ mod tests {
             "dumbmonit_storage_bytes_total",
             "dumbmonit_ups_output_source",
             "dumbmonit_ups_battery_status",
+            // IF-MIB (`profiles/if-mib.yaml`).
+            "dumbmonit_if_errors_in",
+            "dumbmonit_if_errors_out",
+            "dumbmonit_if_oper_status",
+            // Redfish (`collectors/redfish/metrics.rs`).
+            "dumbmonit_redfish_fan_health",
+            "dumbmonit_redfish_temperature_celsius",
+            "dumbmonit_redfish_temperature_upper_critical_celsius",
+            "dumbmonit_redfish_power_redundancy_health",
+            "dumbmonit_redfish_psu_health",
+            "dumbmonit_redfish_drive_failure_predicted",
+            "dumbmonit_redfish_system_health",
             "dumbmonit_proxmox_node_cpu_percent",
             "dumbmonit_proxmox_node_rootfs_percent",
             "dumbmonit_proxmox_storage_used_percent",
@@ -2108,6 +2912,14 @@ mod tests {
             "dumbmonit_container_update_available",
             "dumbmonit_backup_last_success_seconds",
             "dumbmonit_backup_last_status",
+            // Agent : matériel de la machine (`crates/agent/src/collect/
+            // {smart,zfs,sensors}.rs`).
+            "dumbmonit_agent_disk_smart_ok",
+            "dumbmonit_agent_zfs_pool_health",
+            "dumbmonit_agent_zfs_pool_scrub_errors",
+            "dumbmonit_agent_zfs_pool_data_errors",
+            "dumbmonit_agent_sensor_temperature_celsius",
+            "dumbmonit_agent_sensor_temperature_critical_celsius",
             // Synology Active Backup for Business (`collectors/synology/abb.rs`).
             "dumbmonit_abb_task_last_status",
             "dumbmonit_abb_task_last_success_seconds",
@@ -2197,6 +3009,33 @@ mod tests {
             "dumbmonit_pdm_node_rootfs_percent",
             "dumbmonit_pdm_node_certificate_expiry_days",
             "dumbmonit_pdm_node_updates_pending",
+            // OPNsense (`collectors/opnsense/metrics.rs`).
+            "dumbmonit_opnsense_gateway_up",
+            "dumbmonit_opnsense_gateway_loss_percent",
+            "dumbmonit_opnsense_gateway_delay_seconds",
+            "dumbmonit_opnsense_pf_states_used_percent",
+            "dumbmonit_opnsense_mbuf_used_percent",
+            "dumbmonit_opnsense_vpn_tunnel_up",
+            "dumbmonit_opnsense_unbound_running",
+            "dumbmonit_opnsense_service_running",
+            "dumbmonit_opnsense_temperature_celsius",
+            "dumbmonit_opnsense_carp_maintenance_mode",
+            "dumbmonit_opnsense_firmware_reboot_required",
+            "dumbmonit_opnsense_firmware_updates_pending",
+            // TrueNAS (`collectors/truenas/metrics.rs`).
+            "dumbmonit_truenas_pool_healthy",
+            "dumbmonit_truenas_pool_device_errors",
+            "dumbmonit_truenas_pool_used_percent",
+            "dumbmonit_truenas_pool_last_scrub_errors",
+            "dumbmonit_truenas_pool_last_scrub_age_seconds",
+            "dumbmonit_truenas_disk_smart_failed",
+            "dumbmonit_truenas_disk_temperature_celsius",
+            "dumbmonit_truenas_dataset_quota_used_percent",
+            "dumbmonit_truenas_replication_error",
+            "dumbmonit_truenas_snapshot_task_error",
+            "dumbmonit_truenas_snapshot_task_last_run_age_seconds",
+            "dumbmonit_truenas_alerts",
+            "dumbmonit_truenas_service_running",
         ];
 
         for rule in builtin_rules() {

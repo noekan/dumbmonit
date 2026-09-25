@@ -55,6 +55,62 @@ pub fn render(records: &[Record]) -> Vec<String> {
     records.iter().map(|record| normalize(&record.data.to_string())).collect()
 }
 
+/// Façon de confronter la réponse aux valeurs attendues.
+///
+/// `Contains` est le réglage courant : la valeur attendue doit se retrouver
+/// quelque part dans un enregistrement. `Exact` est celui d'une zone que l'on
+/// tient : la réponse ne doit contenir *ni plus ni moins* que ce qui est écrit,
+/// et un enregistrement ajouté à côté du bon — le tour de passe-passe d'une zone
+/// détournée — fait alors échouer la sonde.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Contains,
+    Exact,
+}
+
+impl Mode {
+    pub fn parse(raw: &str) -> Result<Self, ProbeError> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "contains" | "" => Ok(Self::Contains),
+            "exact" => Ok(Self::Exact),
+            other => Err(ProbeError::Config(format!(
+                "\"expect_mode\" expects \"contains\" or \"exact\", got \"{other}\""
+            ))),
+        }
+    }
+}
+
+/// Valeurs de la réponse qu'aucune attente ne couvre, en mode `Exact`.
+///
+/// C'est la moitié manquante de [`missing`] : une zone détournée n'efface pas
+/// toujours le bon enregistrement, elle en ajoute souvent un à côté, et seul un
+/// contrôle dans ce sens-là le voit.
+pub fn unexpected(answers: &[String], expected: &[String]) -> Vec<String> {
+    let expected: Vec<String> = expected.iter().map(|value| normalize(value)).collect();
+    answers
+        .iter()
+        .filter(|answer| {
+            !expected.iter().any(|wanted| *answer == wanted || answer.contains(wanted))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Valeurs interdites présentes dans la réponse.
+///
+/// L'usage : un enregistrement `A` que l'on a supprimé et qui ne doit jamais
+/// revenir, une adresse de l'ancien hébergeur, un `TXT` de validation périmé.
+pub fn forbidden_present(answers: &[String], forbidden: &[String]) -> Vec<String> {
+    forbidden
+        .iter()
+        .filter(|banned| {
+            let banned = normalize(banned);
+            answers.iter().any(|answer| answer == &banned || answer.contains(&banned))
+        })
+        .cloned()
+        .collect()
+}
+
 /// Valeurs attendues absentes de la réponse.
 ///
 /// L'inclusion vaut correspondance : un `MX` se lit `10 mail.exemple.fr`, un `TXT`
@@ -191,6 +247,50 @@ mod tests {
 
         let spf = render(&[txt("exemple.fr.", "v=spf1 include:_spf.exemple.fr -all")]);
         assert!(missing(&spf, &["include:_spf.exemple.fr".to_string()]).is_empty());
+    }
+
+    #[test]
+    fn le_mode_exact_refuse_un_enregistrement_ajoute_a_cote_du_bon() {
+        // Le détournement le plus discret : le bon « A » est toujours là, un
+        // second le double. Le mode par défaut ne voit rien, le mode exact si.
+        let answers =
+            render(&[a("exemple.fr.", [203, 0, 113, 10]), a("exemple.fr.", [198, 51, 100, 7])]);
+        let attendu = ["203.0.113.10".to_string()];
+        assert!(missing(&answers, &attendu).is_empty(), "la valeur attendue est bien là");
+        assert_eq!(unexpected(&answers, &attendu), vec!["198.51.100.7"]);
+    }
+
+    #[test]
+    fn le_mode_exact_accepte_une_reponse_conforme_dans_nimporte_quel_ordre() {
+        let answers =
+            render(&[a("exemple.fr.", [203, 0, 113, 11]), a("exemple.fr.", [203, 0, 113, 10])]);
+        let attendu = ["203.0.113.10".to_string(), "203.0.113.11".to_string()];
+        assert!(missing(&answers, &attendu).is_empty());
+        assert!(unexpected(&answers, &attendu).is_empty(), "l'ordre du DNS n'est pas stable");
+    }
+
+    #[test]
+    fn une_valeur_interdite_se_signale_meme_quand_lattendue_est_la() {
+        let answers = render(&[
+            mx("exemple.fr.", 10, "mail.exemple.fr."),
+            mx("exemple.fr.", 20, "vieux.hebergeur.net."),
+        ]);
+        assert!(missing(&answers, &["mail.exemple.fr".to_string()]).is_empty());
+        assert_eq!(
+            forbidden_present(&answers, &["vieux.hebergeur.net".to_string()]),
+            vec!["vieux.hebergeur.net"]
+        );
+        assert!(forbidden_present(&answers, &["autre.net".to_string()]).is_empty());
+    }
+
+    #[test]
+    fn les_modes_de_comparaison_se_lisent_et_se_refusent() {
+        assert_eq!(Mode::parse("contains").unwrap(), Mode::Contains);
+        assert_eq!(Mode::parse(" EXACT ").unwrap(), Mode::Exact);
+        assert_eq!(Mode::parse("").unwrap(), Mode::Contains);
+        let error = Mode::parse("presque").unwrap_err();
+        assert!(matches!(error, ProbeError::Config(_)));
+        assert!(!error.means_down(), "une faute de frappe n'est pas une zone détournée");
     }
 
     #[test]

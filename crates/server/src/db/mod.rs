@@ -1,10 +1,12 @@
 pub mod abb_runs;
 pub mod alerts;
+pub mod opnsense;
 pub mod pbs;
 pub mod pdm;
 pub mod pmg;
 pub mod status_pages;
 pub mod targets;
+pub mod truenas;
 
 use std::path::Path;
 

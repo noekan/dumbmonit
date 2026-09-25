@@ -20,7 +20,7 @@ crates/server    the binary
   alerting/      rules, state machine (Phase/EffectivePhase), suppression by parent, silences, seasonal baseline
   notify/        22 notification channels, described to the UI by notify/catalog.rs
   crypto.rs      AES-256-GCM for credentials/tokens, key derived from /data/secret.key or DUMBMONIT_SECRET
-crates/agent     Linux/Windows agent; install/ holds install.sh/.ps1 served by the server
+crates/agent     Linux/macOS/FreeBSD/Windows agent; install/ holds install.sh/.ps1 served by the server
 web/             SvelteKit (Svelte 5 runes, Tailwind 4, uPlot), adapter-static SPA fallback, ssr=false
 profiles/        SNMP collection profiles, auto-applied by sysObjectID
 docs/            this documentation (MkDocs, published on Read the Docs)

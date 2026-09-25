@@ -124,7 +124,7 @@ provider subject after the first sign-in. On a first sign-in:
 
 ## Agents
 
-Enrollment tokens for the [Linux and Windows agent](../devices/agent.md).
+Enrollment tokens for the [Linux, macOS, FreeBSD and Windows agent](../devices/agent.md).
 Create one with a name ("File server", "Home fleet"): the token is shown once,
 with the Linux and Windows install commands ready to copy, and the SHA-256
 checksums of the agent binaries this server ships — the installer checks the

@@ -1,0 +1,25 @@
+[
+  {
+    "uuid": "2235ab45-15d6-4ea2-833d-4722c2f7f99b",
+    "source": "Replication",
+    "klass": "ReplicationSuccess",
+    "args": {
+      "name": "local media copy"
+    },
+    "node": "Controller A",
+    "key": "[1, \"2026-09-24T22:53:54.210663\"]",
+    "datetime": {
+      "$date": 1790290434000
+    },
+    "last_occurrence": {
+      "$date": 1790290837000
+    },
+    "dismissed": false,
+    "mail": null,
+    "text": "Replication \"%(name)s\" succeeded.",
+    "id": "2235ab45-15d6-4ea2-833d-4722c2f7f99b",
+    "level": "INFO",
+    "formatted": "Replication \"local media copy\" succeeded.",
+    "one_shot": false
+  }
+]

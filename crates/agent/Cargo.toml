@@ -57,6 +57,14 @@ serde_yaml_ng = "0.10"
 # petit.
 regex = { version = "1", default-features = false, features = ["std", "unicode-perl"] }
 
+# Sondes de température, hors Windows : `sysinfo` lit `/sys/class/hwmon` sous
+# Linux, le SMC sous macOS et `dev.cpu.N.temperature` sous FreeBSD — les trois
+# sources derrière une seule interface, sans dépendance supplémentaire. Windows
+# en est exclu à dessein : la même fonctionnalité y ferait entrer tout le client
+# WMI, pour une lecture qui exige de toute façon des droits d'administration.
+[target.'cfg(not(windows))'.dependencies]
+sysinfo = { version = "0.39", default-features = false, features = ["component"] }
+
 [dev-dependencies]
 # Répertoires jetables pour les tests du secret de liaison : ils écrivent un
 # fichier et en vérifient les permissions, ce qui n'a de sens que sur un vrai

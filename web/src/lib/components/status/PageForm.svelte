@@ -2,32 +2,40 @@
 	/**
 	 * Create or edit a status page, inline: title, slug (suggested from the
 	 * title until typed by hand), description, theme, history depth, published
-	 * toggle, and the service picker — tick devices, name them for the public,
-	 * group them. Saves the page then its services in one go.
+	 * toggle, the look (logo, accent, footer, link to the organisation's site),
+	 * email subscription, and the service picker — tick devices, name them for
+	 * the public, group them. Saves the page, its logo, then its services.
 	 */
 	import { untrack } from 'svelte';
 	import { Check, X } from 'lucide-svelte';
 	import {
 		createStatusPage,
+		deleteStatusPageLogo,
 		setStatusPageItems,
+		statusPageLogoUrl,
 		updateStatusPage,
+		uploadStatusPageLogo,
+		type Channel,
 		type StatusPage,
+		type StatusPageAccent,
 		type StatusPageItemPayload,
 		type StatusPageTheme,
 		type Target
 	} from '$lib/api';
 	import { Button, ErrorNotice, Field, Toggle } from '$lib/ui';
-	import { slugify } from './words';
+	import { ACCENTS, accentClass, slugify } from './words';
 
 	interface Props {
 		/** `null` creates a page. */
 		page: StatusPage | null;
 		targets: Target[];
+		/** Notification channels; the SMTP ones can mail subscribers. */
+		channels?: Channel[];
 		onsaved: (page: StatusPage) => void;
 		oncancel: () => void;
 	}
 
-	let { page, targets, onsaved, oncancel }: Props = $props();
+	let { page, targets, channels = [], onsaved, oncancel }: Props = $props();
 
 	// The form seeds itself once from the page it was opened for; the parent
 	// re-mounts it for another page.
@@ -43,6 +51,52 @@
 	let theme = $state<StatusPageTheme>(initial?.theme ?? 'auto');
 	let published = $state(initial?.published ?? false);
 	let showDays = $state(initial?.show_uptime_days ?? 90);
+	let accent = $state<StatusPageAccent>(initial?.accent ?? 'default');
+	let footerText = $state(initial?.footer_text ?? '');
+	let homepageUrl = $state(initial?.homepage_url ?? '');
+	let subscribeChannel = $state<number | null>(initial?.subscribe_channel_id ?? null);
+	const smtpChannels = $derived(channels.filter((channel) => channel.kind === 'smtp'));
+
+	// Logo: what is stored, and what this form will do to it on save.
+	const MAX_LOGO_BYTES = 256 * 1024;
+	const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+	let hasStoredLogo = $state(Boolean(initial?.logo_type));
+	let pendingLogo = $state<string | null>(null);
+	let removeLogo = $state(false);
+	let logoError = $state<string | null>(null);
+	const logoPreview = $derived(
+		pendingLogo ?? (hasStoredLogo && !removeLogo && initial ? statusPageLogoUrl(initial.id, initial.updated_at) : null)
+	);
+
+	function pickLogo(event: Event & { currentTarget: HTMLInputElement }) {
+		logoError = null;
+		const file = event.currentTarget.files?.[0];
+		event.currentTarget.value = '';
+		if (!file) return;
+		if (!LOGO_TYPES.includes(file.type)) {
+			logoError = 'Use a PNG, JPEG or WebP image.';
+			return;
+		}
+		if (file.size > MAX_LOGO_BYTES) {
+			logoError = `The logo is limited to ${MAX_LOGO_BYTES / 1024} KiB.`;
+			return;
+		}
+		const reader = new FileReader();
+		reader.onload = () => {
+			pendingLogo = typeof reader.result === 'string' ? reader.result : null;
+			removeLogo = false;
+		};
+		reader.onerror = () => (logoError = 'The file could not be read.');
+		reader.readAsDataURL(file);
+	}
+
+	function dropLogo() {
+		pendingLogo = null;
+		removeLogo = true;
+		logoError = null;
+	}
+
+	let homepageError = $state<string | null>(null);
 
 	// Picker state: per target, whether it is shown and how.
 	interface Pick {
@@ -103,7 +157,8 @@
 		error = null;
 		titleError = title.trim() ? null : 'Give the page a title.';
 		slugError = SLUG_RULE.test(slug) ? null : '2 to 40 characters: lowercase letters, digits and hyphens.';
-		if (titleError || slugError) return;
+		homepageError = homepageUrl.trim() === '' || /^https?:\/\/[^\s/]+/i.test(homepageUrl.trim()) ? null : 'Start with http:// or https://.';
+		if (titleError || slugError || homepageError) return;
 
 		saving = true;
 		try {
@@ -113,9 +168,20 @@
 				description: description.trim(),
 				theme,
 				published,
-				show_uptime_days: showDays
+				show_uptime_days: showDays,
+				accent,
+				footer_text: footerText.trim(),
+				homepage_url: homepageUrl.trim(),
+				subscribe_channel_id: subscribeChannel
 			};
-			const saved = page ? await updateStatusPage(page.id, payload) : await createStatusPage(payload);
+			let saved = page ? await updateStatusPage(page.id, payload) : await createStatusPage(payload);
+			if (pendingLogo) {
+				await uploadStatusPageLogo(saved.id, pendingLogo);
+				saved = { ...saved, logo_type: 'image' };
+			} else if (removeLogo && hasStoredLogo) {
+				await deleteStatusPageLogo(saved.id);
+				saved = { ...saved, logo_type: null };
+			}
 			const items: StatusPageItemPayload[] = order
 				.filter((id) => picks.has(id))
 				.map((id) => {
@@ -190,6 +256,79 @@
 			<Toggle id="{idPrefix}-published" bind:checked={published} disabled={saving} label="Published" />
 		</Field>
 	</div>
+
+	<!-- Look -->
+	<fieldset class="grid gap-4" disabled={saving}>
+		<legend class="text-sm font-semibold text-ink">Look</legend>
+		<div class="grid gap-4 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-start">
+			<div class="grid gap-2">
+				<span class="text-sm text-ink" id="{idPrefix}-logo-label">Logo</span>
+				<div class="flex items-center gap-3">
+					<div class="flex size-16 items-center justify-center overflow-hidden rounded-lg border border-dashed border-line-strong bg-canvas-deep">
+						{#if logoPreview}
+							<img src={logoPreview} alt="Logo preview" class="size-full object-contain" />
+						{:else}
+							<span class="text-[0.6875rem] text-ink-3">None</span>
+						{/if}
+					</div>
+					<div class="grid gap-1.5">
+						<label class="inline-flex cursor-pointer items-center rounded-md border border-line bg-surface px-3 py-1.5 text-sm font-semibold text-ink hover:bg-surface-2 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ink">
+							{logoPreview ? 'Replace' : 'Upload'}
+							<input type="file" accept="image/png,image/jpeg,image/webp" class="sr-only" onchange={pickLogo} aria-labelledby="{idPrefix}-logo-label" />
+						</label>
+						{#if logoPreview}
+							<Button variant="ghost" size="sm" onclick={dropLogo}>Remove</Button>
+						{/if}
+					</div>
+				</div>
+				<p class="text-[0.8125rem] text-ink-2">PNG, JPEG or WebP, up to 256 KiB. Square works best.</p>
+				{#if logoError}<p class="text-[0.8125rem] text-warning-ink" role="alert">{logoError}</p>{/if}
+			</div>
+			<div class="grid gap-4">
+				<div class="grid gap-2">
+					<span class="text-sm text-ink" id="{idPrefix}-accent-label">Accent</span>
+					<div class="flex flex-wrap gap-2" role="radiogroup" aria-labelledby="{idPrefix}-accent-label">
+						{#each ACCENTS as option (option.value)}
+							<label class={`inline-flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm ${accent === option.value ? 'border-ink bg-surface-2 text-ink' : 'border-line text-ink-2 hover:text-ink'} ${accentClass(option.value)}`}>
+								<input type="radio" class="sr-only" name="{idPrefix}-accent" value={option.value} bind:group={accent} />
+								<span class="size-3.5 rounded-full bg-accent" aria-hidden="true"></span>
+								{option.label}
+							</label>
+						{/each}
+					</div>
+					<p class="text-[0.8125rem] text-ink-2">Links, the top rule and the subscribe button. Each accent stays readable by day and by night.</p>
+				</div>
+				<Field label="Organisation website" for="{idPrefix}-homepage" error={homepageError} help="Optional link shown next to the title.">
+					<input id="{idPrefix}-homepage" type="url" class="input" bind:value={homepageUrl} maxlength="300" placeholder="https://example.org" disabled={saving} oninput={() => (homepageError = null)} />
+				</Field>
+			</div>
+		</div>
+		<Field label="Footer text" for="{idPrefix}-footer" help="Plain text under the page, up to 280 characters: who runs it, how to reach them.">
+			<textarea id="{idPrefix}-footer" class="input min-h-16" bind:value={footerText} maxlength="280" rows="2" disabled={saving}></textarea>
+		</Field>
+	</fieldset>
+
+	<!-- Email subscription -->
+	<Field
+		label="Email subscribers"
+		for="{idPrefix}-subscribe"
+		help={smtpChannels.length === 0
+			? 'Add an email (SMTP) channel under Notifications to let visitors subscribe. Until then the page offers its RSS feed.'
+			: 'Visitors confirm their address by email, and every update carries a one-click unsubscribe link.'}
+	>
+		<select
+			id="{idPrefix}-subscribe"
+			class="input"
+			value={subscribeChannel === null ? '' : String(subscribeChannel)}
+			onchange={(event) => (subscribeChannel = event.currentTarget.value === '' ? null : Number(event.currentTarget.value))}
+			disabled={saving || (smtpChannels.length === 0 && subscribeChannel === null)}
+		>
+			<option value="">Off — RSS only</option>
+			{#each smtpChannels as channel (channel.id)}
+				<option value={String(channel.id)}>Send through “{channel.name}”{channel.enabled ? '' : ' (disabled)'}</option>
+			{/each}
+		</select>
+	</Field>
 
 	<!-- Service picker -->
 	<fieldset class="grid gap-2" disabled={saving}>

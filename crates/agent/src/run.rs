@@ -14,7 +14,10 @@ use crate::client::{PushClient, PushError};
 use crate::collect::docker::DockerProbe;
 use crate::collect::plakar::PlakarProbe;
 use crate::collect::registry::UpdateChecker;
+use crate::collect::sensors::SensorsProbe;
+use crate::collect::smart::SmartProbe;
 use crate::collect::system_health::SystemHealthProbe;
+use crate::collect::zfs::ZfsProbe;
 use crate::collect::{SystemProbe, agent_samples, services};
 use crate::commands::CommandRunner;
 use crate::config::{Config, MIN_INTERVAL_SECS};
@@ -57,6 +60,11 @@ pub struct Agent {
     docker: DockerProbe,
     updates: UpdateChecker,
     plakar: PlakarProbe,
+    /// Matériel : sondes de température, santé des disques, pools ZFS. Chacun
+    /// se tait complètement là où la machine n'a rien à en dire.
+    sensors: SensorsProbe,
+    smart: SmartProbe,
+    zfs: ZfsProbe,
     buffer: PendingBuffer,
     client: PushClient,
     backoff: Backoff,
@@ -101,6 +109,9 @@ impl Agent {
             docker: DockerProbe::new(&config.docker_socket, config.docker_max_containers),
             updates: UpdateChecker::new(),
             plakar: PlakarProbe::new(&config.plakar),
+            sensors: SensorsProbe::new(config.sensors),
+            smart: SmartProbe::new(&config.smart),
+            zfs: ZfsProbe::new(&config.zfs),
             backoff: Backoff::new(BACKOFF_BASE, BACKOFF_MAX),
             commands,
             relay: None,
@@ -125,6 +136,9 @@ impl Agent {
         }
         snapshot.system_health = self.health.read().await;
         snapshot.backups = self.plakar.read().await;
+        snapshot.sensors = self.sensors.read();
+        snapshot.smart = self.smart.read().await;
+        snapshot.zfs = self.zfs.read().await;
 
         // Un seul horodatage pour tout le cycle : c'est ce qui rend les séries
         // comparables entre elles à l'instant près.
@@ -390,6 +404,9 @@ mod tests {
             probe: crate::collect::ProbeConfig::default(),
             system_health: crate::collect::system_health::SystemHealthConfig::default(),
             plakar: crate::collect::plakar::PlakarConfig::default(),
+            sensors: false,
+            smart: crate::collect::smart::SmartConfig::default(),
+            zfs: crate::collect::zfs::ZfsConfig::default(),
             max_buffered_samples: 1_000,
             secret_path: std::path::PathBuf::from("/inexistant/agent-secret"),
             log_level: tracing::Level::INFO,

@@ -93,6 +93,52 @@ impl Smtp {
     fn secrets(&self) -> Vec<SecretString> {
         self.password.iter().cloned().collect()
     }
+
+    /// Envoie un courriel à un seul destinataire, hors des destinataires du
+    /// canal : c'est ce que font les pages de statut pour leurs abonnés.
+    ///
+    /// `unsubscribe` pose `List-Unsubscribe` et `List-Unsubscribe-Post`
+    /// (RFC 8058) : les messageries proposent alors le désabonnement en un clic.
+    pub async fn send_to(
+        &self,
+        recipient: &str,
+        subject: &str,
+        body: String,
+        unsubscribe: Option<&str>,
+    ) -> Result<(), NotifyError> {
+        use lettre::message::header::{HeaderName, HeaderValue};
+
+        let mut builder = lettre::Message::builder()
+            .from(
+                self.from
+                    .parse()
+                    .map_err(|_| NotifyError::Config("invalid sender address".to_string()))?,
+            )
+            .to(recipient
+                .parse()
+                .map_err(|_| NotifyError::Config("invalid recipient address".to_string()))?)
+            .subject(subject)
+            .header(ContentType::TEXT_PLAIN);
+        if let Some(url) = unsubscribe {
+            builder = builder
+                .raw_header(HeaderValue::new(
+                    HeaderName::new_from_ascii_str("List-Unsubscribe"),
+                    format!("<{url}>"),
+                ))
+                .raw_header(HeaderValue::new(
+                    HeaderName::new_from_ascii_str("List-Unsubscribe-Post"),
+                    "List-Unsubscribe=One-Click".to_string(),
+                ));
+        }
+        let email = builder.body(body).map_err(|error| NotifyError::Config(error.to_string()))?;
+        self.transport.send(email).await.map_err(|error| {
+            NotifyError::Transport(secret::truncate(
+                &secret::redact(&error.to_string(), &self.secrets()),
+                200,
+            ))
+        })?;
+        Ok(())
+    }
 }
 
 #[async_trait]

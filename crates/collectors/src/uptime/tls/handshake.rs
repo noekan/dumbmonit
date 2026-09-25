@@ -135,7 +135,7 @@ pub async fn inspect(
 }
 
 /// Libellé lisible d'une version de protocole : `TLSv1_3` devient `TLSv1.3`.
-fn protocol_label(version: &rustls::ProtocolVersion) -> String {
+pub(crate) fn protocol_label(version: &rustls::ProtocolVersion) -> String {
     format!("{version:?}").replace('_', ".")
 }
 
@@ -144,7 +144,7 @@ fn protocol_label(version: &rustls::ProtocolVersion) -> String {
 /// `ring` et `aws-lc-rs` sont tous deux compilés — `reqwest` active le second —,
 /// et rustls refuse alors de deviner lequel employer. Le désigner ici évite de
 /// dépendre d'un fournisseur installé au niveau du processus par un autre module.
-fn provider() -> Arc<CryptoProvider> {
+pub(crate) fn provider() -> Arc<CryptoProvider> {
     static PROVIDER: OnceLock<Arc<CryptoProvider>> = OnceLock::new();
     PROVIDER.get_or_init(|| Arc::new(rustls::crypto::ring::default_provider())).clone()
 }
@@ -154,7 +154,7 @@ fn provider() -> Arc<CryptoProvider> {
 /// L'image finale est construite depuis `scratch` et n'a pas de magasin système ;
 /// embarquer les racines est donc la seule option qui fonctionne à l'identique en
 /// conteneur et en développement.
-fn roots() -> Arc<RootCertStore> {
+pub(crate) fn roots() -> Arc<RootCertStore> {
     static ROOTS: OnceLock<Arc<RootCertStore>> = OnceLock::new();
     ROOTS
         .get_or_init(|| {
@@ -167,14 +167,14 @@ fn roots() -> Arc<RootCertStore> {
 
 /// Vérificateur qui note le verdict au lieu de l'appliquer. Voir l'en-tête du module.
 #[derive(Debug)]
-struct RecordingVerifier {
+pub(crate) struct RecordingVerifier {
     inner: Arc<WebPkiServerVerifier>,
     /// `None` tant qu'aucun refus n'a été constaté.
     refusal: Mutex<Option<String>>,
 }
 
 impl RecordingVerifier {
-    fn new() -> Result<Self, HandshakeError> {
+    pub(crate) fn new() -> Result<Self, HandshakeError> {
         let inner = WebPkiServerVerifier::builder_with_provider(roots(), provider())
             .build()
             .map_err(|error| HandshakeError::Tls(format!("TLS verifier unusable: {error}")))?;
@@ -182,7 +182,7 @@ impl RecordingVerifier {
     }
 
     /// Motif du refus, ou `None` si la chaîne est digne de confiance.
-    fn verdict(&self) -> Option<String> {
+    pub(crate) fn verdict(&self) -> Option<String> {
         self.refusal.lock().unwrap_or_else(|poison| poison.into_inner()).clone()
     }
 }

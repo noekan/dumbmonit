@@ -13,6 +13,9 @@ form always matches what this version can monitor.
 | [Proxmox Datacenter Manager](pdm.md) | `pdm` | API token | Console federating several PVE clusters and PBS instances |
 | [Proxmox Mail Gateway](pmg.md) | `pmg` | username/password | Mail gateway filtering spam and viruses |
 | [Synology DSM](synology.md) | `synology` | username/password | DiskStation, RackStation |
+| [OPNsense](opnsense.md) | `opnsense` | API key and secret | Firewall, router, multi-WAN edge |
+| [TrueNAS](truenas.md) | `truenas` | API key | ZFS storage server (SCALE, Community Edition) |
+| [Server hardware (Redfish)](redfish.md) | `redfish` | username/password | Server fans, temperatures, power supplies and drives, read from its BMC |
 | [Server with agent](agent.md) | `agent` | none (enrollment token) | Linux, Windows, Raspberry Pi |
 | [Website or web API](services.md#http) | `http` | none, username/password or token | Health page, REST API |
 | [Network port](services.md#tcp) | `tcp` | none | SSH, SMB, database |

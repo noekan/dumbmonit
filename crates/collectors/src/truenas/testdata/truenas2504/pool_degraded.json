@@ -1,0 +1,251 @@
+[
+  {
+    "id": 1,
+    "name": "tank",
+    "guid": "2280433153965505253",
+    "path": "/mnt/tank",
+    "status": "DEGRADED",
+    "scan": {
+      "function": "SCRUB",
+      "state": "FINISHED",
+      "start_time": {
+        "$date": 1790290946000
+      },
+      "end_time": {
+        "$date": 1790290964000
+      },
+      "percentage": 99.99696016311646,
+      "bytes_to_process": 1077501952,
+      "bytes_processed": 1077534720,
+      "bytes_issued": 1076895744,
+      "pause": null,
+      "errors": 0,
+      "total_secs_left": null
+    },
+    "expand": null,
+    "topology": {
+      "data": [
+        {
+          "name": "raidz1-0",
+          "type": "RAIDZ1",
+          "path": null,
+          "guid": "1639298526686699772",
+          "status": "DEGRADED",
+          "stats": {
+            "timestamp": 805214165394,
+            "read_errors": 0,
+            "write_errors": 0,
+            "checksum_errors": 0,
+            "ops": [
+              0,
+              3084,
+              17769,
+              0,
+              0,
+              0,
+              0
+            ],
+            "bytes": [
+              0,
+              2168180736,
+              1157378048,
+              0,
+              0,
+              0,
+              0
+            ],
+            "size": 5905580032,
+            "allocated": 1077460992,
+            "fragmentation": 1,
+            "self_healed": 0,
+            "configured_ashift": 12,
+            "logical_ashift": 12,
+            "physical_ashift": 9
+          },
+          "children": [
+            {
+              "name": "a2d51cb7-7262-4431-a2b4-3b905221adb7",
+              "type": "DISK",
+              "path": "/dev/disk/by-partuuid/a2d51cb7-7262-4431-a2b4-3b905221adb7",
+              "guid": "6552475225270499906",
+              "status": "ONLINE",
+              "stats": {
+                "timestamp": 805214406523,
+                "read_errors": 0,
+                "write_errors": 0,
+                "checksum_errors": 0,
+                "ops": [
+                  0,
+                  1036,
+                  5953,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "bytes": [
+                  0,
+                  722628608,
+                  386134016,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "size": 0,
+                "allocated": 0,
+                "fragmentation": 0,
+                "self_healed": 0,
+                "configured_ashift": 12,
+                "logical_ashift": 9,
+                "physical_ashift": 9
+              },
+              "children": [],
+              "device": "sdc1",
+              "disk": "sdc",
+              "unavail_disk": null
+            },
+            {
+              "name": "f57f7380-b3ed-47f4-b5a7-dcffac1604eb",
+              "type": "DISK",
+              "path": "/dev/disk/by-partuuid/f57f7380-b3ed-47f4-b5a7-dcffac1604eb",
+              "guid": "4060482899948100205",
+              "status": "OFFLINE",
+              "stats": {
+                "timestamp": 805214453835,
+                "read_errors": 0,
+                "write_errors": 0,
+                "checksum_errors": 0,
+                "ops": [
+                  0,
+                  1019,
+                  5880,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "bytes": [
+                  0,
+                  722456576,
+                  385232896,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "size": 0,
+                "allocated": 0,
+                "fragmentation": 0,
+                "self_healed": 0,
+                "configured_ashift": 12,
+                "logical_ashift": 9,
+                "physical_ashift": 9
+              },
+              "children": [],
+              "device": "sdd1",
+              "disk": "sdd",
+              "unavail_disk": {
+                "identifier": "{serial}DATA0002",
+                "name": "sdd",
+                "subsystem": "scsi",
+                "number": 2096,
+                "serial": "DATA0002",
+                "lunid": null,
+                "size": 2147483648,
+                "description": "",
+                "transfermode": "Auto",
+                "hddstandby": "ALWAYS ON",
+                "advpowermgmt": "DISABLED",
+                "togglesmart": true,
+                "smartoptions": "",
+                "expiretime": null,
+                "critical": null,
+                "difference": null,
+                "informational": null,
+                "model": "QEMU_HARDDISK",
+                "rotationrate": null,
+                "type": "HDD",
+                "zfs_guid": "4060482899948100205",
+                "bus": "SCSI",
+                "devname": "sdd",
+                "enclosure": null,
+                "supports_smart": null,
+                "pool": null
+              }
+            },
+            {
+              "name": "595336fa-ea4b-403e-aad7-27226d87cd26",
+              "type": "DISK",
+              "path": "/dev/disk/by-partuuid/595336fa-ea4b-403e-aad7-27226d87cd26",
+              "guid": "14083669257712398338",
+              "status": "ONLINE",
+              "stats": {
+                "timestamp": 805214529979,
+                "read_errors": 0,
+                "write_errors": 0,
+                "checksum_errors": 0,
+                "ops": [
+                  0,
+                  1029,
+                  5936,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "bytes": [
+                  0,
+                  723095552,
+                  386011136,
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "size": 0,
+                "allocated": 0,
+                "fragmentation": 0,
+                "self_healed": 0,
+                "configured_ashift": 12,
+                "logical_ashift": 9,
+                "physical_ashift": 9
+              },
+              "children": [],
+              "device": "sda1",
+              "disk": "sda",
+              "unavail_disk": null
+            }
+          ],
+          "unavail_disk": null
+        }
+      ],
+      "log": [],
+      "cache": [],
+      "spare": [],
+      "special": [],
+      "dedup": []
+    },
+    "healthy": false,
+    "warning": false,
+    "status_code": "OFFLINE_DEV",
+    "status_detail": "One or more devices has been taken offline by the administrator. Sufficient replicas exist for the pool to continue functioning in a degraded state.",
+    "size": 5905580032,
+    "allocated": 1077460992,
+    "free": 4828119040,
+    "freeing": 0,
+    "fragmentation": "1",
+    "size_str": "5905580032",
+    "allocated_str": "1077460992",
+    "free_str": "4828119040",
+    "freeing_str": "0",
+    "dedup_table_quota": "auto",
+    "dedup_table_size": 0,
+    "autotrim": {
+      "value": "off",
+      "rawvalue": "off",
+      "parsed": "off",
+      "source": "DEFAULT"
+    }
+  }
+]

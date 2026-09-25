@@ -71,12 +71,17 @@ RUN touch crates/proto/src/lib.rs crates/collectors/src/lib.rs crates/server/src
 RUN mkdir -p /empty
 
 # ---------------------------------------------------------------------------
-# Compilation croisée de l'agent, pour les trois plateformes que le serveur sait
+# Compilation croisée de l'agent, pour les quatre plateformes que le serveur sait
 # livrer sur /download/… (voir crates/server/src/api/agent_files.rs).
 #
 # Toujours exécutée sur la plateforme de construction : zig fait office d'éditeur
 # de liens pour chaque cible, il n'y a donc rien à émuler, et l'image multi-arch
-# ne compile pas trois fois l'agent sous QEMU.
+# ne compile pas quatre fois l'agent sous QEMU.
+#
+# macOS n'est pas ici, et ne peut pas y être : son édition de liens réclame le
+# SDK d'Apple, que sa licence interdit de redistribuer. Les binaires macOS sont
+# construits sur un exécuteur macOS et attachés à chaque version publiée
+# (.github/workflows/release.yml) ; le serveur explique où les prendre.
 # ---------------------------------------------------------------------------
 FROM --platform=$BUILDPLATFORM ghcr.io/rust-cross/cargo-zigbuild:0.23.4 AS agent
 
@@ -84,7 +89,7 @@ FROM --platform=$BUILDPLATFORM ghcr.io/rust-cross/cargo-zigbuild:0.23.4 AS agent
 # (sysinfo demande 1.95) : la chaîne est donc installée explicitement, à une
 # version fixe, pour que l'agent livré ne dépende pas de la date de construction.
 ARG RUST_TOOLCHAIN=1.98.0
-ARG AGENT_TARGETS="x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-pc-windows-gnu"
+ARG AGENT_TARGETS="x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-pc-windows-gnu x86_64-unknown-freebsd"
 RUN rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal \
       --target $(echo "$AGENT_TARGETS" | tr ' ' ',') \
  && rustup default "$RUST_TOOLCHAIN"
@@ -96,6 +101,27 @@ ENV CARGO_PROFILE_RELEASE_OPT_LEVEL=s \
     CARGO_PROFILE_RELEASE_LTO=fat
 
 WORKDIR /build
+
+# FreeBSD : zig fournit la libc, pas les autres bibliothèques de la base, dont
+# `sysinfo` et `libc` réclament quatre : libgeom, libdevstat, libkvm et
+# libprocstat. Chacune est remplacée ici par une bibliothèque factice au SONAME
+# de la vraie (FreeBSD 13 à 15) : l'éditeur de liens inscrit la dépendance, et
+# c'est la bibliothèque de la base qui est chargée sur la machine.
+#
+# Elles sont passées par leur chemin plutôt que par `-L` : zig fournit déjà
+# des `libkvm.so` et `libdevstat.so` vides, qui passeraient devant les nôtres.
+# Posées avant la compilation des dépendances : le binaire factice ci-dessous
+# est déjà lié contre `sysinfo`.
+COPY crates/agent/freebsd /opt/freebsd-stubs
+RUN cd /opt/freebsd-stubs \
+ && for lib in libgeom:5 libdevstat:7 libkvm:7 libprocstat:1; do \
+      name="${lib%%:*}"; major="${lib##*:}"; \
+      zig cc -target x86_64-freebsd -shared -Wl,-soname,"$name.so.$major" \
+        -o "$name.so" "$name.c" || exit 1; \
+    done
+ENV CARGO_TARGET_X86_64_UNKNOWN_FREEBSD_RUSTFLAGS="-L native=/opt/freebsd-stubs \
+-C link-arg=/opt/freebsd-stubs/libgeom.so -C link-arg=/opt/freebsd-stubs/libdevstat.so \
+-C link-arg=/opt/freebsd-stubs/libkvm.so -C link-arg=/opt/freebsd-stubs/libprocstat.so"
 
 # Même principe que pour le serveur : dépendances d'abord, sur des sources
 # factices. Le manifeste du workspace exige que chaque membre existe, d'où la
@@ -130,6 +156,7 @@ RUN touch crates/proto/src/lib.rs crates/collectors/src/lib.rs crates/agent/src/
  && cp target/x86_64-unknown-linux-musl/release/dumbmonit-agent  /agents/dumbmonit-agent-linux-x86_64 \
  && cp target/aarch64-unknown-linux-musl/release/dumbmonit-agent /agents/dumbmonit-agent-linux-aarch64 \
  && cp target/x86_64-pc-windows-gnu/release/dumbmonit-agent.exe  /agents/dumbmonit-agent-windows-x86_64.exe \
+ && cp target/x86_64-unknown-freebsd/release/dumbmonit-agent  /agents/dumbmonit-agent-freebsd-x86_64 \
  && ls -l /agents
 
 # ---------------------------------------------------------------------------

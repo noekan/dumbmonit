@@ -60,7 +60,8 @@ import type {
 	Incident,
 	IncidentPayload,
 	IncidentUpdatePayload,
-	PublicStatus
+	PublicStatus,
+	StatusSubscriber
 } from './types';
 
 export * from './types';
@@ -651,6 +652,49 @@ export function deleteIncident(id: number): Promise<void> {
 /** Posts a message and moves the incident to `status` (or keeps it). */
 export function addIncidentUpdate(id: number, payload: IncidentUpdatePayload): Promise<Incident> {
 	return request<Incident>(`/incidents/${id}/updates`, { method: 'POST', body: payload });
+}
+
+/** Uploads a logo (PNG, JPEG or WebP, as a base64 or `data:` URL). */
+export function uploadStatusPageLogo(id: number, data: string): Promise<void> {
+	return request<void>(`/status-pages/${id}/logo`, { method: 'PUT', body: { data } });
+}
+
+export function deleteStatusPageLogo(id: number): Promise<void> {
+	return request<void>(`/status-pages/${id}/logo`, { method: 'DELETE' });
+}
+
+/** Admin preview URL of a page's logo (works for drafts too). */
+export function statusPageLogoUrl(id: number, version: string): string {
+	return `/api/status-pages/${id}/logo?v=${encodeURIComponent(version)}`;
+}
+
+export function listStatusSubscribers(id: number, signal?: AbortSignal): Promise<StatusSubscriber[]> {
+	return request<StatusSubscriber[]>(`/status-pages/${id}/subscribers`, { signal });
+}
+
+export function deleteStatusSubscriber(id: number, subscriber: number): Promise<void> {
+	return request<void>(`/status-pages/${id}/subscribers/${subscriber}`, { method: 'DELETE' });
+}
+
+/** Public: asks for a confirmation email. Same answer whatever the address's state. */
+export function subscribeToStatus(slug: string, email: string): Promise<{ status: string; message: string }> {
+	return request(`/public/status/${encodeURIComponent(slug)}/subscribe`, { method: 'POST', body: { email } });
+}
+
+/** Public: confirms a subscription with the token from the email. */
+export function confirmStatusSubscription(slug: string, token: string): Promise<{ status: string }> {
+	return request(`/public/status/${encodeURIComponent(slug)}/confirm`, { method: 'POST', query: { token } });
+}
+
+/** Public: removes a subscription with the token from any update email. */
+export function unsubscribeFromStatus(slug: string, token: string): Promise<{ status: string }> {
+	return request(`/public/status/${encodeURIComponent(slug)}/unsubscribe`, { method: 'POST', query: { token } });
+}
+
+/** Public: base URL of a page's badges (append `badge.svg`, `uptime.svg?days=30`, `response.svg`). */
+export function statusBadgeBase(slug: string, componentKey?: string): string {
+	const base = `/api/public/status/${encodeURIComponent(slug)}`;
+	return componentKey ? `${base}/components/${encodeURIComponent(componentKey)}` : base;
 }
 
 /** Public document of a status page: no session, no cookie needed. */

@@ -12,18 +12,25 @@
 //! types concrets.
 
 pub mod agent;
+pub mod opnsense_history;
 pub mod pbs_history;
 pub mod pdm_history;
 pub mod pmg_history;
 pub mod push;
 pub mod relay;
 pub mod synology_history;
+pub mod truenas_history;
 
 pub use dumbmonit_collectors::{
-    DnsCollector, DummyCollector, HttpCollector, PbsCollector, PdmCollector, PingCollector,
-    PmgCollector, ProxmoxCollector, Registry, SnmpCollector, SynologyCollector, TcpCollector,
-    TlsCollector, dummy, http, pbs, pdm, pmg, proxmox, snmp, synology, uptime,
+    DnsCollector, DummyCollector, HttpCollector, OpnsenseCollector, PbsCollector, PdmCollector,
+    PingCollector, PmgCollector, ProxmoxCollector, Registry, SnmpCollector, SynologyCollector,
+    TcpCollector, TlsCollector, TruenasCollector, dummy, http, opnsense, pbs, pdm, pmg, proxmox,
+    snmp, synology, truenas, uptime,
 };
+pub use dumbmonit_collectors::{
+    MqttCollector, MysqlCollector, PostgresCollector, SmtpCollector, WebsocketCollector,
+};
+pub use dumbmonit_collectors::{RedfishCollector, redfish};
 #[allow(unused_imports)]
 pub use dumbmonit_proto::Collector;
 
