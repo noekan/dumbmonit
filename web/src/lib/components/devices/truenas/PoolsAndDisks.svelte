@@ -117,8 +117,7 @@
 							></div>
 						</div>
 						<span class="tnum text-[0.8125rem] text-ink-2">
-							{used.toFixed(0)} %{#if reading(pool.allocated_bytes) !== null && reading(pool.size_bytes) !== null}
-								— {formatBytes(pool.allocated_bytes)} of {formatBytes(pool.size_bytes)}{/if}
+							{used.toFixed(0)} %{#if reading(pool.allocated_bytes) !== null && reading(pool.size_bytes) !== null}{' — '}{formatBytes(pool.allocated_bytes)} of {formatBytes(pool.size_bytes)}{/if}
 						</span>
 					</div>
 				{:else if reading(pool.size_bytes) !== null}

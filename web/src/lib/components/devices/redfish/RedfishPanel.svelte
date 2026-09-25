@@ -178,7 +178,7 @@
 										<li class="flex flex-col gap-1 px-5 py-2.5">
 											<div class="flex items-center gap-3">
 												<p class="min-w-0 flex-1 truncate text-sm font-semibold text-ink" title={t.sensor}>
-													{t.sensor}{#if manyChassis}<span class="font-normal text-ink-3"> · {t.chassis}</span>{/if}
+													{t.sensor}{#if manyChassis}<span class="font-normal text-ink-3">{` · ${t.chassis}`}</span>{/if}
 												</p>
 												<span class={`tnum text-sm ${t.limit === 'critical' ? 'text-warning-ink' : t.limit === 'caution' ? 'text-advisory-ink' : 'text-ink'}`}>{celsius(t.celsius)}</span>
 												{#if plate}<Plate tone={plate.tone} label={plate.label} />{/if}
@@ -222,7 +222,7 @@
 										<li class="flex items-center gap-3 px-5 py-2.5">
 											<div class="min-w-0 flex-1">
 												<p class="truncate text-sm font-semibold text-ink" title={fan.fan}>
-													{fan.fan}{#if manyChassis}<span class="font-normal text-ink-3"> · {fan.chassis}</span>{/if}
+													{fan.fan}{#if manyChassis}<span class="font-normal text-ink-3">{` · ${fan.chassis}`}</span>{/if}
 												</p>
 												<p class="tnum text-[0.75rem] text-ink-3">{floor ? `minimum ${floor}` : 'No minimum declared'}</p>
 											</div>
@@ -256,10 +256,10 @@
 							{@const plate = healthPlate(psu.health, ['OK', 'Degraded', 'Failed'])}
 							<li class="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 py-3">
 								<p class="min-w-0 flex-1 truncate text-sm font-semibold text-ink" title={psu.psu}>
-									{psu.psu}{#if manyChassis}<span class="font-normal text-ink-3"> · {psu.chassis}</span>{/if}
+									{psu.psu}{#if manyChassis}<span class="font-normal text-ink-3">{` · ${psu.chassis}`}</span>{/if}
 								</p>
 								<span class="tnum text-[0.8125rem] text-ink-2">
-									{#if psu.output_watts !== null}{watts(psu.output_watts)} out{/if}{#if psu.output_watts !== null && psu.capacity_watts !== null}<span class="text-ink-3"> of </span>{/if}{#if psu.capacity_watts !== null}{watts(psu.capacity_watts)}{psu.output_watts === null ? ' capacity' : ''}{/if}
+									{#if psu.output_watts !== null}{watts(psu.output_watts)} out{/if}{#if psu.output_watts !== null && psu.capacity_watts !== null}<span class="text-ink-3">{' of '}</span>{/if}{#if psu.capacity_watts !== null}{watts(psu.capacity_watts)}{psu.output_watts === null ? ' capacity' : ''}{/if}
 								</span>
 								<Plate tone={plate.tone} label={plate.label} />
 							</li>
@@ -314,7 +314,7 @@
 							{#if s.memory_health !== null || s.memory_total_bytes !== null}
 								{@const plate = healthPlate(s.memory_health)}
 								<li class="flex items-center gap-3 px-5 py-2.5">
-									<p class="min-w-0 flex-1 text-sm font-semibold text-ink">Memory{#if view.systems.length > 1}<span class="font-normal text-ink-3"> · {s.id}</span>{/if}</p>
+									<p class="min-w-0 flex-1 text-sm font-semibold text-ink">Memory{#if view.systems.length > 1}<span class="font-normal text-ink-3">{` · ${s.id}`}</span>{/if}</p>
 									<span class="tnum text-[0.8125rem] text-ink-2">{formatBytes(s.memory_total_bytes)}</span>
 									<Plate tone={plate.tone} label={plate.label} />
 								</li>
@@ -322,7 +322,7 @@
 							{#if s.processor_health !== null}
 								{@const plate = healthPlate(s.processor_health)}
 								<li class="flex items-center gap-3 px-5 py-2.5">
-									<p class="min-w-0 flex-1 text-sm font-semibold text-ink">Processors{#if view.systems.length > 1}<span class="font-normal text-ink-3"> · {s.id}</span>{/if}</p>
+									<p class="min-w-0 flex-1 text-sm font-semibold text-ink">Processors{#if view.systems.length > 1}<span class="font-normal text-ink-3">{` · ${s.id}`}</span>{/if}</p>
 									<Plate tone={plate.tone} label={plate.label} />
 								</li>
 							{/if}
