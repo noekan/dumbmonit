@@ -80,7 +80,7 @@ subtle = "2.6"
 # JWKS du fournisseur). `rust_crypto` : pas de dépendance C, compatible musl.
 jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "rust_crypto"] }
 # Encodage base64url du défi PKCE.
-base64 = "0.22"
+base64 = "0.23"
 
 [target.'cfg(unix)'.dependencies]
 # SIGTERM vers le VictoriaMetrics embarqué : tokio ne sait envoyer que SIGKILL.
