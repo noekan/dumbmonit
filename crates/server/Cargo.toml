@@ -82,7 +82,7 @@ subtle = "2.6"
 # JWKS du fournisseur). `rust_crypto` : pas de dépendance C, compatible musl.
 jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "rust_crypto"] }
 # Encodage base64url du défi PKCE.
-base64 = "0.22"
+base64 = "0.23"
 # Spécification OpenAPI de l'API, écrite en YAML et servie en JSON (`api/openapi.rs`).
 serde_yaml_ng = "0.10"
 
